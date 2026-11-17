@@ -70,6 +70,8 @@ from jarvis.memory_review import (
     parse_proposals,
     proposal_prompt,
 )
+from jarvis.model_routing import choice as model_choice
+from jarvis.model_routing import settings_for, validate_model_routes
 from jarvis.plans import PlanManager
 from jarvis.project_aliases import ProjectAliasConflict, ProjectAliasStore
 from jarvis.project_checks import ProjectCheckStore
@@ -219,6 +221,7 @@ class SettingsUpdate(BaseModel):
     provider: str | None = Field(default=None, pattern="^(ollama|openrouter)$")
     ollama_model: str | None = Field(default=None, min_length=1, max_length=120)
     openrouter_model: str | None = Field(default=None, min_length=1, max_length=120)
+    model_routes: dict[str, dict[str, str]] | None = None
     daily_budget_usd: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     max_output_tokens: int | None = Field(default=None, ge=1, le=8192)
     max_context_chars: int | None = Field(default=None, ge=4000, le=200_000)
@@ -231,6 +234,11 @@ class SettingsUpdate(BaseModel):
         if has_unbudgeted_online_search(value):
             raise ValueError("OpenRouter-Onlinevariante hat zusätzliche Suchkosten und ist gesperrt")
         return value
+
+    @field_validator("model_routes")
+    @classmethod
+    def valid_model_routes(cls, value: dict[str, dict[str, str]] | None):
+        return validate_model_routes(value) if value is not None else None
 
     @field_validator("personal_style_label")
     @classmethod
@@ -656,6 +664,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         known = {key: value for key, value in stored.items()
                  if key in SettingsUpdate.model_fields}
         try:
+            if "model_routes" in known:
+                known["model_routes"] = json.loads(known["model_routes"])
             persisted = SettingsUpdate.model_validate(known).model_dump(exclude_unset=True)
             if any(value is None for value in persisted.values()):
                 raise ValueError("Leerer Einstellungswert")
@@ -854,8 +864,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", response_model=Health)
     async def health():
         provider_name = config.provider
+        model = model_choice(config, "chat")[0]
         if provider_name == "openrouter":
-            model = config.openrouter_model
             online_variant = has_unbudgeted_online_search(model)
             try:
                 key_ready = bool(openrouter_api_key(config))
@@ -873,7 +883,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 message = "OpenRouter-Key und Modell lokal einrichten"
         else:
-            model = config.ollama_model
             configured = await OllamaAdapter(config.ollama_url, model,
                                              config.max_output_tokens).available()
             message = "Ollama-Modell verfügbar" if configured else "Ollama starten und Modell installieren"
@@ -970,9 +979,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def settings_view():
         return {
             "provider": config.provider,
-            "model": config.ollama_model if config.provider == "ollama" else config.openrouter_model,
+            "model": model_choice(config, "chat")[0],
             "ollama_model": config.ollama_model,
             "openrouter_model": config.openrouter_model,
+            "model_routes": config.model_routes,
+            "effective_models": {task: {"model": model_choice(config, task)[0],
+                                        "reason": model_choice(config, task)[1]}
+                                 for task in ("chat", "draft", "plan", "research")},
             "daily_budget_usd": config.daily_budget_usd,
             "spent_today_usd": db.cost_since(start_of_local_day(config.timezone)),
             "max_output_tokens": config.max_output_tokens,
@@ -991,7 +1004,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ZoneInfo(values["timezone"])
             except Exception as exc:
                 raise HTTPException(422, "Unbekannte IANA-Zeitzone") from exc
-        db.set_settings({key: str(value) for key, value in values.items()})
+        db.set_settings({key: (json.dumps(value, ensure_ascii=False, sort_keys=True)
+                               if key == "model_routes" else str(value))
+                         for key, value in values.items()})
         for key, value in values.items():
             setattr(config, key, value)
         db.log("settings_updated", ", ".join(values))
@@ -1300,8 +1315,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if current_chat["archived_at"] is not None:
             raise HTTPException(409, "Archiviertes Gespräch zuerst wiederherstellen")
         content = data.content.strip()
-        provider_name = config.provider
-        model_name = config.ollama_model if provider_name == "ollama" else config.openrouter_model
+        chat_settings = settings_for(config, "chat")
+        provider_name = chat_settings.provider
+        model_name = chat_settings.ollama_model if provider_name == "ollama" else chat_settings.openrouter_model
         context_limit = config.max_context_chars
         timezone_name = config.timezone
         if not content or len(content) > 20_000:
@@ -1313,7 +1329,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if data.memory_proposal_ids and provider_name != "ollama":
             raise HTTPException(422, "Bestätigte Erinnerungen dürfen nur an lokales Ollama")
         try:
-            provider = make_provider(config)
+            provider = make_provider(chat_settings)
         except ProviderError as exc:
             raise HTTPException(503, str(exc)) from exc
         if isinstance(provider, OllamaAdapter) and not await provider.available():

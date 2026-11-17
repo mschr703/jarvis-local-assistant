@@ -6,7 +6,13 @@ export type Settings = {
   openrouter_model: string | null; daily_budget_usd: number; spent_today_usd: number;
   max_output_tokens: number; max_context_chars: number; timezone: string;
   personal_style_label: string;
+  model_routes: Partial<Record<'ollama' | 'openrouter', Partial<Record<ModelTask, string>>>>;
+  effective_models: Record<ModelTask, { model: string | null; reason: string }>;
 };
+type ModelTask = 'chat' | 'draft' | 'plan' | 'research';
+const modelTasks: [ModelTask, string][] = [
+  ['chat', 'Chat'], ['draft', 'Entwurf und Text'], ['plan', 'Plan'], ['research', 'Recherche'],
+];
 type UsageReceipt = {
   id: string; purpose: string; provider: string; model: string;
   input_tokens: number | null; output_tokens: number | null;
@@ -17,7 +23,7 @@ type PairingCode = { code: string; expires_at: string };
 type BackupSchedule = { configured: boolean; enabled: boolean; directory?: string;
   time_local?: string; timezone?: string; keep?: number; last_status: string;
   last_error: string | null; last_success_at?: string | null; last_archive?: string | null };
-const purposeLabels: Record<string, string> = { chat: 'Chat', draft: 'Entwurf', plan: 'Plan' };
+const purposeLabels: Record<string, string> = { chat: 'Chat', draft: 'Entwurf', plan: 'Plan', research: 'Recherche' };
 const statusLabels: Record<string, string> = {
   complete: 'abgeschlossen', running: 'läuft', interrupted: 'unterbrochen',
   failed: 'fehlgeschlagen', cancelled: 'abgebrochen', empty: 'ohne Antwort',
@@ -55,6 +61,15 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
   function change<K extends keyof Settings>(key: K, value: Settings[K]) {
     ++editRevision.current;
     setSettings((current) => current ? { ...current, [key]: value } : current);
+  }
+  function changeRoute(task: ModelTask, value: string) {
+    if (!settings) return;
+    const provider = settings.provider;
+    const current = { ...(settings.model_routes[provider] || {}) };
+    if (value) current[task] = value;
+    else delete current[task];
+    const routes = { ...settings.model_routes, [provider]: current };
+    change('model_routes', routes);
   }
   const loadUsage = useCallback(async () => {
     const request = ++usageRequest.current;
@@ -111,6 +126,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
         provider: submitted.provider,
         ollama_model: submitted.ollama_model,
         openrouter_model: submitted.openrouter_model || undefined,
+        model_routes: submitted.model_routes,
         daily_budget_usd: submitted.daily_budget_usd,
         max_output_tokens: submitted.max_output_tokens,
         max_context_chars: submitted.max_context_chars,
@@ -159,6 +175,18 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
       <label>Zeitzone (IANA)<input value={settings.timezone} onChange={(event) => change('timezone', event.target.value)} /></label>
       <label>Name für persönliches Schreibprofil<input maxLength={60} value={settings.personal_style_label} onChange={(event) => change('personal_style_label', event.target.value)} /></label>
     </div>
+    <h4>Modell je Aufgabe</h4>
+    <p>Leere Felder verwenden das Standardmodell des gewählten Providers. Die angezeigte Wahl wird erst nach „Einstellungen speichern“ aktiv. Es gibt keinen automatischen Provider- oder Modellwechsel. OpenRouter-Preise und Tagesbudget werden vor jedem bezahlten Aufruf geprüft; Cloudfreigaben bleiben erforderlich.</p>
+    <div className="form-grid">{modelTasks.map(([task, label]) => {
+      const selected = settings.model_routes[settings.provider]?.[task] || '';
+      const fallback = settings.provider === 'ollama' ? settings.ollama_model : settings.openrouter_model;
+      return <label key={task}>{label}<input aria-label={`Modell für ${label}`} maxLength={120}
+        style={{ minWidth: 0, maxWidth: '100%' }}
+        value={selected} placeholder={fallback || 'Standardmodell noch nicht gesetzt'}
+        onChange={(event) => changeRoute(task, event.target.value)} />
+        <small>{selected ? 'Aufgabenregel' : 'Standardmodell'} · {selected || fallback || 'nicht eingerichtet'}</small>
+      </label>;
+    })}</div>
     <p>Heute erfasst: {settings.spent_today_usd.toFixed(5)} USD. Bei fehlender Usage wird die vorab berechnete Obergrenze gespeichert.</p>
     <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Speichere…' : 'Einstellungen speichern'}</button>
     {message && <span className="form-message" role="status">{message}</span>}

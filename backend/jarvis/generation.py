@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from jarvis.config import Settings
 from jarvis.db import Database
+from jarvis.model_routing import settings_for
 from jarvis.provider import (
     Completion,
     OllamaAdapter,
@@ -21,6 +22,7 @@ def day_start_utc(timezone_name: str) -> str:
 
 async def generate_text(db: Database, settings: Settings, purpose: str,
                         messages: list[dict[str, str]]) -> Completion:
+    settings = settings_for(settings, purpose)
     if sum(len(item["content"]) for item in messages) > settings.max_context_chars:
         raise ProviderError("context_limit", "Eingabetext überschreitet das Kontextlimit")
     provider_name = settings.provider

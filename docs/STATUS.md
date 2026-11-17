@@ -1,10 +1,10 @@
 # Projektstatus
 
-Stand: 18.11.2026, 00:02 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 18.11.2026, 00:24 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A71a ist in Trello und im getrennten Arbeitsbaum in Umsetzung: optionale Modellregeln je Aufgabentyp innerhalb des ausdrücklich gewählten Providers, ohne stillen Cloudwechsel. Erste API-/Routingtests und der Frontendbuild bestehen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A71a: Optionale Modellregeln je Aufgabentyp innerhalb des ausdrücklich gewählten Providers sind im Hauptarbeitsbaum implementiert. Der echte Edge/Ollama-Pfad wählte ein zweites Modell für Chat, zeigte es vor dem Senden, speicherte den Nutzungsbeleg und bestand Reload sowie 390-Pixel-Ansicht mit langer Modell-ID. Echte lokale Entwurf-, Plan- und Rechercheaufrufe nutzten die passenden Regeln. Ein synthetischer OpenRouter-Livetest wählte trotz ungültigem Standardmodell die Aufgabenregel und meldete 0,0000054 USD. 533 Backendtests/2 erwartete Windows-Skips, 23 Frontendtests, Build, Ruff und Public-Audit mit null Befunden bestanden; 29 gezielte API-/Konfigurationstests nach der letzten Health-Anpassung bestanden. Push, CI und Trello-Abschluss folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 

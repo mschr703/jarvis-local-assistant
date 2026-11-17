@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from jarvis.model_routing import validate_model_routes
+
 
 def default_data_dir() -> Path:
     if sys.platform == "win32":
@@ -43,6 +45,8 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = Field(default=None, repr=False,
                                            alias="JARVIS_OPENROUTER_API_KEY")
     openrouter_model: str | None = Field(default=None, alias="JARVIS_OPENROUTER_MODEL")
+    model_routes: dict[str, dict[str, str]] = Field(default_factory=dict,
+                                                   alias="JARVIS_MODEL_ROUTES")
     daily_budget_usd: float = Field(default=1.0, ge=0, allow_inf_nan=False,
                                     alias="JARVIS_DAILY_BUDGET_USD")
     max_output_tokens: int = Field(default=1024, ge=1, le=8192, alias="JARVIS_MAX_OUTPUT_TOKENS")
@@ -60,6 +64,11 @@ class Settings(BaseSettings):
         if not value.is_absolute():
             raise ValueError("Jarvis-Datenordner muss ein absoluter Pfad sein")
         return value
+
+    @field_validator("model_routes")
+    @classmethod
+    def valid_model_routes(cls, value: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+        return validate_model_routes(value)
 
     @field_validator("timezone")
     @classmethod
