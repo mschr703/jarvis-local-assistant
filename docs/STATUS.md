@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026, 18:25 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 18:49 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -11,6 +11,7 @@ Stand: 17.11.2026, 18:25 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - Beantwortete, belegte Lernrunden können nach ausdrücklicher Prüfung als lokale UTF-8-CSV-Lernkarten mit Quellenzitat und SHA-256 exportiert werden. Gleiche Frage und gleicher Quellenhash ergeben nur eine Karte; die Ansicht lädt die 50 zuletzt geänderten Runden.
 - Eine lokale Übungsprüfung kann aus diesen Fragen mit Zeitlimit gestartet werden. Lösungen und Quellen erscheinen nach Abgabe; die Selbsteinschätzung zeigt Wiederholungsfragen. Der Prüfungsverlauf bleibt im Tab und wird nicht gespeichert.
 - Das Prüfungsprotokoll kann nach Abgabe bewusst als lokale CSV mit eigenen Antworten, Bewertung, Musterantwort und Quellenbeleg heruntergeladen werden.
+- Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
 ## Zuletzt geprüft
 
@@ -22,13 +23,14 @@ Stand: 17.11.2026, 18:25 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - Der Windows-CI-Workflow prüft öffentliche Pushes und Pull Requests ohne Secrets. GitHub-Lauf [44132746512](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44132746512) ist in Backend und Frontend grün. Der erste Lauf fand eine Ruff-Importsortierung im neuen öffentlichen Audit-Skript; Commit `daf366e` korrigierte sie. P01 steht in Trello auf „Erledigt“.
 - A36a: 16 Frontendtests, TypeScript/Vite-Build, Ruff und lokaler Public-Audit (281 Dateien, null Funde) bestanden. `scripts/smoke_learning_ui.py` erzeugte mit echtem Ollama eine belegte Frage, korrigierte und beantwortete sie, lud die CSV in Edge herunter, prüfte Frage/Pfad/Hash/Zitat und bestätigte die 390-Pixel-Ansicht ohne Überlauf. Commit `fd6d287` ist veröffentlicht; GitHub-Lauf [44134315243](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44134315243) ist vollständig grün. Die Trello-Karte ist erledigt.
 - A37a: 19 Frontendtests, TypeScript/Vite-Build und echter Edge/Ollama-Pfad mit belegter Frage, abgegebener Prüfung, Selbsteinschätzung und 390-Pixel-Ansicht bestanden. Der Prüfungsablauf änderte die gespeicherte Lernrunde nicht. Commit `265f1e5` ist öffentlich; GitHub-Lauf [44135680615](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44135680615) ist vollständig grün. Die Trello-Karte ist erledigt.
-- A37b: 22 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit (286 Dateien, null Funde) bestanden. Ein echter Edge/Ollama-Pfad lud das Prüfungsprotokoll herunter und prüfte Frage, Antwort, Bewertung, Hash und mobile Breite. Vor der Abgabe war der Download nicht angeboten. Der vollständige Pfad wurde zweimal erfolgreich ausgeführt; öffentlicher CI-Lauf folgt nach dem Push.
+- A37b: 22 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit (286 Dateien, null Funde) bestanden. Ein echter Edge/Ollama-Pfad lud das Prüfungsprotokoll herunter und prüfte Frage, Antwort, Bewertung, Hash und mobile Breite. Vor der Abgabe war der Download nicht angeboten. Der vollständige Pfad wurde zweimal erfolgreich ausgeführt. Commit `a6c4fdf` und GitHub-Lauf [44136867444](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44136867444) sind öffentlich und vollständig grün; Trello ist erledigt.
+- A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde.
 
 ## Offene Arbeiten
 
-1. P00, A79b, P01, A36a und A37a sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. A37b separat pushen und GitHub-CI prüfen; anschließend die Trello-Karte abschließen.
-3. Weitere fachliche Trello-Teilstufen nach Voraussetzungen auswählen und mit Tests und Dokumentation umsetzen.
+1. P00, A79b, P01, A36a, A37a und A37b sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
+2. A36b nach lokalem Nachweis separat pushen und Windows-CI verfolgen; danach Trello abschließen.
+3. P02: lokale Secrets/Backups vor öffentlichen Pushes auch anhand des Dateinamens absichern und dokumentieren; getrennt veröffentlichen.
 
 ## Betriebsgrenzen
 

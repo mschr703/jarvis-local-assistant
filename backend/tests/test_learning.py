@@ -10,7 +10,7 @@ from jarvis.app import create_app
 from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
-from jarvis.learning import LearningStore, parse_feedback, parse_question
+from jarvis.learning import LearningConflict, LearningStore, parse_feedback, parse_question
 from jarvis.provider import Completion
 
 
@@ -174,3 +174,67 @@ def test_learning_invalid_model_reply_and_cloud_block(tmp_path, monkeypatch):
         response = client.post("/learning/sessions", headers=csrf(client), json={
             "topic": "Astronomie", "passage_ids": [1]})
         assert response.status_code == 422 and len(calls) == 1
+
+
+def test_duplicate_question_for_same_source_is_rejected_atomically(tmp_path):
+    store = LearningStore(Database(tmp_path / "jarvis.db"))
+    source = {"passage_id": 1, "document_id": "d", "path": "bio.txt",
+              "page": None, "sha256": "hash-a", "policy": "local_only",
+              "text": "Pflanzen nutzen Wasser und Sonnenlicht."}
+    question = {"question": "Was nutzen Pflanzen?", "reference_answer": "Wasser.",
+                "evidence_quote": "Pflanzen nutzen Wasser", "source": source}
+    first = store.create("Biologie", question)
+    with pytest.raises(LearningConflict, match="existiert bereits"):
+        store.create("Biologie", {**question, "question": " WAS  nutzen pflanzen? "})
+    second = store.create("Biologie", {**question, "question": "Wozu dient Sonnenlicht?"})
+    with pytest.raises(LearningConflict, match="existiert bereits"):
+        store.correct(second["id"], 1, first["question"], "Wasser.",
+                      "Pflanzen nutzen Wasser")
+    assert len(store.list()) == 2
+    assert store.questions_for_sources({"hash-a"}) == [second["question"], first["question"]]
+    other = store.create("Biologie", {**question, "source": {**source, "sha256": "hash-b"}})
+    assert other["source"]["sha256"] == "hash-b"
+
+
+def test_learning_retries_one_duplicate_question_then_stops(tmp_path, monkeypatch):
+    questions = [
+        "Was benötigen Pflanzen zum Wachsen?",
+        " WAS  benötigen pflanzen zum wachsen? ",
+        "Was entsteht bei der Photosynthese?",
+        "Was benötigen Pflanzen zum Wachsen?",
+        "Was entsteht bei der Photosynthese?",
+    ]
+    prompts = []
+
+    async def generate(_db, _config, purpose, messages):
+        assert purpose == "learning"
+        prompts.append(messages[-1]["content"])
+        value = {"source_index": 1, "question": questions.pop(0),
+                 "answer": "Pflanzen nutzen Licht und bilden Zucker.",
+                 "evidence_quote": "Sonnenlicht entsteht Zucker"}
+        return Completion(json.dumps(value, ensure_ascii=False), 20, 20, 0,
+                          "local_no_api_charge")
+
+    monkeypatch.setattr("jarvis.app.generate_text", generate)
+    source_dir = tmp_path / "sources"
+    source_dir.mkdir()
+    (source_dir / "bio.txt").write_text(
+        "Mit Sonnenlicht entsteht Zucker. Pflanzen nutzen Wasser.", encoding="utf-8")
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=tmp_path / "data",
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        token = csrf(client)
+        folder = client.post("/folders", headers=token, json={
+            "path": str(source_dir), "policy": "local_only"}).json()
+        client.post(f"/folders/{folder['id']}/index", headers=token).raise_for_status()
+        passage = client.get("/search?q=Sonnenlicht").json()[0]
+        payload = {"topic": "Photosynthese", "passage_ids": [passage["passage_id"]]}
+        first = client.post("/learning/sessions", headers=token, json=payload)
+        assert first.status_code == 200, first.text
+        second = client.post("/learning/sessions", headers=token, json=payload)
+        assert second.status_code == 200, second.text
+        assert second.json()["question"] == "Was entsteht bei der Photosynthese?"
+        assert "Was benötigen Pflanzen" in prompts[1]
+        assert "WAS benötigen pflanzen" in prompts[2]
+        third = client.post("/learning/sessions", headers=token, json=payload)
+        assert third.status_code == 409 and len(prompts) == 5
+        assert len(client.get("/learning/sessions").json()) == 2

@@ -122,11 +122,38 @@ def main() -> None:
                         assert report_rows[0]["Bewertung"] == "Teilweise richtig"
                         assert report_rows[0]["SHA-256"] == item["source"]["sha256"]
                         assert store.get(item["id"])["version"] == version_before_exam
+                        page.get_by_role("button", name="Zurück zum Lernmodus").click()
+                        page.get_by_role("button", name="Dokumente öffnen").click()
+                        page.get_by_label("Dokumente durchsuchen").fill("Photosynthese")
+                        page.get_by_role("button", name="Suchen", exact=True).click()
+                        page.locator(".source-result input[type=checkbox]").first.check()
+                        page.get_by_role("button", name="Mit Fundstelle(n) lernen").click()
+                        page.get_by_label("Lernthema").fill("Photosynthese")
+                        page.get_by_role("button", name="Belegte Frage erstellen").click()
+                        expect(page.get_by_text("Weitere Lernfrage erstellt.", exact=False)
+                               ).to_be_visible(timeout=180_000)
+                        rounds = store.list()
+                        assert len(rounds) == 2, rounds
+                        assert rounds[0]["question"] != rounds[1]["question"]
+                        assert rounds[0]["source"]["sha256"] == item["source"]["sha256"]
+                        page.get_by_label("Meine Lernantwort").fill(
+                            "Wasser, Kohlendioxid und Licht ergeben Zucker und Sauerstoff.")
+                        page.get_by_role("button", name="Antwort prüfen", exact=True).click()
+                        expect(page.get_by_text("Antwort gespeichert.", exact=False)
+                               ).to_be_visible(timeout=180_000)
+                        page.get_by_label("Ich habe die Inhalte und Quellen vor dem Export geprüft.").check()
+                        with page.expect_download() as two_cards_info:
+                            page.get_by_role("button", name="CSV herunterladen").click()
+                        with two_cards_info.value.path().open(
+                                encoding="utf-8-sig", newline="") as exported:
+                            two_cards = list(csv.DictReader(exported, delimiter=";"))
+                        assert len(two_cards) == 2, two_cards
                         assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"ollama": True, "source_quote": True,
                                           "question_correction": True, "answer_reload": True,
                                           "csv_export": True, "exam": True,
                                           "exam_report": True,
+                                          "second_distinct_card": True,
                                           "mobile_width": "fits"}))
                     finally:
                         browser.close()

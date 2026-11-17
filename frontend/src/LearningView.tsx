@@ -67,13 +67,17 @@ export default function LearningView({ visible, sources, configured, provider, o
   };
   const create = async () => {
     if (busy || !selected.length || !topic.trim()) return;
+    const related = sessions.some((item) => item.topic === topic.trim()
+      && selected.some((source) => source.sha256 === item.source.sha256));
     setBusy(true); setNotice('Ollama erstellt eine belegte Lernfrage…');
     try {
       const item = await api<LearningSession>('/learning/sessions', {
         method: 'POST', body: JSON.stringify({ topic: topic.trim(),
           passage_ids: selected.map((source) => source.passage_id) }),
       });
-      replace(item); setNotice('Lernfrage erstellt. Prüfe Frage und Beleg vor dem Antworten.');
+      replace(item); setNotice(related
+        ? 'Weitere Lernfrage erstellt. Prüfe Frage und Beleg vor dem Antworten.'
+        : 'Lernfrage erstellt. Prüfe Frage und Beleg vor dem Antworten.');
     } catch (error) { setNotice((error as Error).message); }
     finally { setBusy(false); }
   };
@@ -143,6 +147,7 @@ export default function LearningView({ visible, sources, configured, provider, o
         maxLength={160} placeholder="Zum Beispiel: Grundlagen der Photosynthese" /></label>
       <button className="primary" onClick={() => void create()} disabled={busy || !configured || provider !== 'ollama' ||
         !selected.length || topic.trim().length < 3}>Belegte Frage erstellen</button>
+      <small>Für eine weitere unterschiedliche Frage zum selben Thema erneut klicken. Jarvis versucht bei einem Duplikat höchstens einmal eine andere Frage.</small>
       {provider !== 'ollama' && <small>Der Lernmodus verwendet derzeit nur lokales Ollama.</small>}
     </section>
     <section className="card"><h3>Gespeicherte Lernrunden</h3>

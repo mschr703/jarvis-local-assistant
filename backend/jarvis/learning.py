@@ -1,5 +1,7 @@
 """One-source, reviewable learning rounds backed by local document passages."""
 
+from __future__ import annotations
+
 import json
 from uuid import uuid4
 
@@ -22,6 +24,10 @@ def _clean(value: object, minimum: int, maximum: int, label: str) -> str:
 
 def _in_source(quote: str, source_text: str) -> bool:
     return " ".join(quote.split()) in " ".join(source_text.split())
+
+
+def _question_key(question: str) -> str:
+    return " ".join(question.split()).casefold()
 
 
 def parse_question(text: str, sources: list[dict]) -> dict:
@@ -80,6 +86,28 @@ class LearningStore:
                                ORDER BY updated_at DESC,id DESC LIMIT ?""", (limit,))
             return [self._row(row) for row in rows]
 
+    def questions_for_sources(self, hashes: set[str], limit: int = 8) -> list[str]:
+        """Recent examples for the local model, bounded independently of total history."""
+        with self.db.connect() as db:
+            rows = db.execute("""SELECT question,source_json FROM learning_sessions
+                               ORDER BY updated_at DESC,id DESC""")
+            questions = []
+            for row in rows:
+                if json.loads(row["source_json"])["sha256"] in hashes:
+                    questions.append(row["question"])
+                    if len(questions) >= limit:
+                        break
+            return questions
+
+    @staticmethod
+    def _is_duplicate(db, question: str, sha256: str,
+                      exclude_id: str | None = None) -> bool:
+        key = _question_key(question)
+        rows = db.execute("SELECT id,question,source_json FROM learning_sessions")
+        return any(row["id"] != exclude_id
+                   and json.loads(row["source_json"])["sha256"] == sha256
+                   and _question_key(row["question"]) == key for row in rows)
+
     def create(self, topic: str, question: dict) -> dict:
         source = question["source"]
         snapshot = {key: source[key] for key in
@@ -87,6 +115,9 @@ class LearningStore:
         snapshot["text"] = source["text"][:1200]
         now, session_id = utcnow(), str(uuid4())
         with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._is_duplicate(db, question["question"], source["sha256"]):
+                raise LearningConflict("Diese Frage zur Quellenfassung existiert bereits")
             db.execute("""INSERT INTO learning_sessions
                        (id,topic,question,reference_answer,evidence_quote,source_json,
                         created_at,updated_at,version)
@@ -110,6 +141,10 @@ class LearningStore:
         if not _in_source(clean_quote, current["source"]["text"]):
             raise ValueError("Quellenzitat steht nicht in der ausgewählten Fundstelle")
         with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._is_duplicate(db, clean_question, current["source"]["sha256"],
+                                  exclude_id=session_id):
+                raise LearningConflict("Diese Frage zur Quellenfassung existiert bereits")
             result = db.execute("""UPDATE learning_sessions SET question=?,reference_answer=?,
                                 evidence_quote=?,version=version+1,updated_at=?
                                 WHERE id=? AND version=? AND user_answer IS NULL""",
