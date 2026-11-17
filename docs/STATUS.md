@@ -1,11 +1,10 @@
 # Projektstatus
 
-Stand: 17.11.2026, 23:21 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 23:34 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A47a: Eine gemeinsame Qualitätsübersicht für gespeicherte Chat-, Plan-, Werkzeug- und Recherchebewertungen ist implementiert. Sie unterscheidet unbewertete Einträge, gemeldete und geschätzte OpenRouter-Kosten, gemessene Dauer und Fehlerfälle; Originalbelege lassen sich öffnen. Ein im Edge-Test entdeckter Polling-Fehler bei langsamen API-Antworten wurde behoben. Die Backend-Gesamtsuite mit 524 bestandenen Tests und zwei erwarteten Windows-Symlink-Skips, 23 Frontendtests, Ruff, Build und ein vollständiger Edge-Klickpfad mit vier Belegarten und mobiler Breite bestanden. Public-Audit, Commit, Push, CI und Trello-Abschluss folgen als nächste Schritte.
-- A40a ist in Trello als nächster begrenzter Schritt vorbereitet: ein rein lokaler Überblick über ausdrücklich freigegebene Codeprojekte. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A40a: Ein rein lokaler Überblick über ausdrücklich freigegebene Codeprojekte ist im getrennten Arbeitsbaum implementiert. Der Edge-Klicktest prüft noch einen mobilen Überlauf; danach folgen Regression, Public-Audit, Commit, Push, CI und Trello-Abschluss. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 
@@ -20,6 +19,8 @@ Stand: 17.11.2026, 23:21 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf
 - Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
 ## Zuletzt geprüft
+
+- A47a: Die gemeinsame Qualitätsübersicht für Chat-, Plan-, Werkzeug- und Recherchebewertungen unterscheidet unbewertete Einträge, gemeldete und geschätzte OpenRouter-Kosten, gemessene Dauer und Fehlerfälle; Originalbelege lassen sich öffnen. Ein im Edge-Test entdeckter Polling-Fehler bei langsamen API-Antworten wurde behoben. Die Backend-Gesamtsuite mit 524 bestandenen Tests und zwei erwarteten Windows-Symlink-Skips, 23 Frontendtests, Ruff, Build und ein vollständiger Edge-Klickpfad mit vier Belegarten und mobiler Breite bestanden. Public-Audit: null Funde. Commit `d62cae8` ist veröffentlicht; GitHub-Lauf [44189666685](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44189666685) ist grün. Die Trello-Teilkarte ist erledigt.
 
 - Die erste öffentliche Version wurde als elternloser Commit `aa1092c` auf `main` veröffentlicht; der frühere lokale Verlauf wurde nicht übertragen. Das Repository ist ohne Anmeldung als öffentlich abrufbar. Der korrigierte große Edge-Klicktest liegt in Commit `add1611`, ebenfalls gepusht.
 - Nach Einführung des einstellbaren Profilnamens und des Windows-Einrichtungshelfers: vollständige Backend-Regression mit 517 bestandenen Tests und zwei Windows-Symlink-Skips, zwölf Frontendtests, Ruff und TypeScript/Vite-Build bestanden. Der Einrichtungshelfer lief erfolgreich mit `-SkipModelDownload`; eine vorhandene lokale `.env` wurde nicht überschrieben. Die erneut ausgeführten 24 Konfigurations-/API-Tests bestanden. `scripts/smoke_named_style_ui.py` und `scripts/smoke_public_profile_ui.py` bestanden mit Edge/Ollama, inklusive 390-Pixel-Ansicht und gespeicherter Umbenennung. `scripts/e2e_local.py` bestand mit Chat, Entwurf, Wissen, Aufgabe, öffentlichem Browserabruf und Schema-52-Restore; `scripts/smoke_stop.py` bestätigte Health/UI und freie Ports nach dem Stopp. Ein erster Stil-Klicktest musste nach Start des noch nicht laufenden Ollama-Dienstes wiederholt werden und bestand dann.
