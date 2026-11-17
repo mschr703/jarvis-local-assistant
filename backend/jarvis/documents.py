@@ -7,18 +7,24 @@ import re
 import threading
 from pathlib import Path
 from uuid import uuid4
+from zipfile import BadZipFile, ZipFile
 
+from defusedxml import ElementTree
+from defusedxml.common import DefusedXmlException
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from jarvis.db import Database, utcnow
 
-SUPPORTED = {".txt", ".md", ".markdown", ".pdf"}
+SUPPORTED = {".txt", ".md", ".markdown", ".pdf", ".docx"}
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_FILES_PER_SCAN = 1000
 MAX_DIRECTORIES_PER_SCAN = 2000
 MAX_EXTRACTED_CHARS = 2_000_000
 MAX_PDF_PAGES = 200
+MAX_DOCX_ENTRIES = 1000
+MAX_DOCX_XML_BYTES = 8 * 1024 * 1024
+WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
 def fts_query(text: str) -> str:
@@ -39,6 +45,50 @@ def chunks(text: str, size: int = 1200, overlap: int = 100) -> list[str]:
             break
         start = end - overlap
     return result
+
+
+def extract_docx(data: bytes) -> str:
+    """Read the main Word document in document order without extracting ZIP members."""
+    try:
+        with ZipFile(io.BytesIO(data)) as archive:
+            if len(archive.infolist()) > MAX_DOCX_ENTRIES:
+                raise ValueError("DOCX enthält zu viele ZIP-Einträge")
+            document = archive.getinfo("word/document.xml")
+            if document.file_size > MAX_DOCX_XML_BYTES:
+                raise ValueError("DOCX-XML ist zu groß")
+            if document.flag_bits & 1:
+                raise ValueError("Verschlüsseltes DOCX")
+            with archive.open(document) as stream:
+                xml = stream.read(MAX_DOCX_XML_BYTES + 1)
+    except (BadZipFile, KeyError, RuntimeError, OSError) as exc:
+        raise ValueError("Ungültiges oder verschlüsseltes DOCX") from exc
+    if len(xml) > MAX_DOCX_XML_BYTES:
+        raise ValueError("DOCX-XML ist zu groß")
+    try:
+        root = ElementTree.fromstring(xml, forbid_dtd=True)
+    except (ElementTree.ParseError, DefusedXmlException) as exc:
+        raise ValueError("Ungültiges DOCX-XML") from exc
+    body = root.find(f"{WORD_NS}body")
+    if body is None:
+        raise ValueError("DOCX-Haupttext fehlt")
+    paragraphs: list[str] = []
+    length = 0
+    for paragraph in body.iter(f"{WORD_NS}p"):
+        parts = []
+        for node in paragraph.iter():
+            if node.tag == f"{WORD_NS}t":
+                parts.append(node.text or "")
+            elif node.tag == f"{WORD_NS}tab":
+                parts.append("\t")
+            elif node.tag in {f"{WORD_NS}br", f"{WORD_NS}cr"}:
+                parts.append("\n")
+        text = "".join(parts).strip()
+        if text:
+            length += len(text)
+            if length > MAX_EXTRACTED_CHARS:
+                raise ValueError("DOCX-Text ist zu lang")
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
 
 
 class DocumentStore:
@@ -169,6 +219,8 @@ class DocumentStore:
                         scan_incomplete = True
                     if resolved is not None and resolved.is_relative_to(root):
                         reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
+                                  or (resolved.suffix.lower() == ".docx"
+                                      and isinstance(exc, ValueError))
                                   else type(exc).__name__)
                         self._record_error(folder, resolved, reason)
             if limit_hit:
@@ -218,6 +270,8 @@ class DocumentStore:
                 if extracted > MAX_EXTRACTED_CHARS:
                     raise ValueError("PDF-Text ist zu lang")
                 segments.extend((number, piece) for piece in chunks(content))
+        elif path.suffix.lower() == ".docx":
+            segments.extend((None, piece) for piece in chunks(extract_docx(data)))
         else:
             content = data.decode("utf-8", "replace")
             if len(content) > MAX_EXTRACTED_CHARS:

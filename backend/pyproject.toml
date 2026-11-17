@@ -16,6 +16,7 @@ dependencies = [
   "playwright>=1.64.1",
   "truststore>=0.10.5,<1",
   "cryptography>=46,<47",
+  "defusedxml==0.7.1",
   "graphifyy==0.9.101",
   "agent-reach @ https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip",
 ]

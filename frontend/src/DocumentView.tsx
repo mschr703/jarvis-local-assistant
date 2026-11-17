@@ -158,7 +158,7 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
   };
 
   return <div className="section-stack">
-    <h2>Dokumente und Wissen</h2><p className="intro">Nur ausdrücklich freigegebene Ordner werden indexiert. Ein lokaler Index bleibt auf diesem Laptop. „Cloud erlaubt“ gibt nur ausgewählte Ausschnitte für OpenRouter-Anfragen frei.</p>
+    <h2>Dokumente und Wissen</h2><p className="intro">Nur ausdrücklich freigegebene Ordner werden indexiert. Unterstützt werden TXT, Markdown, Text-PDF und DOCX mit lesbarem Haupttext. Ein lokaler Index bleibt auf diesem Laptop. „Cloud erlaubt“ gibt nur ausgewählte Ausschnitte für OpenRouter-Anfragen frei.</p>
     {notice && <p className="notice" role="status">{notice}</p>}
     <section className="card"><h3>Ordner freigeben</h3>
       <div className="inline-form"><input aria-label="Absoluter Ordnerpfad" placeholder="C:\\Pfad\\zum\\Ordner" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} />
