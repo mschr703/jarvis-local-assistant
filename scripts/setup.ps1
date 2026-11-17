@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipModelDownload
 )
 
@@ -36,7 +36,11 @@ Require-Command 'python' 'https://www.python.org/downloads/windows/'
 Require-Command 'node' 'https://nodejs.org/en/download'
 Require-Command 'pnpm' 'https://pnpm.io/installation'
 Require-Command 'ollama' 'https://ollama.com/download/windows'
-Require-Version 'Python' ([version](& python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')) ([version]'3.13')
+$pythonVersionOutput = (& python --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $pythonVersionOutput -notmatch '^Python\s+(\d+\.\d+(?:\.\d+)?)') {
+    throw "Python-Version konnte nicht gelesen werden: $pythonVersionOutput"
+}
+Require-Version 'Python' ([version]$Matches[1]) ([version]'3.13')
 Require-Version 'Node.js' ([version]((& node --version).TrimStart('v'))) ([version]'24.0')
 Require-Version 'pnpm' ([version](& pnpm --version)) ([version]'11.0')
 

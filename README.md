@@ -17,7 +17,7 @@ git clone https://github.com/mschr703/jarvis-local-assistant.git
 Set-Location jarvis-local-assistant
 ```
 
-Der Einrichtungshelfer prüft die benötigten Programme und Versionen, installiert die gesperrten Python-/Frontend-Abhängigkeiten, erstellt bei Bedarf eine lokale `.env` und lädt das Ollama-Modell. Eine bestehende `.env` wird nicht überschrieben:
+Der Einrichtungshelfer funktioniert mit Windows PowerShell 5.1 und PowerShell 7. Er prüft die benötigten Programme und Versionen, installiert die gesperrten Python-/Frontend-Abhängigkeiten, erstellt bei Bedarf eine lokale `.env` und lädt das Ollama-Modell. Eine bestehende `.env` wird nicht überschrieben:
 
 ```powershell
 .\scripts\setup.ps1

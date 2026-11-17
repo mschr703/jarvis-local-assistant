@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026, 19:01 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 19:06 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -27,13 +27,14 @@ Stand: 17.11.2026, 19:01 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - A37b: 22 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit (286 Dateien, null Funde) bestanden. Ein echter Edge/Ollama-Pfad lud das Prüfungsprotokoll herunter und prüfte Frage, Antwort, Bewertung, Hash und mobile Breite. Vor der Abgabe war der Download nicht angeboten. Der vollständige Pfad wurde zweimal erfolgreich ausgeführt. Commit `a6c4fdf` und GitHub-Lauf [44136867444](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44136867444) sind öffentlich und vollständig grün; Trello ist erledigt.
 - A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde. Commit `f60ddad` und GitHub-Lauf [44141088360](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44141088360) sind öffentlich und grün; Trello ist erledigt.
 - P02: `.gitignore` schließt lokale Umgebungsvarianten, Archive, Schlüssel, Logs, Datenbanken und Tresordateien für gewöhnliches Git-Add aus. Vier synthetische Tests prüfen Dateinamen, Ignore-Regeln, Tokenmuster und ein aus dem aktuellen Baum gelöschtes Secret in der Commit-Historie. `scripts/push_public.ps1 -CheckOnly` bestand; ein Ref-Spec ungleich `HEAD:<Zielbranch>` wurde abgelehnt. Der Audit von 288 veröffentlichbaren Dateien und der erreichbaren HEAD-Historie meldete null Funde, ebenso der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel. Commit `6e05a63` wurde mit dem neuen Helfer gepusht; GitHub-Lauf [44142141489](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44142141489) ist vollständig grün. Trello ist erledigt.
-- A37c: 23 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit bestanden. Der Edge/Ollama-Pfad prüfte nach Teilbewertung eine neue Fünf-Minuten-Runde mit leerem Antwortfeld, erneut verborgenen Lösungen, Abgabe, unveränderter gespeicherter Lernrunde und 390-Pixel-Ansicht. Der zweite belegte Lernkartenpfad blieb grün. Öffentlicher Push/CI folgen.
+- A37c: 23 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit bestanden. Der Edge/Ollama-Pfad prüfte nach Teilbewertung eine neue Fünf-Minuten-Runde mit leerem Antwortfeld, erneut verborgenen Lösungen, Abgabe, unveränderter gespeicherter Lernrunde und 390-Pixel-Ansicht. Der zweite belegte Lernkartenpfad blieb grün. Commit `45c2f34` wurde öffentlich gepusht; GitHub-Lauf 44143461687 läuft noch.
+- P03: Der aktuelle öffentliche Clone zeigte einen Setup-Abbruch in Windows PowerShell 5.1: der eingebettete `python -c`-Versionsaufruf verlor seine Anführungszeichen. Die Prüfung liest nun `python --version` ohne fragiles Quoting; `scripts/setup.ps1 -SkipModelDownload` bestand lokal sowohl mit Windows PowerShell 5.1 als auch PowerShell 7, erhielt die vorhandene `.env` und installierte Backend/Frontend aus den Lockfiles. Eine UTF-8-BOM korrigierte die deutschen Meldungen in PowerShell 5.1. Der Test nach öffentlichem Push aus dem Clone steht aus.
 
 ## Offene Arbeiten
 
 1. P00, A79b, P01, P02, A36a, A36b, A37a und A37b sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. A37c: separat pushen, CI prüfen und Trello aktualisieren.
-3. Weitere fachliche Trello-Teilstufen nach Voraussetzungen auswählen und mit Tests und Dokumentation umsetzen.
+2. A37c: GitHub-Lauf 44143461687 prüfen und Trello nach Erfolg abschließen.
+3. P03: Setup-Fix separat pushen, den öffentlichen Clone aktualisieren und dort Windows-PowerShell-5.1-Setup, Build und Ollama-E2E prüfen; dann CI/Trello abschließen.
 
 ## Betriebsgrenzen
 
