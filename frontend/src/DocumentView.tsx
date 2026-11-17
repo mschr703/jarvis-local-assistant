@@ -1,0 +1,183 @@
+import { useEffect, useRef, useState } from 'react';
+import { api } from './api';
+import MarkdownEditor from './MarkdownEditor';
+
+export type Source = { passage_id: number; document_id: string; path: string; page: number | null; text: string; policy: string; sha256: string };
+type Folder = { id: string; path: string; policy: 'local_only' | 'cloud_allowed' };
+type Document = { id: string; folder_id: string; path: string; policy: string; status: string; excluded: number; error: string | null; sha256: string | null; indexed_at: string | null };
+type Memory = { id: string; text: string; source_ref: string; policy: 'local_only' | 'cloud_allowed'; updated_at: string };
+
+export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, visible }: {
+  onDraft: (sources: Source[]) => void; onLearn: (sources: Source[]) => void;
+  onSourcesInvalidated: () => void; visible: boolean;
+}) {
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [folderPath, setFolderPath] = useState('');
+  const [folderPolicy, setFolderPolicy] = useState<Folder['policy']>('local_only');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Source[]>([]);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [indexing, setIndexing] = useState(false);
+  const indexingRef = useRef(false);
+  const [memoryText, setMemoryText] = useState('');
+  const [memorySource, setMemorySource] = useState('');
+  const [memoryPolicy, setMemoryPolicy] = useState<Memory['policy']>('local_only');
+  const [memorySearch, setMemorySearch] = useState('');
+  const [memoryFilter, setMemoryFilter] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [memorySaving, setMemorySaving] = useState(false);
+  const memorySavingRef = useRef(false);
+  const [notice, setNotice] = useState('');
+  const [editingMarkdown, setEditingMarkdown] = useState<string | null>(null);
+  const refreshRequest = useRef(0);
+  const searchRequest = useRef(0);
+
+  const clearResults = () => {
+    ++searchRequest.current;
+    setResults([]);
+    setSelected([]);
+  };
+
+  const refresh = async (filter = memoryFilter) => {
+    const request = ++refreshRequest.current;
+    try {
+      const [nextFolders, nextDocuments, nextMemories] = await Promise.all([
+        api<Folder[]>('/folders'), api<Document[]>('/documents'),
+        api<Memory[]>(`/memories${filter ? `?q=${encodeURIComponent(filter)}` : ''}`),
+      ]);
+      if (request === refreshRequest.current) {
+        setFolders(nextFolders); setDocuments(nextDocuments); setMemories(nextMemories);
+      }
+    } catch (error) {
+      if (request === refreshRequest.current) throw error;
+    }
+  };
+  useEffect(() => {
+    if (visible) void refresh().catch((error: Error) => setNotice(error.message));
+    return () => { ++refreshRequest.current; };
+  }, [visible]);
+
+  const addFolder = async () => {
+    try {
+      await api<Folder>('/folders', { method: 'POST', body: JSON.stringify({ path: folderPath, policy: folderPolicy }) });
+      setFolderPath(''); setNotice('Ordner freigegeben. Starte jetzt die Indexierung.'); await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+  };
+  const index = async (id: string) => {
+    if (indexingRef.current) return;
+    indexingRef.current = true;
+    setIndexing(true);
+    try {
+      const counts = await api<Record<string, number>>(`/folders/${id}/index`, { method: 'POST' });
+      setNotice(`Index aktualisiert: ${counts.indexed} neu/geändert, ${counts.unchanged} unverändert, ${counts.ocr_pending} OCR ausstehend, ${counts.errors} Fehler.${counts.limited ? ' Scanlimit erreicht; vorhandene übrige Indexeinträge bleiben erhalten.' : ''}`);
+      clearResults();
+      onSourcesInvalidated();
+      await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+    finally { indexingRef.current = false; setIndexing(false); }
+  };
+  const changePolicy = async (folder: Folder) => {
+    const policy = folder.policy === 'local_only' ? 'cloud_allowed' : 'local_only';
+    try {
+      await api<Folder>(`/folders/${folder.id}/policy`, { method: 'PATCH', body: JSON.stringify({ policy }) });
+      clearResults();
+      onSourcesInvalidated();
+      setNotice(policy === 'cloud_allowed' ? 'Dieser Ordner und seine indexierten Texte sind für ausdrücklich freigegebene Cloud-Anfragen verfügbar.' : 'Cloud-Freigabe dieses Ordners entfernt.');
+      await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+  };
+  const removeFolder = async (folder: Folder) => {
+    try {
+      await api(`/folders/${folder.id}`, { method: 'DELETE' });
+      if (documents.some((document) => document.folder_id === folder.id && document.id === editingMarkdown)) setEditingMarkdown(null);
+      clearResults();
+      onSourcesInvalidated();
+      setNotice('Freigabe und lokaler Index entfernt. Originaldateien bleiben bestehen.');
+      await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+  };
+  const toggleDocument = async (document: Document) => {
+    try {
+      await api<Document>(`/documents/${document.id}/excluded`, {
+        method: 'PATCH', body: JSON.stringify({ excluded: !document.excluded }),
+      });
+      if (!document.excluded && editingMarkdown === document.id) setEditingMarkdown(null);
+      clearResults();
+      onSourcesInvalidated();
+      setNotice(document.excluded
+        ? 'Dokument wieder einbezogen. Aktualisiere den Index, bevor es in der Suche erscheint.'
+        : 'Dokument aus dem lokalen Suchindex entfernt.');
+      await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+  };
+  const search = async () => {
+    clearResults();
+    if (!query.trim()) return;
+    const request = searchRequest.current;
+    try {
+      const found = await api<Source[]>(`/search?q=${encodeURIComponent(query)}`);
+      if (request === searchRequest.current) setResults(found);
+    } catch (error) {
+      if (request === searchRequest.current) setNotice((error as Error).message);
+    }
+  };
+  const addMemory = async () => {
+    if (memorySavingRef.current) return;
+    memorySavingRef.current = true;
+    setMemorySaving(true);
+    try {
+      await api<Memory>('/memories', { method: 'POST', body: JSON.stringify({ text: memoryText, source_ref: memorySource, policy: memoryPolicy }) });
+      setMemoryText(''); setMemorySource(''); setNotice('Erinnerung gespeichert.'); await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+    finally { memorySavingRef.current = false; setMemorySaving(false); }
+  };
+  const saveMemory = async (id: string) => {
+    if (memorySavingRef.current) return;
+    memorySavingRef.current = true;
+    setMemorySaving(true);
+    try {
+      await api<Memory>(`/memories/${id}`, { method: 'PATCH', body: JSON.stringify({ text: memoryText, source_ref: memorySource, policy: memoryPolicy }) });
+      setEditing(null); setMemoryText(''); setMemorySource(''); setNotice('Erinnerung geändert.'); await refresh();
+    } catch (error) { setNotice((error as Error).message); }
+    finally { memorySavingRef.current = false; setMemorySaving(false); }
+  };
+  const deleteMemory = async (id: string) => {
+    try {
+      await api<{ deleted: boolean }>(`/memories/${id}`, { method: 'DELETE' });
+      if (editing === id) { setEditing(null); setMemoryText(''); setMemorySource(''); }
+      setNotice('Erinnerung gelöscht.'); await refresh();
+    }
+    catch (error) { setNotice((error as Error).message); }
+  };
+  const searchMemories = async (filter: string) => {
+    setMemoryFilter(filter);
+    try { await refresh(filter); }
+    catch (error) { setNotice((error as Error).message); }
+  };
+
+  return <div className="section-stack">
+    <h2>Dokumente und Wissen</h2><p className="intro">Nur ausdrücklich freigegebene Ordner werden indexiert. Ein lokaler Index bleibt auf diesem Laptop. „Cloud erlaubt“ gibt nur ausgewählte Ausschnitte für OpenRouter-Anfragen frei.</p>
+    {notice && <p className="notice" role="status">{notice}</p>}
+    <section className="card"><h3>Ordner freigeben</h3>
+      <div className="inline-form"><input aria-label="Absoluter Ordnerpfad" placeholder="C:\\Pfad\\zum\\Ordner" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} />
+        <select aria-label="Cloud-Freigabe" value={folderPolicy} onChange={(event) => setFolderPolicy(event.target.value as Folder['policy'])}><option value="local_only">Nur lokal</option><option value="cloud_allowed">Cloud erlaubt</option></select>
+        <button className="primary" onClick={() => void addFolder()} disabled={!folderPath.trim()}>Freigeben</button></div>
+      <div className="item-list">{folders.map((folder) => <div key={folder.id} className="item-row"><div><strong>{folder.path}</strong><small>{folder.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'}</small></div><div className="item-actions"><button disabled={indexing} onClick={() => void index(folder.id)}>{indexing ? 'Indexiere…' : 'Index aktualisieren'}</button><button onClick={() => void changePolicy(folder)}>{folder.policy === 'local_only' ? 'Cloud für ausgewählte Ausschnitte erlauben' : 'Cloud-Freigabe entfernen'}</button><button onClick={() => void removeFolder(folder)}>Ordnerfreigabe entfernen</button></div></div>)}</div>
+    </section>
+    <section className="card"><h3>Dokumente</h3>{documents.length === 0 ? <p>Noch keine Dokumente indexiert.</p> : <div className="item-list">{documents.map((document) => <div key={document.id} className="item-row"><div><strong>{document.path}</strong><small>{document.excluded ? 'Ausgeschlossen' : document.status === 'ocr_pending' ? 'OCR ausstehend: keine Textschicht' : document.status === 'pending_index' ? 'Index ausstehend' : document.status}{document.error && ` · ${document.error}`} · {document.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}</small>{!document.excluded && document.sha256 && document.indexed_at && document.status === 'indexed' && <small>Indexstand: {new Date(document.indexed_at).toLocaleString('de-DE')} · SHA-256 {document.sha256}</small>}</div><div className="item-actions">{!document.excluded && document.status === 'indexed' && /\.(?:md|markdown)$/i.test(document.path) && <button disabled={indexing} onClick={() => setEditingMarkdown(document.id)}>Markdown bearbeiten</button>}<button disabled={indexing} onClick={() => void toggleDocument(document)}>{document.excluded ? 'Einbeziehen' : 'Ausschließen'}</button></div></div>)}</div>}</section>
+    {editingMarkdown && <MarkdownEditor key={editingMarkdown} documentId={editingMarkdown} onClose={() => setEditingMarkdown(null)} onChanged={async () => { clearResults(); onSourcesInvalidated(); await refresh(); }} />}
+    <section className="card"><h3>Suche</h3><div className="inline-form"><input aria-label="Dokumente durchsuchen" value={query} onChange={(event) => { clearResults(); setQuery(event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter') void search(); }} /><button onClick={() => void search()} disabled={!query.trim()}>Suchen</button></div>
+      <p>Wähle höchstens fünf Fundstellen.</p><div className="item-list">{results.map((result) => <label key={result.passage_id} className="source-result"><input type="checkbox" checked={selected.includes(result.passage_id)} disabled={selected.length >= 5 && !selected.includes(result.passage_id)} onChange={(event) => setSelected(event.target.checked ? [...selected, result.passage_id] : selected.filter((id) => id !== result.passage_id))} /><span><strong>{result.path}{result.page ? ` · Seite ${result.page}` : ''}</strong><small>{result.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'}</small><p>{result.text}</p></span></label>)}</div>
+      {selected.length > 0 && <div className="item-actions"><button className="primary" onClick={() => onDraft(results.filter((item) => selected.includes(item.passage_id)))}>Mit {selected.length} Fundstelle(n) Entwurf erstellen</button>
+        <button onClick={() => onLearn(results.filter((item) => selected.includes(item.passage_id)))} disabled={selected.length > 3}>Mit Fundstelle(n) lernen</button></div>}
+    </section>
+    <section className="card"><h3>Bewusst gespeichertes Wissen</h3><p>Eine Erinnerung braucht immer eine Quelle. Sie lässt sich später bearbeiten oder löschen.</p>
+      <div className="inline-form"><input aria-label="Erinnerungstext durchsuchen" value={memorySearch} onChange={(event) => setMemorySearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchMemories(memorySearch.trim()); }} /><button onClick={() => void searchMemories(memorySearch.trim())}>Wissen suchen</button>{memoryFilter && <button onClick={() => { setMemorySearch(''); void searchMemories(''); }}>Alle anzeigen</button>}</div>
+      {memoryFilter && <p>{memories.length} Treffer für „{memoryFilter}“</p>}
+      <div className="memory-form"><textarea aria-label="Erinnerung" value={memoryText} disabled={memorySaving} onChange={(event) => setMemoryText(event.target.value)} placeholder="Projektentscheidung…" /><input aria-label="Quelle der Erinnerung" value={memorySource} disabled={memorySaving} onChange={(event) => setMemorySource(event.target.value)} placeholder="Quelle / Anlass" /><select aria-label="Cloud-Freigabe der Erinnerung" value={memoryPolicy} disabled={memorySaving} onChange={(event) => setMemoryPolicy(event.target.value as Memory['policy'])}><option value="local_only">Nur lokal</option><option value="cloud_allowed">Cloud erlaubt</option></select><button className="primary" onClick={() => void (editing ? saveMemory(editing) : addMemory())} disabled={memorySaving || !memoryText.trim() || !memorySource.trim()}>{memorySaving ? 'Speichere…' : editing ? 'Änderung speichern' : 'Erinnerung speichern'}</button></div>
+      <div className="item-list">{memories.map((memory) => <div key={memory.id} className="item-row"><div><strong>{memory.text}</strong><small>Quelle: {memory.source_ref} · {memory.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}</small></div><div className="item-actions"><button disabled={memorySaving} onClick={() => { setEditing(memory.id); setMemoryText(memory.text); setMemorySource(memory.source_ref); setMemoryPolicy(memory.policy); }}>Bearbeiten</button><button disabled={memorySaving} onClick={() => void deleteMemory(memory.id)}>Löschen</button></div></div>)}</div>
+    </section>
+  </div>;
+}

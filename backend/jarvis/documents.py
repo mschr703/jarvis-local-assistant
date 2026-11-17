@@ -1,0 +1,381 @@
+"""Erlaubte lokale Quellen, FTS5-Suche und explizite Erinnerungen."""
+
+import hashlib
+import io
+import os
+import re
+import threading
+from pathlib import Path
+from uuid import uuid4
+
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+
+from jarvis.db import Database, utcnow
+
+SUPPORTED = {".txt", ".md", ".markdown", ".pdf"}
+MAX_FILE_BYTES = 20 * 1024 * 1024
+MAX_FILES_PER_SCAN = 1000
+MAX_DIRECTORIES_PER_SCAN = 2000
+MAX_EXTRACTED_CHARS = 2_000_000
+MAX_PDF_PAGES = 200
+
+
+def fts_query(text: str) -> str:
+    words = re.findall(r"\w+", text, flags=re.UNICODE)[:12]
+    return " AND ".join(f'"{word}"' for word in words)
+
+
+def chunks(text: str, size: int = 1200, overlap: int = 100) -> list[str]:
+    clean = re.sub(r"\r\n?", "\n", text).strip()
+    if not clean:
+        return []
+    result = []
+    start = 0
+    while start < len(clean):
+        end = min(len(clean), start + size)
+        result.append(clean[start:end])
+        if end == len(clean):
+            break
+        start = end - overlap
+    return result
+
+
+class DocumentStore:
+    def __init__(self, db: Database):
+        self.db = db
+        self._scan_lock = threading.Lock()
+        self.mutation_lock = threading.RLock()
+
+    def add_folder(self, path: str, policy: str) -> dict:
+        if policy not in {"local_only", "cloud_allowed"}:
+            raise ValueError("Ungültige Cloud-Freigabe")
+        supplied = Path(path).expanduser()
+        if not supplied.is_absolute() or not supplied.is_dir():
+            raise ValueError("Es wird ein vorhandener absoluter Ordnerpfad benötigt")
+        root = supplied.resolve(strict=True)
+        folder_id, now = str(uuid4()), utcnow()
+        with self.db.connect() as db:
+            prior = db.execute("SELECT * FROM folders WHERE path=?", (str(root),)).fetchone()
+            if prior:
+                return dict(prior)
+            for row in db.execute("SELECT path FROM folders"):
+                existing = Path(row["path"])
+                if root.is_relative_to(existing) or existing.is_relative_to(root):
+                    raise ValueError("Überlappende Freigabeordner sind nicht erlaubt")
+            db.execute("INSERT INTO folders VALUES(?,?,?,?)", (folder_id, str(root), policy, now))
+        self.db.log("folder_added", f"Dokumentenordner {folder_id}")
+        return {"id": folder_id, "path": str(root), "policy": policy, "created_at": now}
+
+    def folders(self) -> list[dict]:
+        with self.db.connect() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM folders ORDER BY path")]
+
+    def get_folder(self, folder_id: str) -> dict | None:
+        with self.db.connect() as db:
+            row = db.execute("SELECT * FROM folders WHERE id=?", (folder_id,)).fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def granted_root(folder: dict) -> Path:
+        saved = Path(folder["path"])
+        current = saved.resolve(strict=True)
+        if current != saved or not current.is_dir():
+            raise ValueError("Freigabeordner wurde umgeleitet; Ordner erneut freigeben")
+        return current
+
+    def set_folder_policy(self, folder_id: str, policy: str) -> dict:
+        if policy not in {"local_only", "cloud_allowed"}:
+            raise ValueError("Ungültige Cloud-Freigabe")
+        with self.db.connect() as db:
+            if db.execute("SELECT 1 FROM folders WHERE id=?", (folder_id,)).fetchone() is None:
+                raise ValueError("Ordner nicht gefunden")
+            db.execute("UPDATE folders SET policy=? WHERE id=?", (policy, folder_id))
+            db.execute("UPDATE documents SET policy=? WHERE folder_id=?", (policy, folder_id))
+        self.db.log("folder_policy_changed", f"Ordner {folder_id}: {policy}")
+        return self.get_folder(folder_id)
+
+    def remove_folder(self, folder_id: str) -> None:
+        with self.mutation_lock, self.db.connect() as db:
+            db.execute("DELETE FROM folders WHERE id=?", (folder_id,))
+        self.db.log("folder_removed", f"Ordner {folder_id}; Originaldateien unverändert")
+
+    def index_folder(self, folder_id: str) -> dict:
+        with self._scan_lock:
+            return self._index_folder(folder_id)
+
+    def _index_folder(self, folder_id: str) -> dict:
+        folder = self.get_folder(folder_id)
+        if folder is None:
+            raise ValueError("Ordner nicht gefunden")
+        root = self.granted_root(folder)
+        counts = {"indexed": 0, "unchanged": 0, "ocr_pending": 0,
+                  "skipped": 0, "errors": 0, "removed": 0, "limited": 0}
+        seen: set[str] = set()
+        visited = 0
+        visited_directories = 0
+        limit_hit = False
+        scan_incomplete = False
+        def walk_error(_error: OSError) -> None:
+            nonlocal scan_incomplete
+            scan_incomplete = True
+            counts["errors"] += 1
+
+        for base, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
+            visited_directories += 1
+            if visited_directories > MAX_DIRECTORIES_PER_SCAN:
+                counts["skipped"] += 1
+                counts["limited"] = 1
+                limit_hit = True
+                break
+            safe_dirs = []
+            for directory in dirs:
+                candidate = Path(base) / directory
+                try:
+                    if (not candidate.is_symlink() and not candidate.is_junction()
+                            and candidate.resolve(strict=True).is_relative_to(root)):
+                        safe_dirs.append(directory)
+                except OSError:
+                    scan_incomplete = True
+                    counts["skipped"] += 1
+                    counts["errors"] += 1
+            dirs[:] = safe_dirs
+            for name in files:
+                if Path(name).suffix.lower() not in SUPPORTED:
+                    continue
+                if visited >= MAX_FILES_PER_SCAN:
+                    counts["skipped"] += 1
+                    counts["limited"] = 1
+                    limit_hit = True
+                    break
+                visited += 1
+                candidate = Path(base) / name
+                resolved: Path | None = None
+                try:
+                    resolved = candidate.resolve(strict=True)
+                    if not resolved.is_relative_to(root) or not resolved.is_file():
+                        counts["skipped"] += 1
+                        continue
+                    seen.add(str(resolved))
+                    if self._index_file(folder, resolved):
+                        counts["indexed"] += 1
+                    else:
+                        counts["unchanged"] += 1
+                except OcrPending:
+                    counts["ocr_pending"] += 1
+                except (OSError, ValueError, PdfReadError) as exc:
+                    counts["errors"] += 1
+                    if resolved is None or str(resolved) not in seen:
+                        scan_incomplete = True
+                    if resolved is not None and resolved.is_relative_to(root):
+                        reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
+                                  else type(exc).__name__)
+                        self._record_error(folder, resolved, reason)
+            if limit_hit:
+                dirs[:] = []
+                break
+        if not limit_hit and not scan_incomplete:
+            with self.db.connect() as db:
+                old = db.execute("SELECT id,path FROM documents WHERE folder_id=?", (folder_id,)).fetchall()
+                for item in old:
+                    if item["path"] not in seen:
+                        db.execute("DELETE FROM documents WHERE id=?", (item["id"],))
+                        counts["removed"] += 1
+        self.db.log("folder_indexed", f"Ordner {folder_id}: {counts}")
+        return counts
+
+    def _index_file(self, folder: dict, path: Path) -> bool:
+        stat = path.stat()
+        if stat.st_size > MAX_FILE_BYTES:
+            raise ValueError("Datei zu groß")
+        with self.db.connect() as db:
+            prior = db.execute("SELECT * FROM documents WHERE path=?", (str(path),)).fetchone()
+            if prior and prior["excluded"]:
+                return False
+        with path.open("rb") as stream:
+            data = stream.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError("Datei zu groß")
+        after = path.stat()
+        if ((stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_dev)
+                != (after.st_size, after.st_mtime_ns, after.st_ino, after.st_dev)):
+            raise ValueError("Datei wurde während der Indexierung geändert")
+        digest = hashlib.sha256(data).hexdigest()
+        if (prior and prior["status"] in {"indexed", "ocr_pending"}
+                and prior["sha256"] == digest and prior["policy"] == folder["policy"]):
+            return False
+        segments: list[tuple[int | None, str]] = []
+        if path.suffix.lower() == ".pdf":
+            reader = PdfReader(io.BytesIO(data))
+            if reader.is_encrypted:
+                raise ValueError("Verschlüsseltes PDF")
+            if len(reader.pages) > MAX_PDF_PAGES:
+                raise ValueError("PDF hat zu viele Seiten")
+            extracted = 0
+            for number, page in enumerate(reader.pages, start=1):
+                content = page.extract_text() or ""
+                extracted += len(content)
+                if extracted > MAX_EXTRACTED_CHARS:
+                    raise ValueError("PDF-Text ist zu lang")
+                segments.extend((number, piece) for piece in chunks(content))
+        else:
+            content = data.decode("utf-8", "replace")
+            if len(content) > MAX_EXTRACTED_CHARS:
+                raise ValueError("Dokumenttext ist zu lang")
+            segments.extend((None, piece) for piece in chunks(content))
+        status = "indexed" if segments else "ocr_pending"
+        now = utcnow()
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT policy FROM folders WHERE id=?", (folder["id"],)).fetchone()
+            if current is None:
+                return False
+            current_document = db.execute("SELECT id,excluded FROM documents WHERE path=?",
+                                          (str(path),)).fetchone()
+            if current_document and current_document["excluded"]:
+                return False
+            document_id = current_document["id"] if current_document else str(uuid4())
+            db.execute("""INSERT INTO documents(id,folder_id,path,sha256,mtime_ns,size,policy,status,indexed_at)
+                       VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET
+                       sha256=excluded.sha256,mtime_ns=excluded.mtime_ns,size=excluded.size,
+                       policy=excluded.policy,status=excluded.status,indexed_at=excluded.indexed_at,
+                       error=NULL""",
+                       (document_id, folder["id"], str(path), digest, stat.st_mtime_ns,
+                        stat.st_size, current["policy"], status, now))
+            db.execute("DELETE FROM passages WHERE document_id=?", (document_id,))
+            db.executemany("INSERT INTO passages(document_id,page,ordinal,text) VALUES(?,?,?,?)",
+                           ((document_id, page, index, text)
+                            for index, (page, text) in enumerate(segments)))
+        if status == "ocr_pending":
+            raise OcrPending()
+        return True
+
+    def _record_error(self, folder: dict, path: Path, error: str) -> None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT policy FROM folders WHERE id=?", (folder["id"],)).fetchone()
+            if current is None:
+                return
+            prior = db.execute("SELECT id FROM documents WHERE path=?", (str(path),)).fetchone()
+            document_id = prior["id"] if prior else str(uuid4())
+            db.execute("""INSERT INTO documents(id,folder_id,path,policy,status,indexed_at,error)
+                       VALUES(?,?,?,?,'error',?,?) ON CONFLICT(path) DO UPDATE SET
+                       status='error',error=excluded.error,indexed_at=excluded.indexed_at""",
+                       (document_id, folder["id"], str(path), current["policy"], utcnow(), error))
+            db.execute("DELETE FROM passages WHERE document_id=?", (document_id,))
+
+    def documents(self, folder_id: str | None = None) -> list[dict]:
+        with self.db.connect() as db:
+            if folder_id:
+                rows = db.execute("SELECT * FROM documents WHERE folder_id=? ORDER BY path", (folder_id,))
+            else:
+                rows = db.execute("SELECT * FROM documents ORDER BY path")
+            return [dict(row) for row in rows]
+
+    def get_document(self, document_id: str) -> dict | None:
+        with self.db.connect() as db:
+            row = db.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+            return dict(row) if row else None
+
+    def set_excluded(self, document_id: str, excluded: bool) -> dict:
+        with self.mutation_lock, self.db.connect() as db:
+            row = db.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+            if row is None:
+                raise ValueError("Dokument nicht gefunden")
+            if excluded:
+                db.execute("UPDATE documents SET excluded=1 WHERE id=?", (document_id,))
+                db.execute("DELETE FROM passages WHERE document_id=?", (document_id,))
+                db.execute("DELETE FROM markdown_revisions WHERE document_id=?", (document_id,))
+            else:
+                db.execute("""UPDATE documents SET excluded=0,status='pending_index',
+                           sha256=NULL,error=NULL WHERE id=?""", (document_id,))
+        self.db.log("document_excluded" if excluded else "document_included", f"Dokument {document_id}")
+        return self.get_document(document_id)
+
+    def search(self, query: str, *, cloud_only: bool = False, limit: int = 20) -> list[dict]:
+        match = fts_query(query)
+        if not match:
+            return []
+        with self.db.connect() as db:
+            rows = db.execute("""SELECT p.id AS passage_id,p.document_id,p.page,p.text,
+                              d.path,d.policy,d.sha256, bm25(passages_fts) AS rank
+                              FROM passages_fts JOIN passages p ON p.id=passages_fts.rowid
+                              JOIN documents d ON d.id=p.document_id
+                              WHERE passages_fts MATCH ? AND d.excluded=0 AND d.status='indexed'
+                              AND (?=0 OR d.policy='cloud_allowed')
+                              ORDER BY rank LIMIT ?""", (match, int(cloud_only), limit))
+            return [dict(row) for row in rows]
+
+    def selected_passages(self, passage_ids: list[int], *, cloud_only: bool = False) -> list[dict]:
+        unique = list(dict.fromkeys(passage_ids))
+        if len(unique) > 5:
+            raise ValueError("Höchstens fünf Fundstellen pro Anfrage")
+        if not unique:
+            return []
+        placeholders = ",".join("?" for _ in unique)
+        with self.db.connect() as db:
+            rows = db.execute(
+                f"""SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,d.sha256
+                    FROM passages p JOIN documents d ON d.id=p.document_id
+                    WHERE p.id IN ({placeholders}) AND d.excluded=0 AND d.status='indexed'
+                    AND (?=0 OR d.policy='cloud_allowed')""", (*unique, int(cloud_only)))
+            found = {row["passage_id"]: dict(row) for row in rows}
+        if len(found) != len(unique):
+            raise ValueError("Fundstelle fehlt oder ist für Cloud-Nutzung nicht freigegeben")
+        return [found[item] for item in unique]
+
+    def add_memory(self, text: str, source_ref: str, policy: str) -> dict:
+        if not text.strip() or not source_ref.strip():
+            raise ValueError("Erinnerung und Quelle werden benötigt")
+        if policy not in {"local_only", "cloud_allowed"}:
+            raise ValueError("Ungültige Cloud-Freigabe")
+        memory_id, now = str(uuid4()), utcnow()
+        with self.db.connect() as db:
+            db.execute("INSERT INTO memories VALUES(?,?,?,?,?,?)",
+                       (memory_id, text.strip(), source_ref.strip(), policy, now, now))
+            db.execute("INSERT INTO memories_fts(id,text) VALUES(?,?)", (memory_id, text.strip()))
+        self.db.log("memory_added", f"Erinnerung {memory_id}")
+        return self.get_memory(memory_id)
+
+    def get_memory(self, memory_id: str) -> dict | None:
+        with self.db.connect() as db:
+            row = db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+            return dict(row) if row else None
+
+    def memories(self, query: str | None = None) -> list[dict]:
+        with self.db.connect() as db:
+            if query:
+                match = fts_query(query)
+                if not match:
+                    return []
+                rows = db.execute("""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.id
+                                  WHERE memories_fts MATCH ? ORDER BY bm25(memories_fts) LIMIT 50""",
+                                  (match,))
+            else:
+                rows = db.execute("SELECT * FROM memories ORDER BY updated_at DESC")
+            return [dict(row) for row in rows]
+
+    def update_memory(self, memory_id: str, text: str, source_ref: str, policy: str) -> dict:
+        if not text.strip() or not source_ref.strip():
+            raise ValueError("Erinnerung und Quelle werden benötigt")
+        if policy not in {"local_only", "cloud_allowed"}:
+            raise ValueError("Ungültige Cloud-Freigabe")
+        with self.db.connect() as db:
+            if db.execute("SELECT 1 FROM memories WHERE id=?", (memory_id,)).fetchone() is None:
+                raise ValueError("Erinnerung nicht gefunden")
+            db.execute("UPDATE memories SET text=?,source_ref=?,policy=?,updated_at=? WHERE id=?",
+                       (text.strip(), source_ref.strip(), policy, utcnow(), memory_id))
+            db.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+            db.execute("INSERT INTO memories_fts(id,text) VALUES(?,?)", (memory_id, text.strip()))
+        self.db.log("memory_updated", f"Erinnerung {memory_id}")
+        return self.get_memory(memory_id)
+
+    def delete_memory(self, memory_id: str) -> None:
+        with self.db.connect() as db:
+            db.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+            db.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+        self.db.log("memory_deleted", f"Erinnerung {memory_id}")
+
+
+class OcrPending(Exception):
+    """PDF ohne extrahierbare Textschicht."""
