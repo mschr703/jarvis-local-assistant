@@ -40,3 +40,11 @@ export function examResults(cards: ExamCard[], answers: Record<string, string>,
   }
   return result;
 }
+
+export function repeatExamCards(cards: ExamCard[], answers: Record<string, string>,
+  grades: Record<string, ExamGrade | undefined>): ExamCard[] {
+  return cards.filter((card) => {
+    if (!answers[card.id]?.trim()) return true;
+    return grades[card.id] === 'partial' || grades[card.id] === 'incorrect';
+  });
+}

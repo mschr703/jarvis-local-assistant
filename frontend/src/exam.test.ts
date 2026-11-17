@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { examResults, remainingSeconds, selectExamCards, type ExamCard } from './exam';
+import { examResults, remainingSeconds, repeatExamCards, selectExamCards,
+  type ExamCard } from './exam';
 
 const card: ExamCard = {
   id: '1', question: 'Was ist Photosynthese?', reference_answer: 'Ein Prozess.',
@@ -29,5 +30,14 @@ describe('local exam', () => {
       correct: 1, partial: 1, incorrect: 1, unrated: 0,
       repeat: ['Wozu Wasser?', 'Wozu Licht?'],
     });
+  });
+
+  it('repeats only partial, incorrect and blank answers', () => {
+    const cards = [card, { ...card, id: '2' }, { ...card, id: '3' },
+      { ...card, id: '4' }, { ...card, id: '5' }];
+    expect(repeatExamCards(cards,
+      { '1': 'richtig', '2': 'teilweise', '3': 'falsch', '4': '', '5': 'offen' },
+      { '1': 'correct', '2': 'partial', '3': 'incorrect' }).map((item) => item.id))
+      .toEqual(['2', '3', '4']);
   });
 });

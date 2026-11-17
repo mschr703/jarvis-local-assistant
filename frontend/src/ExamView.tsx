@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { examResults, remainingSeconds, selectExamCards,
+import { examResults, remainingSeconds, repeatExamCards, selectExamCards,
   type ExamCard, type ExamGrade } from './exam';
 import { examCsv } from './examCsv';
 
@@ -17,6 +17,7 @@ export default function ExamView({ sessions, onExit }: {
   const [timedOut, setTimedOut] = useState(false);
   const available = selectExamCards(sessions, 10).length;
   const results = examResults(cards, answers, grades);
+  const repeatCards = repeatExamCards(cards, answers, grades);
 
   useEffect(() => {
     if (phase !== 'running') return;
@@ -34,8 +35,7 @@ export default function ExamView({ sessions, onExit }: {
     };
   }, [phase, deadline]);
 
-  const start = () => {
-    const chosen = selectExamCards(sessions, requested);
+  const startCards = (chosen: ExamCard[]) => {
     if (!chosen.length) return;
     setCards(chosen);
     setAnswers({}); setGrades({}); setTimedOut(false);
@@ -43,6 +43,7 @@ export default function ExamView({ sessions, onExit }: {
     setRemaining(minutes * 60);
     setPhase('running');
   };
+  const start = () => startCards(selectExamCards(sessions, requested));
 
   const downloadReport = () => {
     if (phase !== 'submitted' || cards.length === 0) return;
@@ -116,7 +117,13 @@ export default function ExamView({ sessions, onExit }: {
           <p>{results.unrated ? 'Bewerte deine Antworten, um Wiederholungsziele zu sehen.'
             : 'Keine Wiederholungsfragen aus dieser Runde.'}</p>}
         <p>Das Protokoll enthält {cards.length} Frage(n), deine Antworten, die Selbsteinschätzung und die Quellen. Prüfe persönliche Dateipfade vor dem Teilen.</p>
+        {repeatCards.length > 0 && <label>Zeitlimit für Wiederholung
+          <select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
+            {[5, 10, 20].map((count) => <option key={count} value={count}>{count} Minuten</option>)}
+          </select></label>}
         <div className="item-actions"><button onClick={downloadReport}>Prüfungsprotokoll als CSV herunterladen</button>
+          {repeatCards.length > 0 && <button onClick={() => startCards(repeatCards)}>
+            {repeatCards.length} Frage(n) erneut üben</button>}
           <button onClick={() => setPhase('setup')}>Neue Prüfung</button>
           <button onClick={onExit}>Zurück zum Lernmodus</button></div>
       </section>}

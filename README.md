@@ -107,6 +107,8 @@ Für weitere Fragen zum selben Thema dieselben Fundstellen ausgewählt lassen un
 
 Nach der Abgabe lässt sich mit „Prüfungsprotokoll als CSV herunterladen“ das aktuelle Ergebnis sichern. Die Datei enthält die eigenen Antworten und Selbsteinschätzungen sowie Musterlösungen und Quellenbelege. Leere Antworten werden als falsch und noch nicht bewertete als solche gekennzeichnet. Der Download bleibt lokal; die Datei kann persönliche Pfade enthalten.
 
+Für eine direkte Wiederholung zuerst das Protokoll der alten Runde bei Bedarf herunterladen, dann „Frage(n) erneut üben“ wählen. Jarvis übernimmt nur falsch oder teilweise bewertete und leere Antworten, setzt Eingaben und Bewertungen zurück und startet ein neues wählbares Zeitlimit. Lösungen und Quellen bleiben bis zur erneuten Abgabe verborgen. Noch nicht bewertete Antworten werden nicht als Fehler übernommen; bei Bedarf zuerst bewerten. Der neue Versuch bleibt ebenso nur in diesem Tab.
+
 ### Erinnerungen aus Chats bewusst prüfen
 
 Unter „Gedächtnis“ ein nicht archiviertes Gespräch wählen und „Erinnerungen vorschlagen“ klicken. Jarvis gibt höchstens sechs jüngste fertige **eigene** Nachrichten an lokales Ollama und zeigt höchstens drei kurze Vorschläge. Jeder Vorschlag enthält einen wörtlichen Ausschnitt, Nachrichtenzeit und einen Sprung zur Originalstelle im Chat. Der Modelltext ist zunächst nur ein Vorschlag und wird nicht für spätere Antworten verwendet. Bei einem identischen vorhandenen Erinnerungstext erscheint ein Duplikathinweis.

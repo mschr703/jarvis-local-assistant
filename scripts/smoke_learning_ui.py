@@ -121,6 +121,14 @@ def main() -> None:
                         assert report_rows[0]["Meine Antwort"] == "Nur Wasser und Licht."
                         assert report_rows[0]["Bewertung"] == "Teilweise richtig"
                         assert report_rows[0]["SHA-256"] == item["source"]["sha256"]
+                        page.get_by_label("Zeitlimit für Wiederholung").select_option("5")
+                        page.get_by_role("button", name="1 Frage(n) erneut üben").click()
+                        expect(page.get_by_label("Prüfungsantwort 1")).to_have_value("")
+                        expect(page.get_by_role("timer")).to_be_visible()
+                        assert page.get_by_text("Musterantwort:").count() == 0
+                        assert page.get_by_text("Quellenzitat:").count() == 0
+                        page.get_by_role("button", name="Prüfung abgeben").click()
+                        expect(page.get_by_text("Leere Antwort: als falsch gewertet.")).to_be_visible()
                         assert store.get(item["id"])["version"] == version_before_exam
                         page.get_by_role("button", name="Zurück zum Lernmodus").click()
                         page.get_by_role("button", name="Dokumente öffnen").click()
@@ -153,6 +161,7 @@ def main() -> None:
                                           "question_correction": True, "answer_reload": True,
                                           "csv_export": True, "exam": True,
                                           "exam_report": True,
+                                          "repeat_missed_question": True,
                                           "second_distinct_card": True,
                                           "mobile_width": "fits"}))
                     finally:

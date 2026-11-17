@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026, 18:54 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 19:01 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -10,6 +10,7 @@ Stand: 17.11.2026, 18:54 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - Ein persönliches Schreibprofil mit eigenen Beispielen. Der Anzeigename ist einstellbar und standardmäßig „Mein Stil“. Die technische Kennung `Maxim` bleibt für die Kompatibilität älterer lokaler Daten und API-Aufrufe erhalten.
 - Beantwortete, belegte Lernrunden können nach ausdrücklicher Prüfung als lokale UTF-8-CSV-Lernkarten mit Quellenzitat und SHA-256 exportiert werden. Gleiche Frage und gleicher Quellenhash ergeben nur eine Karte; die Ansicht lädt die 50 zuletzt geänderten Runden.
 - Eine lokale Übungsprüfung kann aus diesen Fragen mit Zeitlimit gestartet werden. Lösungen und Quellen erscheinen nach Abgabe; die Selbsteinschätzung zeigt Wiederholungsfragen. Der Prüfungsverlauf bleibt im Tab und wird nicht gespeichert.
+- Falsch, teilweise oder leer beantwortete Prüfungsfragen können sofort mit neuen leeren Eingaben und neuem Zeitlimit geübt werden; die Lösungen sind wieder bis zur Abgabe verborgen.
 - Das Prüfungsprotokoll kann nach Abgabe bewusst als lokale CSV mit eigenen Antworten, Bewertung, Musterantwort und Quellenbeleg heruntergeladen werden.
 - Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
@@ -24,14 +25,15 @@ Stand: 17.11.2026, 18:54 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - A36a: 16 Frontendtests, TypeScript/Vite-Build, Ruff und lokaler Public-Audit (281 Dateien, null Funde) bestanden. `scripts/smoke_learning_ui.py` erzeugte mit echtem Ollama eine belegte Frage, korrigierte und beantwortete sie, lud die CSV in Edge herunter, prüfte Frage/Pfad/Hash/Zitat und bestätigte die 390-Pixel-Ansicht ohne Überlauf. Commit `fd6d287` ist veröffentlicht; GitHub-Lauf [44134315243](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44134315243) ist vollständig grün. Die Trello-Karte ist erledigt.
 - A37a: 19 Frontendtests, TypeScript/Vite-Build und echter Edge/Ollama-Pfad mit belegter Frage, abgegebener Prüfung, Selbsteinschätzung und 390-Pixel-Ansicht bestanden. Der Prüfungsablauf änderte die gespeicherte Lernrunde nicht. Commit `265f1e5` ist öffentlich; GitHub-Lauf [44135680615](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44135680615) ist vollständig grün. Die Trello-Karte ist erledigt.
 - A37b: 22 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit (286 Dateien, null Funde) bestanden. Ein echter Edge/Ollama-Pfad lud das Prüfungsprotokoll herunter und prüfte Frage, Antwort, Bewertung, Hash und mobile Breite. Vor der Abgabe war der Download nicht angeboten. Der vollständige Pfad wurde zweimal erfolgreich ausgeführt. Commit `a6c4fdf` und GitHub-Lauf [44136867444](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44136867444) sind öffentlich und vollständig grün; Trello ist erledigt.
-- A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde. Commit `f60ddad` ist öffentlich; GitHub-Lauf 44141088360 läuft noch.
-- P02: `.gitignore` schließt lokale Umgebungsvarianten, Archive, Schlüssel, Logs, Datenbanken und Tresordateien für gewöhnliches Git-Add aus. Vier synthetische Tests prüfen Dateinamen, Ignore-Regeln, Tokenmuster und ein aus dem aktuellen Baum gelöschtes Secret in der Commit-Historie. `scripts/push_public.ps1 -CheckOnly` bestand; ein Ref-Spec ungleich `HEAD:<Zielbranch>` wurde abgelehnt. Der Audit von 288 veröffentlichbaren Dateien und der erreichbaren HEAD-Historie meldete null Funde, ebenso der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel. Öffentlicher Push/CI dieses neuen Guards stehen noch aus.
+- A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde. Commit `f60ddad` und GitHub-Lauf [44141088360](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44141088360) sind öffentlich und grün; Trello ist erledigt.
+- P02: `.gitignore` schließt lokale Umgebungsvarianten, Archive, Schlüssel, Logs, Datenbanken und Tresordateien für gewöhnliches Git-Add aus. Vier synthetische Tests prüfen Dateinamen, Ignore-Regeln, Tokenmuster und ein aus dem aktuellen Baum gelöschtes Secret in der Commit-Historie. `scripts/push_public.ps1 -CheckOnly` bestand; ein Ref-Spec ungleich `HEAD:<Zielbranch>` wurde abgelehnt. Der Audit von 288 veröffentlichbaren Dateien und der erreichbaren HEAD-Historie meldete null Funde, ebenso der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel. Commit `6e05a63` wurde mit dem neuen Helfer gepusht; GitHub-Lauf [44142141489](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44142141489) ist vollständig grün. Trello ist erledigt.
+- A37c: 23 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit bestanden. Der Edge/Ollama-Pfad prüfte nach Teilbewertung eine neue Fünf-Minuten-Runde mit leerem Antwortfeld, erneut verborgenen Lösungen, Abgabe, unveränderter gespeicherter Lernrunde und 390-Pixel-Ansicht. Der zweite belegte Lernkartenpfad blieb grün. Öffentlicher Push/CI folgen.
 
 ## Offene Arbeiten
 
-1. P00, A79b, P01, A36a, A37a und A37b sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. A36b: GitHub-Lauf 44141088360 bis zum Ergebnis prüfen und Trello nach Erfolg abschließen.
-3. P02: öffentlichen Guard separat committen, mit dem neuen Push-Helfer veröffentlichen und Windows-CI prüfen.
+1. P00, A79b, P01, P02, A36a, A36b, A37a und A37b sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
+2. A37c: separat pushen, CI prüfen und Trello aktualisieren.
+3. Weitere fachliche Trello-Teilstufen nach Voraussetzungen auswählen und mit Tests und Dokumentation umsetzen.
 
 ## Betriebsgrenzen
 
