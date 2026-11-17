@@ -93,10 +93,26 @@ def main() -> None:
                         assert rows[0]["Quelldatei"] == str(sources / "biologie.txt")
                         assert rows[0]["SHA-256"] == item["source"]["sha256"]
                         assert rows[0]["Quellenzitat"] == item["evidence_quote"]
+                        version_before_exam = store.get(item["id"])["version"]
+                        page.get_by_role("button", name="Prüfungsmodus öffnen").click()
+                        page.get_by_role("button", name="Prüfung starten").click()
+                        expect(page.get_by_label("Prüfungsantwort 1")).to_be_visible()
+                        assert page.get_by_text("Musterantwort:").count() == 0
+                        assert page.get_by_text("Quellenzitat:").count() == 0
+                        assert page.get_by_text(item["source"]["sha256"]).count() == 0
+                        page.get_by_label("Prüfungsantwort 1").fill("Nur Wasser und Licht.")
+                        page.get_by_role("button", name="Prüfung abgeben").click()
+                        expect(page.get_by_text("Musterantwort:")).to_be_visible()
+                        expect(page.get_by_text("Quellenzitat:")).to_be_visible()
+                        page.get_by_label("Selbsteinschätzung 1").select_option("partial")
+                        expect(page.get_by_text("Teilweise: 1", exact=False)).to_be_visible()
+                        expect(page.get_by_role("heading", name="Wiederholen")).to_be_visible()
+                        assert store.get(item["id"])["version"] == version_before_exam
                         assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"ollama": True, "source_quote": True,
                                           "question_correction": True, "answer_reload": True,
-                                          "csv_export": True, "mobile_width": "fits"}))
+                                          "csv_export": True, "exam": True,
+                                          "mobile_width": "fits"}))
                     finally:
                         browser.close()
             finally:

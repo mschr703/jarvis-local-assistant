@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { Source } from './DocumentView';
 import { learningCardsCsv } from './learningCards';
+import ExamView from './ExamView';
 
 type Evaluation = 'correct' | 'partial' | 'incorrect' | 'uncertain' | null;
 type LearningSession = {
@@ -31,6 +32,7 @@ export default function LearningView({ visible, sources, configured, provider, o
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [reviewedForExport, setReviewedForExport] = useState(false);
+  const [examOpen, setExamOpen] = useState(false);
   const request = useRef(0);
   const active = sessions.find((item) => item.id === activeId) ?? null;
   const selected = sources.slice(0, 3);
@@ -126,6 +128,8 @@ export default function LearningView({ visible, sources, configured, provider, o
     setNotice(`${exportData.count} Lernkarte(n) als CSV heruntergeladen.`);
   };
 
+  if (examOpen) return <ExamView sessions={sessions} onExit={() => setExamOpen(false)} />;
+
   return <div className="stack">
     <p className="eyebrow">LOKAL LERNEN</p><h2>Lernmodus</h2>
     <p className="intro">Stelle dir Fragen zu ausgewählten Dokumentstellen. Jarvis speichert nur deine tatsächlichen Antworten und zeigt den Quellenbeleg zu jeder Rückmeldung.</p>
@@ -157,6 +161,10 @@ export default function LearningView({ visible, sources, configured, provider, o
         disabled={exportData.count === 0} /> Ich habe die Inhalte und Quellen vor dem Export geprüft.</label>
       <button onClick={downloadCards} disabled={exportData.count === 0 || !reviewedForExport}>
         CSV herunterladen</button>
+    </section>
+    <section className="card"><h3>Übungsprüfung</h3>
+      <p>Beantworte belegte Fragen unter Zeitlimit. Musterlösungen erscheinen erst nach Abgabe; die Bewertung übernimmst du anhand der Quelle selbst.</p>
+      <button onClick={() => setExamOpen(true)} disabled={exportData.count === 0}>Prüfungsmodus öffnen</button>
     </section>
     {active && <section className="card"><h3>Frage und Antwort</h3>
       <p><strong>{active.question}</strong></p>
