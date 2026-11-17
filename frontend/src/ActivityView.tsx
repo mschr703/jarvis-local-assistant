@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import QualityOverview, { type QualityItem, type QualityOverviewData } from './QualityOverview';
 
 type Capability = { name: string; scope: string; effect: string };
 type Evaluation = { run_id: string; verdict: string; reason: string; regression_case: number; expected_result: string; version: number; updated_at: string };
@@ -41,11 +42,17 @@ function CadResult({ run, onExport, acting }: { run: Run;
   </div>;
 }
 
-export default function ActivityView({ provider, visible }: { provider: string; visible: boolean }) {
+export default function ActivityView({ provider, visible, onChatEvidence, onResearchEvidence }: {
+  provider: string; visible: boolean;
+  onChatEvidence: (chatId: string, messageId: string) => void;
+  onResearchEvidence: (reportId: string) => void;
+}) {
   const [tools, setTools] = useState<Capability[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [quality, setQuality] = useState<QualityOverviewData | null>(null);
+  const [qualityEvidence, setQualityEvidence] = useState<{ item: QualityItem; detail: Plan | Run } | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [cases, setCases] = useState<EvaluationCase[]>([]);
   const [planCases, setPlanCases] = useState<PlanEvaluationCase[]>([]);
@@ -94,18 +101,30 @@ export default function ActivityView({ provider, visible }: { provider: string; 
 
   const refresh = async () => {
     const request = ++refreshRequest.current;
+    const qualityRequest = api<QualityOverviewData>('/quality/overview').then((nextQuality) => {
+      if (request === refreshRequest.current) setQuality(nextQuality);
+    }).catch((error: Error) => {
+      if (request === refreshRequest.current) setNotice(error.message);
+    });
     const [nextTools, nextRuns, nextDocuments, nextActivity, nextPlans, nextCases, nextPlanCases] = await Promise.all([
       api<Capability[]>('/tools'), api<Run[]>('/runs'), api<Document[]>('/documents'), api<Activity[]>('/activity'), api<Plan[]>('/plans'), api<EvaluationCase[]>('/evaluation-cases'), api<PlanEvaluationCase[]>('/plan-evaluation-cases'),
     ]);
     if (request === refreshRequest.current) {
       setTools(nextTools); setRuns(nextRuns); setDocuments(nextDocuments); setActivity(nextActivity); setPlans(nextPlans); setCases(nextCases); setPlanCases(nextPlanCases);
     }
+    await qualityRequest;
   };
   useEffect(() => {
     if (!visible) return;
-    void refresh().catch((error: Error) => setNotice(error.message));
-    const timer = window.setInterval(() => void refresh().catch(() => undefined), 5000);
-    return () => { ++refreshRequest.current; window.clearInterval(timer); };
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try { await refresh(); }
+      catch (error) { if (active) setNotice((error as Error).message); }
+      finally { if (active) timer = window.setTimeout(() => void poll(), 5000); }
+    };
+    void poll();
+    return () => { active = false; ++refreshRequest.current; window.clearTimeout(timer); };
   }, [visible]);
   const run = async () => {
     if (submissionRef.current) return;
@@ -235,14 +254,28 @@ export default function ActivityView({ provider, visible }: { provider: string; 
     finally { endAction(key); }
   };
 
+  const openEvidence = async (item: QualityItem) => {
+    if (item.kind === 'chat' && item.parent_id) { onChatEvidence(item.parent_id, item.evidence_id); return; }
+    if (item.kind === 'research') { onResearchEvidence(item.evidence_id); return; }
+    try {
+      const detail = await api<Plan | Run>(`/${item.kind === 'plan' ? 'plans' : 'runs'}/${item.evidence_id}`);
+      setQualityEvidence({ item, detail });
+    } catch (error) { setNotice((error as Error).message); }
+  };
+
   return <div className="section-stack"><h2>Aktivität und Werkzeuge</h2>
     <p className="intro">Jede Aktion hat ein festes Schema und einen sichtbaren Status. Webseiten gelten als fremde Daten und können Jarvis keine neuen Rechte geben.</p>
     {notice && <p className="notice" role="status">{notice}</p>}
+    <QualityOverview data={quality} onEvidence={(item) => void openEvidence(item)} />
+    {qualityEvidence && <section className="card" aria-label="Originalbeleg"><div className="card-heading"><h3>Originalbeleg: {qualityEvidence.item.label}</h3><button onClick={() => setQualityEvidence(null)}>Schließen</button></div>
+      <p>Status: {qualityEvidence.detail.status} · Kennung: {qualityEvidence.item.evidence_id}</p>
+      <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(qualityEvidence.detail, null, 2)}</pre>
+    </section>}
     <section className="card"><h3>Mehrschrittauftrag planen</h3><p>Das Modell schlägt nur registrierte Werkzeugschritte vor. Vor dem Start kannst du Namen, Argumente und Wirkungen prüfen. Schreibaktionen warten zusätzlich auf eine Freigabe.</p>
       <div className="memory-form"><textarea aria-label="Auftragsziel" value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="z. B. Lies https://example.com und speichere eine kurze Notiz dazu" />
       {provider === 'openrouter' && <label><input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} /> Auftragsziel, aktive Planregel und freigegebene Dateinamen an OpenRouter senden</label>}
       <button className="primary" disabled={busy || !objective.trim() || (provider === 'openrouter' && !allowCloud)} onClick={() => void propose()}>{busy ? 'Plant…' : 'Plan vorschlagen'}</button></div>
-      <div className="item-list">{plans.map((plan) => <div key={plan.id} className="plan-card"><strong>{plan.objective}</strong><small>Status: {plan.status} · Schritt {Math.min(plan.current_index + 1, plan.steps.length)}/{plan.steps.length} · {plan.rule_version != null ? `Planregel v${plan.rule_version}` : 'alter Plan ohne Regelbeleg'}</small>
+      <div className="item-list">{plans.map((plan) => <div key={plan.id} id={`plan-evidence-${plan.id}`} className="plan-card"><strong>{plan.objective}</strong><small>Status: {plan.status} · Schritt {Math.min(plan.current_index + 1, plan.steps.length)}/{plan.steps.length} · {plan.rule_version != null ? `Planregel v${plan.rule_version}` : 'alter Plan ohne Regelbeleg'}</small>
         <small>Modellvorschlag: {plan.usage ? `${plan.usage_duration_seconds != null ? `${plan.usage_duration_seconds.toFixed(2)} s` : 'Dauer offen'} · ${plan.usage.input_tokens ?? '?'} Eingabe- und ${plan.usage.output_tokens ?? '?'} Ausgabetokens · ${plan.usage.cost_kind === 'local_no_api_charge' ? 'keine API-Gebühr (lokal)' : `${plan.usage.cost_usd.toFixed(5)} USD (${plan.usage.cost_kind})`}` : 'kein eindeutiger Modellbeleg'}</small>
         <ol>{plan.steps.map((step, index) => { const evidence = runs.find((run) => run.id === step.run_id); return <li key={index}><strong>{step.tool_name}</strong> · {step.effect} · {step.status}{step.display_path && <small>Vorgeschlagene Datei: {step.display_path}</small>}<pre>{JSON.stringify(step.args, null, 2)}</pre>{evidence && <small>Werkzeugbeleg: {evidence.error || evidence.result_json?.slice(0, 1000) || evidence.status}</small>}</li>; })}</ol>
         {plan.error && <p>{plan.error}</p>}
@@ -266,7 +299,7 @@ export default function ActivityView({ provider, visible }: { provider: string; 
       {toolName === 'cad_holder_build' && <p className="muted">Dieser Pilot baut einen rechteckigen Halter mit genau zwei Bohrungen. Die Maße werden geprüft; die Beschreibung ist ein Beleg und erzeugt keinen freien Python-Code. Die Vorschau entsteht lokal mit Ollama-freier CAD-Laufzeit. STEP oder STL folgen erst nach Prüfung und eigener Freigabe.</p>}
       <button className="primary" onClick={() => void run()} disabled={busy || (toolName === 'open_file' && !fileId) || (toolName === 'save_note' && (!noteTitle.trim() || !noteContent.trim())) || (toolName === 'cad_holder_build' && (!cadDescription.trim() || [cadWidth, cadDepth, cadThickness, cadHoleDiameter, cadHoleSpacing].some((value) => !value || Number(value) <= 0)))}>{busy ? 'Läuft…' : toolName === 'browser_dynamic_read' ? 'Im Browser lesen' : toolName === 'cad_holder_build' ? 'CAD-Vorschau erstellen' : 'Ausführen'}</button>
     </div></section>
-    <section className="card"><h3>Aufträge</h3><p>„succeeded“ bestätigt nur die Werkzeugausführung. Den tatsächlichen Erfolg bewertest du anhand des Ergebnisses. Modellkosten sind keinem einzelnen Werkzeuglauf eindeutig zugeordnet.</p><div className="item-list">{runs.map((item) => <div key={item.id} className="item-row"><div><strong>{item.tool_name} · {item.status}{item.cancel_requested ? ' · Stopp angefordert' : ''}</strong><small>{new Date(item.created_at).toLocaleString('de-DE')} · Lauf-ID {item.id}</small>{item.tool_name === 'browser_dynamic_read' && item.status === 'succeeded' && item.result_json ? <DynamicReadResult run={item} /> : item.tool_name === 'cad_holder_build' && item.status === 'succeeded' && item.result_json ? <CadResult run={item} onExport={(result, format) => void exportCad(result, format)} acting={acting} /> : item.tool_name === 'cad_holder_export' && item.status === 'succeeded' && item.result_json ? <p><a href={`/api/runs/${item.id}/cad-file`} download>Freigegebene CAD-Datei herunterladen</a> · {JSON.parse(item.result_json).format.toUpperCase()} · Vorlage {JSON.parse(item.result_json).template} · SHA-256 {JSON.parse(item.result_json).file_sha256}</p> : <p>{item.error || (item.result_json ? JSON.stringify(JSON.parse(item.result_json)) : item.args_json)}</p>}<small>Werkzeugdauer: {item.execution_seconds === null ? 'kein abgeschlossener Werkzeugbeleg' : `${item.execution_seconds.toFixed(2)} s`} · Modellkosten: nicht zugeordnet{item.evaluation ? ` · Bewertung: ${item.evaluation.verdict}` : ''}</small></div><div className="item-actions">{item.status === 'waiting_approval' && <><button disabled={acting.includes(`run:${item.id}`)} onClick={() => void decide(item, true)}>Freigeben</button><button disabled={acting.includes(`run:${item.id}`)} onClick={() => void decide(item, false)}>Ablehnen</button></>}{['queued', 'running'].includes(item.status) && !item.cancel_requested && <button disabled={acting.includes(`run:${item.id}`)} onClick={() => void cancel(item)}>Stoppen</button>}{['succeeded', 'failed', 'cancelled', 'interrupted'].includes(item.status) && <button onClick={() => selectEvaluation(item)}>Ergebnis bewerten</button>}</div></div>)}</div></section>
+    <section className="card"><h3>Aufträge</h3><p>„succeeded“ bestätigt nur die Werkzeugausführung. Den tatsächlichen Erfolg bewertest du anhand des Ergebnisses. Modellkosten sind keinem einzelnen Werkzeuglauf eindeutig zugeordnet.</p><div className="item-list">{runs.map((item) => <div key={item.id} id={`tool-evidence-${item.id}`} className="item-row"><div><strong>{item.tool_name} · {item.status}{item.cancel_requested ? ' · Stopp angefordert' : ''}</strong><small>{new Date(item.created_at).toLocaleString('de-DE')} · Lauf-ID {item.id}</small>{item.tool_name === 'browser_dynamic_read' && item.status === 'succeeded' && item.result_json ? <DynamicReadResult run={item} /> : item.tool_name === 'cad_holder_build' && item.status === 'succeeded' && item.result_json ? <CadResult run={item} onExport={(result, format) => void exportCad(result, format)} acting={acting} /> : item.tool_name === 'cad_holder_export' && item.status === 'succeeded' && item.result_json ? <p><a href={`/api/runs/${item.id}/cad-file`} download>Freigegebene CAD-Datei herunterladen</a> · {JSON.parse(item.result_json).format.toUpperCase()} · Vorlage {JSON.parse(item.result_json).template} · SHA-256 {JSON.parse(item.result_json).file_sha256}</p> : <p>{item.error || (item.result_json ? JSON.stringify(JSON.parse(item.result_json)) : item.args_json)}</p>}<small>Werkzeugdauer: {item.execution_seconds === null ? 'kein abgeschlossener Werkzeugbeleg' : `${item.execution_seconds.toFixed(2)} s`} · Modellkosten: nicht zugeordnet{item.evaluation ? ` · Bewertung: ${item.evaluation.verdict}` : ''}</small></div><div className="item-actions">{item.status === 'waiting_approval' && <><button disabled={acting.includes(`run:${item.id}`)} onClick={() => void decide(item, true)}>Freigeben</button><button disabled={acting.includes(`run:${item.id}`)} onClick={() => void decide(item, false)}>Ablehnen</button></>}{['queued', 'running'].includes(item.status) && !item.cancel_requested && <button disabled={acting.includes(`run:${item.id}`)} onClick={() => void cancel(item)}>Stoppen</button>}{['succeeded', 'failed', 'cancelled', 'interrupted'].includes(item.status) && <button onClick={() => selectEvaluation(item)}>Ergebnis bewerten</button>}</div></div>)}</div></section>
     {selectedRunId && <section className="card"><h3>Auftragsergebnis bewerten</h3><p>Die Bewertung ergänzt den gespeicherten Lauf; sie ändert weder Werkzeugstatus noch Ergebnis.</p><div className="memory-form"><label>Aufgabenerfolg <select aria-label="Aufgabenerfolg" value={verdict} onChange={(event) => setVerdict(event.target.value)}><option value="achieved">Ziel erreicht</option><option value="partial">Teilweise erreicht</option><option value="failed">Ziel verfehlt</option><option value="unclear">Unklar</option></select></label><textarea aria-label="Begründung der Bewertung" maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Welcher Ergebnisbeleg stützt die Bewertung?" /><label><input type="checkbox" checked={regressionCase} onChange={(event) => setRegressionCase(event.target.checked)} /> Als Fehler-Testfall sichern</label>{regressionCase && <textarea aria-label="Erwartetes Ergebnis im Testfall" maxLength={500} value={expectedResult} onChange={(event) => setExpectedResult(event.target.value)} placeholder="Was sollte bei denselben Eingaben passieren?" />}<button className="primary" disabled={!reason.trim() || (regressionCase && (!['partial', 'failed'].includes(verdict) || !expectedResult.trim())) || acting.includes(`evaluation:${selectedRunId}`)} onClick={() => void saveEvaluation()}>Bewertung speichern</button></div></section>}
     <section className="card"><h3>Gesicherte Fehler-Testfälle</h3><p>Diese Fälle enthalten Werkzeug, Eingaben, beobachteten Status und erwartetes Ergebnis. Sie werden nicht automatisch erneut ausgeführt.</p><div className="item-list">{cases.length ? cases.map((item) => <div key={item.run_id} className="item-row"><div><strong>{item.tool_name} · {item.status}</strong><small>Lauf-ID {item.run_id}</small><p>Eingaben: {item.args_json}</p><p>Beobachtet: {item.error || item.result_json || 'kein Werkzeugergebnis'}</p><p>Bewertung: {item.reason}</p><p>Erwartet: {item.expected_result}</p></div></div>) : <p>Keine Fehler-Testfälle gespeichert.</p>}</div></section>
     <section className="card"><h3>Protokoll</h3><div className="item-list">{activity.slice(0, 50).map((item) => <div key={item.id} className="item-row"><div><strong>{item.kind}</strong><small>{new Date(item.created_at).toLocaleString('de-DE')}</small><p>{item.detail}</p></div></div>)}</div></section>

@@ -217,7 +217,7 @@ export default function App() {
       {timeModelOpened && <div hidden={page !== 'time_model'}><TimeModelView visible={page === 'time_model'} /></div>}
       {eveningPlansOpened && <div hidden={page !== 'evening_plans'}><EveningPlanView visible={page === 'evening_plans'} /></div>}
       {workStatesOpened && <div hidden={page !== 'work_states'}><WorkStateView visible={page === 'work_states'} onTasks={() => navigate('tasks')} onResearch={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
-      {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} /></div>}
+      {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} onChatEvidence={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} onResearchEvidence={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}

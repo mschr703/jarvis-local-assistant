@@ -88,6 +88,7 @@ from jarvis.provider import (
     make_provider,
     openrouter_api_key,
 )
+from jarvis.quality import overview as quality_overview
 from jarvis.quick_capture import QuickCaptureInput, QuickCaptureStore
 from jarvis.research import (
     MAX_SOURCES,
@@ -997,6 +998,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/usage")
     async def usage_view():
         return db.list_usage()
+
+    @app.get("/quality/overview")
+    async def quality_view():
+        return await run_in_threadpool(quality_overview, db)
 
     @app.get("/chats")
     async def chats(q: str = "", archived: bool = False):

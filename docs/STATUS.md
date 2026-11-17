@@ -1,6 +1,11 @@
 # Projektstatus
 
-Stand: 17.11.2026, 19:15 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 23:21 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+
+## In Arbeit (lokal, noch nicht veröffentlicht)
+
+- A47a: Eine gemeinsame Qualitätsübersicht für gespeicherte Chat-, Plan-, Werkzeug- und Recherchebewertungen ist implementiert. Sie unterscheidet unbewertete Einträge, gemeldete und geschätzte OpenRouter-Kosten, gemessene Dauer und Fehlerfälle; Originalbelege lassen sich öffnen. Ein im Edge-Test entdeckter Polling-Fehler bei langsamen API-Antworten wurde behoben. Die Backend-Gesamtsuite mit 524 bestandenen Tests und zwei erwarteten Windows-Symlink-Skips, 23 Frontendtests, Ruff, Build und ein vollständiger Edge-Klickpfad mit vier Belegarten und mobiler Breite bestanden. Public-Audit, Commit, Push, CI und Trello-Abschluss folgen als nächste Schritte.
+- A40a ist in Trello als nächster begrenzter Schritt vorbereitet: ein rein lokaler Überblick über ausdrücklich freigegebene Codeprojekte. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 
