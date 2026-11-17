@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026. Dieses Dokument beschreibt den veröffentlichten Quellstand. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 17:57 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -11,16 +11,16 @@ Stand: 17.11.2026. Dieses Dokument beschreibt den veröffentlichten Quellstand. 
 
 ## Zuletzt geprüft
 
-- Nach der OpenRouter-Tresoranbindung: 516 Backendtests bestanden, zwei Windows-Symlink-Tests übersprungen; zwölf Frontendtests, TypeScript/Vite-Build und Ruff bestanden.
+- Die erste öffentliche Version wurde als elternloser Commit `aa1092c` auf `main` veröffentlicht; der frühere lokale Verlauf wurde nicht übertragen. Das Repository ist ohne Anmeldung als öffentlich abrufbar. Der korrigierte große Edge-Klicktest liegt in Commit `add1611`, ebenfalls gepusht.
 - Nach Einführung des einstellbaren Profilnamens und des Windows-Einrichtungshelfers: vollständige Backend-Regression mit 517 bestandenen Tests und zwei Windows-Symlink-Skips, zwölf Frontendtests, Ruff und TypeScript/Vite-Build bestanden. Der Einrichtungshelfer lief erfolgreich mit `-SkipModelDownload`; eine vorhandene lokale `.env` wurde nicht überschrieben. Die erneut ausgeführten 24 Konfigurations-/API-Tests bestanden. `scripts/smoke_named_style_ui.py` und `scripts/smoke_public_profile_ui.py` bestanden mit Edge/Ollama, inklusive 390-Pixel-Ansicht und gespeicherter Umbenennung. `scripts/e2e_local.py` bestand mit Chat, Entwurf, Wissen, Aufgabe, öffentlichem Browserabruf und Schema-52-Restore; `scripts/smoke_stop.py` bestätigte Health/UI und freie Ports nach dem Stopp. Ein erster Stil-Klicktest musste nach Start des noch nicht laufenden Ollama-Dienstes wiederholt werden und bestand dann.
 - Der echte Edge-Cloud-Test mit temporärem Tresor prüfte bewusste Freigabe, Antwort, Kostenbeleg, Reload, mobile Breite und lokales Entziehen. Der Schlüssel und Nutzerdaten sind nicht Bestandteil des Repositories.
+- Ein frischer GitHub-Clone hatte genau einen Commit und keine `.env` oder Datenbank. `scripts/setup.ps1 -SkipModelDownload` installierte daraus 108 Python- und 103 Frontend-Pakete und erstellte die lokale `.env`. Produktionsbuild, 24 gezielte API-/Konfigurationstests, `scripts/e2e_local.py` mit echtem Ollama/Schema-52-Restore und `scripts/smoke_stop.py` mit freien Ports bestanden. Der große Edge-Klicktest traf zunächst einen veralteten Selektor, der alle Chat-Buttons statt Gesprächseinträge zählte; nach Korrektur bestand er vollständig mit Chat, Dokumenten, Entwurf, Erinnerung, Werkzeugen, Freigaben und Mobilansicht. `scripts/audit_public.py` meldete null Funde in 278 veröffentlichbaren Dateien; der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel ergab ebenfalls null Funde. Die sechs eingecheckten Screenshots wurden als synthetische UI-Beispiele visuell geprüft.
 
 ## Offene Arbeiten
 
-1. Die öffentliche Quellen- und Dokumentationsprüfung abschließen. `scripts/audit_public.py` meldet aktuell null Funde in 276 veröffentlichbaren Dateien; der verdeckte Vergleich mit dem tatsächlich verwendeten Schlüssel ergab ebenfalls null Funde. Ein neuer Git-Startcommit ohne vorherige lokale Historie wird vorbereitet.
-2. Nach dem ersten Push einen frischen Remote-Clone mit Einrichtung, Start/Stopp und wichtigem Ollama-Klickpfad prüfen. Der Cloud-Klickpfad wurde vor der öffentlichen Bereinigung mit temporärem Tresor erfolgreich geprüft; bei Bedarf nach dem Clone wiederholen.
-3. Öffentliche GitHub-Veröffentlichung und danach ein Push pro abgeschlossenem Feature. Die Trello-Karten P00 (öffentliche Version) und A79b (Tresoranbindung) danach mit dem verifizierten Link aktualisieren.
-4. Weitere Trello-Funktionen anhand der offenen Karten umsetzen und nach jeder Funktion testen, dokumentieren und pushen.
+1. P00 und A79b sind mit den verifizierten öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
+2. Für den öffentlichen Quellstand einen begrenzten Windows-CI-Lauf für Backendtests, Ruff, Frontendtests und Build ergänzen; keine Secrets oder Live-Konten im Workflow verwenden.
+3. Danach die nächste fachliche Trello-Teilkarte anhand ihrer Voraussetzungen auswählen, implementieren, testen, dokumentieren und nach Abschluss pushen.
 
 ## Betriebsgrenzen
 
