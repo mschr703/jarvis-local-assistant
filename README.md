@@ -332,6 +332,8 @@ Die verschlüsselten Werte liegen in `%LOCALAPPDATA%\JarvisLocal\vault_credentia
 
 ## Prüfungen
 
+Der öffentliche Quellstand wird bei Push und Pull Request in [Windows CI](.github/workflows/ci.yml) mit gesperrten Abhängigkeiten, Ruff, Backend- und Frontendtests, Produktionsbuild und dem Datei-Scan geprüft. Der Workflow verwendet Standard-Runner ohne OpenRouter-Key, lokale Daten oder Live-Ollama; echte Modell- und Edge-Klickpfade bleiben separate lokale Prüfungen.
+
 ```powershell
 python -m uv run --project backend pytest -q backend/tests
 python -m uv run --project backend ruff check backend
