@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026, 17:57 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 18:11 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -8,6 +8,7 @@ Stand: 17.11.2026, 17:57 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - Zusätzliche lokale Funktionen: versionierte Chat-/Entwurfs-/Planregeln, Schreibproben und Stilprofile, Essays, Lernmodus, bewusst gepflegte Erinnerungen, Projekt-/Dateigraph, Recherche, begrenzte Sprach- und CAD-Integrationen. Einige Integrationen brauchen eine gesonderte Installation; siehe [README](../README.md).
 - Optionaler OpenRouter-Chat mit Freigabe je Anfrage, Modellpreisprüfung, Tagesbudget und Kostenbeleg. Ein echter kleiner Modellaufruf und ein Edge-Klickpfad mit Antwort, Reload und Kostenbeleg wurden am 17.11.2026 geprüft. Der Cloud-Schlüssel kann als Prozessvariable oder benutzergebunden verschlüsselt im Windows-Tresor liegen; Standard bleibt Ollama.
 - Ein persönliches Schreibprofil mit eigenen Beispielen. Der Anzeigename ist einstellbar und standardmäßig „Mein Stil“. Die technische Kennung `Maxim` bleibt für die Kompatibilität älterer lokaler Daten und API-Aufrufe erhalten.
+- Beantwortete, belegte Lernrunden können nach ausdrücklicher Prüfung als lokale UTF-8-CSV-Lernkarten mit Quellenzitat und SHA-256 exportiert werden. Gleiche Frage und gleicher Quellenhash ergeben nur eine Karte; die Ansicht lädt die 50 zuletzt geänderten Runden.
 
 ## Zuletzt geprüft
 
@@ -16,11 +17,14 @@ Stand: 17.11.2026, 17:57 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - Der echte Edge-Cloud-Test mit temporärem Tresor prüfte bewusste Freigabe, Antwort, Kostenbeleg, Reload, mobile Breite und lokales Entziehen. Der Schlüssel und Nutzerdaten sind nicht Bestandteil des Repositories.
 - Ein frischer GitHub-Clone hatte genau einen Commit und keine `.env` oder Datenbank. `scripts/setup.ps1 -SkipModelDownload` installierte daraus 108 Python- und 103 Frontend-Pakete und erstellte die lokale `.env`. Produktionsbuild, 24 gezielte API-/Konfigurationstests, `scripts/e2e_local.py` mit echtem Ollama/Schema-52-Restore und `scripts/smoke_stop.py` mit freien Ports bestanden. Der große Edge-Klicktest traf zunächst einen veralteten Selektor, der alle Chat-Buttons statt Gesprächseinträge zählte; nach Korrektur bestand er vollständig mit Chat, Dokumenten, Entwurf, Erinnerung, Werkzeugen, Freigaben und Mobilansicht. `scripts/audit_public.py` meldete null Funde in 278 veröffentlichbaren Dateien; der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel ergab ebenfalls null Funde. Die sechs eingecheckten Screenshots wurden als synthetische UI-Beispiele visuell geprüft.
 
+- Der Windows-CI-Workflow prüft öffentliche Pushes und Pull Requests ohne Secrets. Im zweiten GitHub-Lauf 44132746512 ist der Frontend-Job erfolgreich; der vollständige Backend-Job läuft noch. Der erste Lauf fand eine Ruff-Importsortierung im neuen öffentlichen Audit-Skript; Commit `daf366e` korrigierte sie.
+- A36a: 16 Frontendtests, TypeScript/Vite-Build, Ruff und lokaler Public-Audit (281 Dateien, null Funde) bestanden. `scripts/smoke_learning_ui.py` erzeugte mit echtem Ollama eine belegte Frage, korrigierte und beantwortete sie, lud die CSV in Edge herunter, prüfte Frage/Pfad/Hash/Zitat und bestätigte die 390-Pixel-Ansicht ohne Überlauf.
+
 ## Offene Arbeiten
 
 1. P00 und A79b sind mit den verifizierten öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. Für den öffentlichen Quellstand einen begrenzten Windows-CI-Lauf für Backendtests, Ruff, Frontendtests und Build ergänzen; keine Secrets oder Live-Konten im Workflow verwenden.
-3. Danach die nächste fachliche Trello-Teilkarte anhand ihrer Voraussetzungen auswählen, implementieren, testen, dokumentieren und nach Abschluss pushen.
+2. P01: zweiten GitHub-CI-Lauf bis zum Backend-Ergebnis verfolgen und Fehler beheben; erst nach erfolgreichem Lauf als erledigt markieren.
+3. A36a: Lernkarten-CSV nach dem lokalen Edge/Ollama-Nachweis separat veröffentlichen und den anschließenden CI-Lauf prüfen.
 
 ## Betriebsgrenzen
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { Source } from './DocumentView';
+import { learningCardsCsv } from './learningCards';
 
 type Evaluation = 'correct' | 'partial' | 'incorrect' | 'uncertain' | null;
 type LearningSession = {
@@ -29,9 +30,11 @@ export default function LearningView({ visible, sources, configured, provider, o
   const [showCorrection, setShowCorrection] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [reviewedForExport, setReviewedForExport] = useState(false);
   const request = useRef(0);
   const active = sessions.find((item) => item.id === activeId) ?? null;
   const selected = sources.slice(0, 3);
+  const exportData = learningCardsCsv(sessions);
 
   useEffect(() => {
     if (!visible) return;
@@ -39,6 +42,7 @@ export default function LearningView({ visible, sources, configured, provider, o
     void api<LearningSession[]>('/learning/sessions').then((items) => {
       if (current !== request.current) return;
       setSessions(items);
+      setReviewedForExport(false);
       setActiveId((previous) => items.some((item) => item.id === previous)
         ? previous : items[0]?.id ?? '');
     }).catch((error: Error) => { if (current === request.current) setNotice(error.message); });
@@ -56,6 +60,7 @@ export default function LearningView({ visible, sources, configured, provider, o
 
   const replace = (item: LearningSession) => {
     setSessions((current) => [item, ...current.filter((old) => old.id !== item.id)]);
+    setReviewedForExport(false);
     setActiveId(item.id);
   };
   const create = async () => {
@@ -101,9 +106,24 @@ export default function LearningView({ visible, sources, configured, provider, o
       await api(`/learning/sessions/${active.id}`, { method: 'DELETE' });
       const remaining = sessions.filter((item) => item.id !== active.id);
       setSessions(remaining); setActiveId(remaining[0]?.id ?? '');
+      setReviewedForExport(false);
       setNotice('Lernrunde gelöscht. Die Quelldatei bleibt erhalten.');
     } catch (error) { setNotice((error as Error).message); }
     finally { setBusy(false); }
+  };
+
+  const downloadCards = () => {
+    if (!reviewedForExport || exportData.count === 0) return;
+    const blob = new Blob([exportData.csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `jarvis-lernkarten-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNotice(`${exportData.count} Lernkarte(n) als CSV heruntergeladen.`);
   };
 
   return <div className="stack">
@@ -127,6 +147,16 @@ export default function LearningView({ visible, sources, configured, provider, o
           <button key={item.id} disabled={busy} onClick={() => setActiveId(item.id)}>
             {item.topic} · {item.user_answer === null ? 'Offene Frage' : evaluationLabel[item.evaluation ?? 'uncertain']}
           </button>)}</div>}
+    </section>
+    <section className="card"><h3>Lernkarten exportieren</h3>
+      <p>Exportiere beantwortete Lernrunden mit Musterantwort, Quellenzitat, Dateipfad, Seite, Hash und Fundstellen-ID. Der Beleg ist ein Snapshot der damaligen Quelle. Prüfe Frage, Antwort und Beleg vor der Weitergabe der Datei. Der Export bleibt auf diesem Gerät.</p>
+      <p className="muted">{exportData.count} Karte(n) bereit{exportData.duplicates > 0
+        ? ` · ${exportData.duplicates} doppelte Frage(n) ausgelassen` : ''}.</p>
+      <label><input type="checkbox" checked={reviewedForExport}
+        onChange={(event) => setReviewedForExport(event.target.checked)}
+        disabled={exportData.count === 0} /> Ich habe die Inhalte und Quellen vor dem Export geprüft.</label>
+      <button onClick={downloadCards} disabled={exportData.count === 0 || !reviewedForExport}>
+        CSV herunterladen</button>
     </section>
     {active && <section className="card"><h3>Frage und Antwort</h3>
       <p><strong>{active.question}</strong></p>

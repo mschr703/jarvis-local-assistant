@@ -1,5 +1,6 @@
 """Real Edge and Ollama learning round with a local source and revision."""
 
+import csv
 import json
 import os
 import subprocess
@@ -42,7 +43,8 @@ def main() -> None:
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(channel="msedge", headless=True)
                     try:
-                        page = browser.new_page(viewport={"width": 390, "height": 844})
+                        page = browser.new_page(viewport={"width": 390, "height": 844},
+                                                accept_downloads=True)
                         page.set_default_timeout(180_000)
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded")
                         page.get_by_role("button", name="Dokumente", exact=True).click()
@@ -78,10 +80,23 @@ def main() -> None:
                         page.get_by_role("button", name="Lernen", exact=True).click()
                         expect(page.get_by_label("Meine Lernantwort")).to_have_value(
                             "Pflanzen nutzen Wasser, Kohlendioxid und Sonnenlicht.")
+                        expect(page.get_by_role("button", name="CSV herunterladen")).to_be_disabled()
+                        page.get_by_label("Ich habe die Inhalte und Quellen vor dem Export geprüft.").check()
+                        with page.expect_download() as download_info:
+                            page.get_by_role("button", name="CSV herunterladen").click()
+                        download = download_info.value
+                        assert download.suggested_filename.startswith("jarvis-lernkarten-")
+                        with download.path().open(encoding="utf-8-sig", newline="") as exported:
+                            rows = list(csv.DictReader(exported, delimiter=";"))
+                        assert len(rows) == 1, rows
+                        assert rows[0]["Frage"] == "Was beschreibt die Quelle zur Photosynthese?"
+                        assert rows[0]["Quelldatei"] == str(sources / "biologie.txt")
+                        assert rows[0]["SHA-256"] == item["source"]["sha256"]
+                        assert rows[0]["Quellenzitat"] == item["evidence_quote"]
                         assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"ollama": True, "source_quote": True,
                                           "question_correction": True, "answer_reload": True,
-                                          "mobile_width": "fits"}))
+                                          "csv_export": True, "mobile_width": "fits"}))
                     finally:
                         browser.close()
             finally:
