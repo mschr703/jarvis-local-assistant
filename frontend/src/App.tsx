@@ -16,17 +16,19 @@ import SkillView from './SkillView';
 import LearningView from './LearningView';
 import MemoryReviewView from './MemoryReviewView';
 import FileGraphView from './FileGraphView';
+import CodeProjectView from './CodeProjectView';
 
-type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'file_graph' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
+type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
 type QuickCapture = { text: string; files: string[]; notice: string };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
-const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['file_graph', 'Datei-Graph'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
+const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
 
 export default function App() {
   const [page, setPage] = useState<Page>('status');
   const [documentsOpened, setDocumentsOpened] = useState(false);
   const [fileGraphOpened, setFileGraphOpened] = useState(false);
+  const [codeProjectsOpened, setCodeProjectsOpened] = useState(false);
   const [learningOpened, setLearningOpened] = useState(false);
   const [memoryReviewOpened, setMemoryReviewOpened] = useState(false);
   const [requestedChatSource, setRequestedChatSource] = useState<{ chatId: string; messageId: string } | null>(null);
@@ -88,6 +90,7 @@ export default function App() {
   const navigate = (target: Page) => {
     if (target === 'documents') setDocumentsOpened(true);
     if (target === 'file_graph') setFileGraphOpened(true);
+    if (target === 'code_projects') setCodeProjectsOpened(true);
     if (target === 'learning') setLearningOpened(true);
     if (target === 'memory_review') setMemoryReviewOpened(true);
     if (target === 'tasks') setTasksOpened(true);
@@ -194,6 +197,7 @@ export default function App() {
       {page === 'status' ? null : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} /> :
         page === 'documents' ? null :
         page === 'file_graph' ? null :
+        page === 'code_projects' ? null :
         page === 'learning' ? null :
         page === 'memory_review' ? null :
         page === 'chat_rules' ? null :
@@ -210,6 +214,7 @@ export default function App() {
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
+      {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
       {learningOpened && <div hidden={page !== 'learning'}><LearningView visible={page === 'learning'} sources={selectedSources} configured={modelReady} provider={health?.provider || 'ollama'} onDocuments={() => navigate('documents')} /></div>}
       {memoryReviewOpened && <div hidden={page !== 'memory_review'}><MemoryReviewView visible={page === 'memory_review'} configured={modelReady} provider={health?.provider || 'ollama'} onChat={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} /></div>}
       {researchOpened && <div hidden={page !== 'research'}><ResearchView visible={page === 'research'} configured={modelReady} provider={health?.provider || 'ollama'} requestedReportId={requestedResearchReport} onReportLoaded={() => setRequestedResearchReport('')} suggestedQuestion={suggestedResearchQuestion} onSuggestionTaken={() => setSuggestedResearchQuestion('')} /></div>}

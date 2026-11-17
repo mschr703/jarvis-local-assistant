@@ -35,6 +35,7 @@ from jarvis.chat_rules import (
 )
 from jarvis.chat_suggestions import parse_suggestions
 from jarvis.chat_suggestions import prompt as suggestion_prompt
+from jarvis.code_projects import CodeProjectStore
 from jarvis.config import Settings, load_settings, valid_personal_style_label
 from jarvis.db import Database
 from jarvis.desktop import register_desktop_tools
@@ -665,6 +666,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for key, value in persisted.items():
             setattr(config, key, value)
     documents = DocumentStore(db)
+    code_projects = CodeProjectStore(documents)
     markdown = MarkdownNotes(db, documents, secrets.token_bytes(32))
     drafts = DraftStore(db, config.data_dir)
     learning = LearningStore(db)
@@ -1487,6 +1489,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def folder_index(folder_id: str):
         try:
             return await run_in_threadpool(documents.index_folder, folder_id)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/code-projects/{folder_id}/overview")
+    async def code_project_overview(folder_id: str):
+        try:
+            return await run_in_threadpool(code_projects.overview, folder_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/code-projects/{folder_id}/file")
+    async def code_project_file(folder_id: str, path: str):
+        try:
+            return await run_in_threadpool(code_projects.read_file, folder_id, path)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
         except (ValueError, OSError) as exc:
             raise HTTPException(422, str(exc)) from exc
 

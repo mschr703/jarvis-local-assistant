@@ -1,10 +1,11 @@
 # Projektstatus
 
-Stand: 17.11.2026, 23:34 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 23:52 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A40a: Ein rein lokaler Überblick über ausdrücklich freigegebene Codeprojekte ist im getrennten Arbeitsbaum implementiert. Der Edge-Klicktest prüft noch einen mobilen Überlauf; danach folgen Regression, Public-Audit, Commit, Push, CI und Trello-Abschluss. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A40a: Der rein lokale Überblick über ausdrücklich freigegebene Codeprojekte ist implementiert und in den Hauptarbeitsbaum übernommen. Der Edge-Klickpfad mit Dateivorschau und 390-Pixel-Ansicht bestand auch nach der Übernahme. Der Scanner begrenzt Dateien und Ordner und sperrt versteckte Pfade (auch Windows-Attribut), Symlinks/Junctions und Pfadausbrüche. Die vollständige Backend-Regression vor den letzten zwei Windows-Grenztests bestand mit 525 Tests und zwei erwarteten Skips; danach bestanden alle vier gezielten Codeprojekt-Tests. Im Hauptarbeitsbaum bestanden die vier Grenztests und der Qualitätsübersicht-Test erneut. 23 Frontendtests, Build, Ruff und Public-Audit bestanden. Push, CI und Trello-Abschluss folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A71a ist in Trello als nächste Arbeit angelegt: optionale Modellregeln je Aufgabentyp innerhalb des ausdrücklich gewählten Providers, ohne stillen Cloudwechsel.
 
 ## Nutzbar
 
