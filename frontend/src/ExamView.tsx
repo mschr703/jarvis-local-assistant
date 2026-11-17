@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { examResults, remainingSeconds, selectExamCards,
   type ExamCard, type ExamGrade } from './exam';
+import { examCsv } from './examCsv';
 
 export default function ExamView({ sessions, onExit }: {
   sessions: ExamCard[]; onExit: () => void;
@@ -41,6 +42,20 @@ export default function ExamView({ sessions, onExit }: {
     setDeadline(Date.now() + minutes * 60_000);
     setRemaining(minutes * 60);
     setPhase('running');
+  };
+
+  const downloadReport = () => {
+    if (phase !== 'submitted' || cards.length === 0) return;
+    const blob = new Blob([examCsv(cards, answers, grades)],
+      { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `jarvis-pruefung-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return <div className="stack exam-view">
@@ -100,7 +115,9 @@ export default function ExamView({ sessions, onExit }: {
           <li key={`${question}-${index}`}>{question}</li>)}</ul> :
           <p>{results.unrated ? 'Bewerte deine Antworten, um Wiederholungsziele zu sehen.'
             : 'Keine Wiederholungsfragen aus dieser Runde.'}</p>}
-        <div className="item-actions"><button onClick={() => setPhase('setup')}>Neue Prüfung</button>
+        <p>Das Protokoll enthält {cards.length} Frage(n), deine Antworten, die Selbsteinschätzung und die Quellen. Prüfe persönliche Dateipfade vor dem Teilen.</p>
+        <div className="item-actions"><button onClick={downloadReport}>Prüfungsprotokoll als CSV herunterladen</button>
+          <button onClick={() => setPhase('setup')}>Neue Prüfung</button>
           <button onClick={onExit}>Zurück zum Lernmodus</button></div>
       </section>}
     </>}

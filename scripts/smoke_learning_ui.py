@@ -100,6 +100,8 @@ def main() -> None:
                         assert page.get_by_text("Musterantwort:").count() == 0
                         assert page.get_by_text("Quellenzitat:").count() == 0
                         assert page.get_by_text(item["source"]["sha256"]).count() == 0
+                        assert page.get_by_role("button", name=
+                            "Prüfungsprotokoll als CSV herunterladen").count() == 0
                         page.get_by_label("Prüfungsantwort 1").fill("Nur Wasser und Licht.")
                         page.get_by_role("button", name="Prüfung abgeben").click()
                         expect(page.get_by_text("Musterantwort:")).to_be_visible()
@@ -107,11 +109,24 @@ def main() -> None:
                         page.get_by_label("Selbsteinschätzung 1").select_option("partial")
                         expect(page.get_by_text("Teilweise: 1", exact=False)).to_be_visible()
                         expect(page.get_by_role("heading", name="Wiederholen")).to_be_visible()
+                        with page.expect_download() as report_info:
+                            page.get_by_role("button", name=
+                                "Prüfungsprotokoll als CSV herunterladen").click()
+                        report = report_info.value
+                        assert report.suggested_filename.startswith("jarvis-pruefung-")
+                        with report.path().open(encoding="utf-8-sig", newline="") as exported:
+                            report_rows = list(csv.DictReader(exported, delimiter=";"))
+                        assert len(report_rows) == 1, report_rows
+                        assert report_rows[0]["Frage"] == "Was beschreibt die Quelle zur Photosynthese?"
+                        assert report_rows[0]["Meine Antwort"] == "Nur Wasser und Licht."
+                        assert report_rows[0]["Bewertung"] == "Teilweise richtig"
+                        assert report_rows[0]["SHA-256"] == item["source"]["sha256"]
                         assert store.get(item["id"])["version"] == version_before_exam
                         assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"ollama": True, "source_quote": True,
                                           "question_correction": True, "answer_reload": True,
                                           "csv_export": True, "exam": True,
+                                          "exam_report": True,
                                           "mobile_width": "fits"}))
                     finally:
                         browser.close()

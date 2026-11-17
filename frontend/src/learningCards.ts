@@ -8,7 +8,7 @@ export type LearningCardSession = {
 
 const HEADER = ['Frage', 'Musterantwort', 'Quellenzitat', 'Quelldatei', 'Seite', 'SHA-256', 'Fundstelle'];
 
-function csvCell(value: string): string {
+export function csvCell(value: string): string {
   const safe = /^\s*[=+\-@]/u.test(value) || /^[\t\r\n]/u.test(value) ? `'${value}` : value;
   return `"${safe.replaceAll('"', '""')}"`;
 }

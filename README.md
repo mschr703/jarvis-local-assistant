@@ -103,6 +103,8 @@ Unter „Lernkarten exportieren“ beantwortete Runden samt Quelle prüfen, das 
 
 „Prüfungsmodus öffnen“ startet aus diesen beantworteten Fragen eine Übungsprüfung mit wählbarer Fragenzahl und Zeitlimit. Während der Bearbeitung bleiben Musterantwort und Quelle verborgen. „Prüfung abgeben“ oder ein abgelaufenes Zeitlimit sperrt die Eingaben und zeigt Musterantwort, Zitat, Fundstelle und Hash. Jede Antwort wird selbst als richtig, teilweise richtig oder falsch eingestuft; leere Antworten zählen als falsch. Die Auswertung nennt Fragen zum Wiederholen. Diese erste Prüfungsstufe läuft nur im aktuellen Tab, speichert keinen Prüfungsverlauf und ruft kein Modell auf.
 
+Nach der Abgabe lässt sich mit „Prüfungsprotokoll als CSV herunterladen“ das aktuelle Ergebnis sichern. Die Datei enthält die eigenen Antworten und Selbsteinschätzungen sowie Musterlösungen und Quellenbelege. Leere Antworten werden als falsch und noch nicht bewertete als solche gekennzeichnet. Der Download bleibt lokal; die Datei kann persönliche Pfade enthalten.
+
 ### Erinnerungen aus Chats bewusst prüfen
 
 Unter „Gedächtnis“ ein nicht archiviertes Gespräch wählen und „Erinnerungen vorschlagen“ klicken. Jarvis gibt höchstens sechs jüngste fertige **eigene** Nachrichten an lokales Ollama und zeigt höchstens drei kurze Vorschläge. Jeder Vorschlag enthält einen wörtlichen Ausschnitt, Nachrichtenzeit und einen Sprung zur Originalstelle im Chat. Der Modelltext ist zunächst nur ein Vorschlag und wird nicht für spätere Antworten verwendet. Bei einem identischen vorhandenen Erinnerungstext erscheint ein Duplikathinweis.
