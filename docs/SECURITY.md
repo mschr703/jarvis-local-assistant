@@ -1,6 +1,10 @@
 # Lokale Sicherheitsgrenzen
 
-Stand: 04.11.2026. Jarvis ist für einen Benutzer auf einem Windows-Laptop gebaut. `scripts/dev.py` bindet Backend und Oberfläche an `127.0.0.1`; diese Konfiguration ist keine Freigabe für LAN oder Internet.
+Stand: 17.11.2026. Jarvis ist für einen Benutzer auf einem Windows-Laptop gebaut. `scripts/dev.py` bindet Backend und Oberfläche an `127.0.0.1`; diese Konfiguration ist keine Freigabe für LAN oder Internet.
+
+## Öffentliche Veröffentlichung
+
+Das öffentliche Repository enthält Quellcode und synthetische Tests. `.gitignore` schließt lokale Umgebungsdateien, Datenbanken, Tresorwerte, Browserprofile, Schlüsseldateien, Logs und Archive für gewöhnliches `git add` aus. `scripts/audit_public.py` prüft auch absichtlich in Git aufgenommene Dateien und die von `HEAD` erreichbare Commit-Historie anhand von Dateiname und typischen Tokenmustern. Der Maintainer-Befehl `scripts/push_public.ps1` führt diesen Scan und `git diff --check` vor dem Push aus; Windows-CI holt die vollständige Historie und wiederholt den Scan. Für eine neue lokale Modell- oder Cloud-Konfiguration gehört der Schlüssel in die ignorierte `.env` oder den DPAPI-Tresor, nie in eine Beispieldatei oder einen Commit.
 
 ## Vertrauensgrenzen
 

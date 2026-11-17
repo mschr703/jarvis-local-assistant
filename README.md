@@ -342,6 +342,8 @@ Die verschlüsselten Werte liegen in `%LOCALAPPDATA%\JarvisLocal\vault_credentia
 
 Der öffentliche Quellstand wird bei Push und Pull Request in [Windows CI](.github/workflows/ci.yml) mit gesperrten Abhängigkeiten, Ruff, Backend- und Frontendtests, Produktionsbuild und dem Datei-Scan geprüft. Der Workflow verwendet Standard-Runner ohne OpenRouter-Key, lokale Daten oder Live-Ollama; echte Modell- und Edge-Klickpfade bleiben separate lokale Prüfungen.
 
+Für einen eigenen öffentlichen Git-Push zuerst die Änderungen committen und `./scripts/push_public.ps1` in PowerShell ausführen. Der Helfer scannt den veröffentlichbaren Baum und alle von `HEAD` erreichbaren Commits nach Schlüsselmustern und privaten Dateinamen, prüft Git-Whitespace und pusht nur bei sauberem Arbeitsbaum `HEAD` nach `origin/main`. So fällt auch ein Secret auf, das in einem früheren Commit wieder gelöscht wurde. Mit `-CheckOnly` laufen die Prüfungen ohne Push bereits während der Bearbeitung. `.gitignore` schließt lokale `.env`-Varianten, Tresor-, Datenbank-, Schlüssel-, Log- und Backup-Dateien aus; `.env.example` ist die öffentliche Vorlage. Das Skript ersetzt keine bewusste Sichtung neuer Dateien vor einem Commit.
+
 ```powershell
 python -m uv run --project backend pytest -q backend/tests
 python -m uv run --project backend ruff check backend
@@ -560,4 +562,4 @@ Der Jarvis-Quellcode steht unter der [MIT-Lizenz](LICENSE). Optional installiert
 
 ## Vor einem öffentlichen Push
 
-`.env`, Datenbank, Exporte und lokale Schlüsseldateien sind ausgeschlossen. `python scripts/audit_public.py` prüft alle Git-Dateien und nicht ignorierte neue Dateien auf bekannte Secret-Muster und lokale persönliche Kennzeichen. Für einen bekannten Schlüssel kann `python scripts/audit_public.py --check-stdin-secret` zusätzlich einen verdeckten Vergleich ausführen. Der Scan ersetzt keine manuelle Prüfung neuer Dateien und Bilder. Neue Funktionen mit `python -m uv run --project backend pytest backend/tests -q`, `pnpm --dir frontend test` und `pnpm --dir frontend build` prüfen.
+`.env`, Datenbank, Exporte und lokale Schlüsseldateien sind ausgeschlossen. Der oben beschriebene Push-Helfer prüft auch die erreichbare Commit-Historie; `python scripts/audit_public.py --check-stdin-secret` erlaubt zusätzlich einen verdeckten Vergleich mit einem bekannten Schlüssel. Vor dem Commit neue Dateien und Bilder selbst ansehen. Neue Funktionen mit `python -m uv run --project backend pytest backend/tests -q`, `pnpm --dir frontend test` und `pnpm --dir frontend build` prüfen.

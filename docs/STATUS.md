@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 17.11.2026, 18:49 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 17.11.2026, 18:54 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öffentlichen Quellstand](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -24,13 +24,14 @@ Stand: 17.11.2026, 18:49 Uhr Europe/Berlin. Dieses Dokument beschreibt den [öff
 - A36a: 16 Frontendtests, TypeScript/Vite-Build, Ruff und lokaler Public-Audit (281 Dateien, null Funde) bestanden. `scripts/smoke_learning_ui.py` erzeugte mit echtem Ollama eine belegte Frage, korrigierte und beantwortete sie, lud die CSV in Edge herunter, prüfte Frage/Pfad/Hash/Zitat und bestätigte die 390-Pixel-Ansicht ohne Überlauf. Commit `fd6d287` ist veröffentlicht; GitHub-Lauf [44134315243](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44134315243) ist vollständig grün. Die Trello-Karte ist erledigt.
 - A37a: 19 Frontendtests, TypeScript/Vite-Build und echter Edge/Ollama-Pfad mit belegter Frage, abgegebener Prüfung, Selbsteinschätzung und 390-Pixel-Ansicht bestanden. Der Prüfungsablauf änderte die gespeicherte Lernrunde nicht. Commit `265f1e5` ist öffentlich; GitHub-Lauf [44135680615](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44135680615) ist vollständig grün. Die Trello-Karte ist erledigt.
 - A37b: 22 Frontendtests, TypeScript/Vite-Build, Ruff und Public-Audit (286 Dateien, null Funde) bestanden. Ein echter Edge/Ollama-Pfad lud das Prüfungsprotokoll herunter und prüfte Frage, Antwort, Bewertung, Hash und mobile Breite. Vor der Abgabe war der Download nicht angeboten. Der vollständige Pfad wurde zweimal erfolgreich ausgeführt. Commit `a6c4fdf` und GitHub-Lauf [44136867444](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44136867444) sind öffentlich und vollständig grün; Trello ist erledigt.
-- A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde.
+- A36b: vollständige Backend-Regression mit 519 bestandenen Tests und zwei Windows-Symlink-Skips, 22 Frontendtests, Build und Ruff bestanden. Der erweiterte Edge/Ollama-Pfad erstellte zwei unterschiedliche belegte Fragen aus derselben Quelle, beantwortete beide und prüfte zwei CSV-Karten sowie die 390-Pixel-Ansicht. Zwei Testläufe hielten zunächst am deaktivierten Button, weil nach dem Reload Quelle beziehungsweise Thema nicht neu gesetzt waren; der korrigierte vollständige Test bestand. Der Public-Audit hatte null Funde. Commit `f60ddad` ist öffentlich; GitHub-Lauf 44141088360 läuft noch.
+- P02: `.gitignore` schließt lokale Umgebungsvarianten, Archive, Schlüssel, Logs, Datenbanken und Tresordateien für gewöhnliches Git-Add aus. Vier synthetische Tests prüfen Dateinamen, Ignore-Regeln, Tokenmuster und ein aus dem aktuellen Baum gelöschtes Secret in der Commit-Historie. `scripts/push_public.ps1 -CheckOnly` bestand; ein Ref-Spec ungleich `HEAD:<Zielbranch>` wurde abgelehnt. Der Audit von 288 veröffentlichbaren Dateien und der erreichbaren HEAD-Historie meldete null Funde, ebenso der verdeckte Vergleich mit dem tatsächlich verwendeten OpenRouter-Schlüssel. Öffentlicher Push/CI dieses neuen Guards stehen noch aus.
 
 ## Offene Arbeiten
 
 1. P00, A79b, P01, A36a, A37a und A37b sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. A36b nach lokalem Nachweis separat pushen und Windows-CI verfolgen; danach Trello abschließen.
-3. P02: lokale Secrets/Backups vor öffentlichen Pushes auch anhand des Dateinamens absichern und dokumentieren; getrennt veröffentlichen.
+2. A36b: GitHub-Lauf 44141088360 bis zum Ergebnis prüfen und Trello nach Erfolg abschließen.
+3. P02: öffentlichen Guard separat committen, mit dem neuen Push-Helfer veröffentlichen und Windows-CI prüfen.
 
 ## Betriebsgrenzen
 
