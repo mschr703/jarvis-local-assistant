@@ -7,7 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PATTERNS = {
     "OpenRouter key": re.compile(rb"sk-or-v1-[A-Za-z0-9_-]{20,}"),
