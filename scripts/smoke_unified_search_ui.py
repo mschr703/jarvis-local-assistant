@@ -1,0 +1,81 @@
+"""Isolated Edge path for local document, memory and project search."""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from playwright.sync_api import expect, sync_playwright
+from smoke_code_project_ui import wait_ui
+from smoke_research_ui import overflow_nodes
+from smoke_ui import ROOT, port_free, stop_test_server
+
+sys.path.insert(0, str(ROOT / "backend"))
+from jarvis.db import Database
+from jarvis.documents import DocumentStore
+from jarvis.tasks import TaskStore
+from jarvis.work_states import WorkStateStore
+
+
+def main() -> None:
+    if not port_free(8765) or not port_free(5173):
+        raise RuntimeError("Jarvis vor dem isolierten UI-Test mit scripts/stop.ps1 stoppen")
+    with TemporaryDirectory(prefix="jarvis-unified-search-ui-") as temporary:
+        root = Path(temporary)
+        allowed = root / "allowed"
+        allowed.mkdir()
+        file = allowed / "Vertrag_Orion.md"
+        file.write_text("Projekt Orion: Der Vertrag ist unterschrieben.", encoding="utf-8")
+        data = root / "data"
+        db = Database(data / "jarvis.db")
+        docs = DocumentStore(db)
+        folder = docs.add_folder(str(allowed), "local_only")
+        assert docs.index_folder(folder["id"])["indexed"] == 1
+        docs.add_memory("Orion braucht den Vertrag am Freitag.", "Eigene Notiz", "local_only")
+        WorkStateStore(db, docs, TaskStore(db)).create("Projekt Orion", "Vertrag liegt vor",
+                                                       "", "Unterlagen sammeln", [], [], [])
+        environment = os.environ.copy()
+        environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
+                           JARVIS_OLLAMA_MODEL="fixture")
+        with (root / "server.log").open("w", encoding="utf-8") as log:
+            process = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "dev.py")],
+                                       cwd=ROOT, env=environment, stdout=log,
+                                       stderr=subprocess.STDOUT)
+            try:
+                wait_ui(process)
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(channel="msedge", headless=True)
+                    try:
+                        page = browser.new_page(viewport={"width": 390, "height": 844})
+                        page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded",
+                                  timeout=120000)
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        results = page.get_by_role("region", name="Suchergebnisse")
+                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=30000)
+                        expect(results.get_by_text("Vertrag_Orion.md", exact=False).first).to_be_visible()
+                        expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
+                        expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
+                        expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()
+                        assert not overflow_nodes(page), overflow_nodes(page)
+                        page.get_by_label("Gemeinsame Suche").fill("Vertrag_Orion")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(timeout=30000)
+                        page.get_by_label("Gemeinsame Suche").fill("Saturn")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        expect(results.get_by_text("Keine passenden gespeicherten Quellen gefunden.")).to_be_visible(timeout=30000)
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
+                        print(json.dumps({"sources": 3, "filename": "found",
+                                          "empty": "shown", "mobile_width": "fits", "model_calls": 0}))
+                    finally:
+                        browser.close()
+            finally:
+                stop_test_server(process)
+
+
+if __name__ == "__main__":
+    main()

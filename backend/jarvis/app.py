@@ -115,6 +115,7 @@ from jarvis.time_model import (
     TimeModelConflict,
     TimeModelStore,
 )
+from jarvis.unified_search import search as unified_search
 from jarvis.vault import CredentialVault, VaultConflict
 from jarvis.voice import ALLOWED_AUDIO_TYPES, MAX_AUDIO_BYTES, VoiceError, VoiceTranscriber
 from jarvis.work_states import WorkStateConflict, WorkStateStore
@@ -1019,6 +1020,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/quality/overview")
     async def quality_view():
         return await run_in_threadpool(quality_overview, db)
+
+    @app.get("/search/unified")
+    async def unified_search_view(q: str = Query(min_length=2, max_length=160)):
+        try:
+            return await run_in_threadpool(unified_search, db, q)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.get("/chats")
     async def chats(q: str = "", archived: bool = False):
