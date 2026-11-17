@@ -161,7 +161,7 @@ def main() -> None:
                         page.get_by_role("button", name="Chat", exact=True).click()
                         page.get_by_role("button", name="Neues Gespräch").evaluate(
                             "button => { button.click(); button.click(); }")
-                        expect(page.locator(".chat-list button")).to_have_count(2)
+                        expect(page.locator(".chat-list-item")).to_have_count(1)
                         rejected_message = "A" * 3700
                         page.get_by_label("Nachricht").fill(rejected_message)
                         page.get_by_role("button", name="Senden", exact=True).click()
