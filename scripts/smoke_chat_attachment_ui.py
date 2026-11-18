@@ -68,8 +68,9 @@ def main() -> None:
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded",
                                   timeout=120000)
                         page.get_by_role("button", name="Chat", exact=True).click()
+                        expect(page.get_by_label("Nachricht")).to_be_enabled(timeout=120000)
                         page.get_by_label("Datei für Chat").set_input_files(str(file))
-                        expect(page.get_by_text("Gewählt: Wohnungsnotiz.txt", exact=False)).to_be_visible()
+                        expect(page.get_by_text("1. Wohnungsnotiz.txt", exact=False)).to_be_visible()
                         page.get_by_label("Nachricht").fill("Wie hoch ist die Kaution für Projekt Elbe?")
                         page.get_by_role("button", name="Senden", exact=True).click()
                         expect(page.locator(".message.assistant .usage")).to_contain_text(

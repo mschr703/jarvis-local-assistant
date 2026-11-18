@@ -14,9 +14,10 @@ test('streamChat liefert Deltas und Abschluss in der richtigen Reihenfolge', asy
   const events: string[] = [];
   await streamChat('chat-id', 'Hallo', new AbortController().signal, false, (name, payload) => {
     events.push(`${name}:${name === 'delta' ? payload.text : 'done'}`);
-  });
+  }, null, [], ['datei-a', 'datei-b']);
   expect(events).toEqual(['delta:Guten ', 'delta:Tag', 'done:done']);
   expect((fetchMock.mock.calls[1][1].headers as Headers).get('X-Jarvis-CSRF')).toBe('token');
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body).attachment_ids).toEqual(['datei-a', 'datei-b']);
 });
 
 test('streamChat meldet einen fehlenden Abschluss als Fehler', async () => {

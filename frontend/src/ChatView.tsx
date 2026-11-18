@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, streamChat, transcribeAudio, uploadChatAttachment, type Chat,
+import { api, streamChat, transcribeAudio, uploadChatAttachment, type Chat, type ChatAttachment,
   type ChatCompaction, type ChatSummary, type Message } from './api';
 import type { Skill } from './SkillView';
 
@@ -79,14 +79,15 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [active, setActive] = useState<Chat | null>(null);
   const [streamed, setStreamed] = useState('');
   const [busy, setBusy] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [imagePreview, setImagePreview] = useState('');
+  const selectedImage = selectedFiles.find((file) => isImageFile(file.name));
   useEffect(() => {
-    if (!selectedFile || !isImageFile(selectedFile.name)) { setImagePreview(''); return; }
-    const url = URL.createObjectURL(selectedFile);
+    if (!selectedImage) { setImagePreview(''); return; }
+    const url = URL.createObjectURL(selectedImage);
     setImagePreview(url);
     return () => URL.revokeObjectURL(url);
-  }, [selectedFile]);
+  }, [selectedImage]);
   const [navigating, setNavigating] = useState(false);
   const [error, setError] = useState('');
   const [speechBusyId, setSpeechBusyId] = useState('');
@@ -253,7 +254,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     navigationRef.current = true; setNavigating(true); setError('');
     try { const [chat, states] = await Promise.all([api<Chat>(`/chats/${id}`),
       api<ChatCompaction[]>(`/chats/${id}/compactions`)]);
-      setActive(chat); setSelectedFile(null); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
+      setActive(chat); setSelectedFiles([]); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
       setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice(''); }
     catch (cause) { setError((cause as Error).message); }
     finally { navigationRef.current = false; setNavigating(false); }
@@ -295,7 +296,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     navigationRef.current = true; setNavigating(true); setError('');
     try {
       const chat = await api<ChatSummary>('/chats', { method: 'POST' });
-      setActive({ ...chat, messages: [] }); setSelectedFile(null); setSelectedAnswerId('');
+      setActive({ ...chat, messages: [] }); setSelectedFiles([]); setSelectedAnswerId('');
       setCompactions([]); setCompactionNotice(''); setResetCandidate(false);
       setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice('');
       setShowArchived(false); setSearchText(''); setAppliedSearch('');
@@ -403,7 +404,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   };
 
   const send = async (fromVoice = false) => {
-    if (!draft.trim() || busy || suggestionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFile && provider !== 'ollama')) return;
+    if (!draft.trim() || busy || suggestionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')) return;
     const content = draft.trim();
     const voiceGenerationEpoch = voiceEpoch.current;
     const memoryIds = [...selectedMemoryIds];
@@ -414,23 +415,26 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     const abort = new AbortController(); controller.current = abort;
     let chat = active;
     let streamCompleted = false;
-    let uploadedAttachmentId = '';
+    const uploadedAttachmentIds: string[] = [];
     try {
       if (!chat) {
         const item = await api<ChatSummary>('/chats', { method: 'POST' });
         chat = { ...item, messages: [] }; setActive(chat);
       }
-      const uploaded = selectedFile ? await uploadChatAttachment(chat.id, selectedFile, abort.signal) : null;
-      uploadedAttachmentId = uploaded?.id || '';
+      const uploaded: ChatAttachment[] = [];
+      for (const file of selectedFiles) {
+        const item = await uploadChatAttachment(chat.id, file, abort.signal);
+        uploaded.push(item); uploadedAttachmentIds.push(item.id);
+      }
       setActive({ ...chat, messages: [...chat.messages, {
         id: 'pending-user', role: 'user', content, status: 'complete', created_at: new Date().toISOString(),
-        attachments: uploaded ? [uploaded] : [],
+        attachments: uploaded,
       }] });
       await streamChat(chat.id, content, abort.signal, allowCloud, (name, payload) => {
         if (name === 'delta') setStreamed((previous) => previous + String(payload.text || ''));
-      }, selectedSkillId || null, memoryIds, uploadedAttachmentId || null);
+      }, selectedSkillId || null, memoryIds, uploadedAttachmentIds);
       streamCompleted = true;
-      setSelectedFile(null);
+      setSelectedFiles([]);
       const updated = await api<Chat>(`/chats/${chat.id}`);
       setActive(updated);
       await refreshList();
@@ -457,10 +461,12 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         } catch { /* Verbindung kann gerade ausgefallen sein. */ }
       }
       if (!userMessageSaved) { setDraft((current) => current || content); setSelectedMemoryIds(memoryIds); }
-      else setSelectedFile(null);
-      if (!userMessageSaved && uploadedAttachmentId && chat) {
-        try { await api(`/chats/${chat.id}/attachments/${uploadedAttachmentId}`, { method: 'DELETE' }); }
-        catch { /* Der ungesendete Anhang bleibt im lokalen Chat, bis der Chat gelöscht wird. */ }
+      else setSelectedFiles([]);
+      if (!userMessageSaved && chat) {
+        for (const id of uploadedAttachmentIds) {
+          try { await api(`/chats/${chat.id}/attachments/${id}`, { method: 'DELETE' }); }
+          catch { /* Ein ungesendeter Anhang bleibt im lokalen Chat, bis der Chat gelöscht wird. */ }
+        }
       }
     } finally { setBusy(false); setStreamed(''); controller.current = null; }
   };
@@ -559,27 +565,34 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         {voiceLatency && <small>{voiceLatency}</small>}
         {voiceError && <p className="notice error" role="alert">{voiceError}</p>}
       </section>
-      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown, DOCX, Text-PDF oder PNG/JPEG/WebP; höchstens 512 KiB)
-        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx,.pdf,.png,.jpg,.jpeg,.webp"
+      <section className="card"><label>Bis zu drei Dateien für diese Nachricht (TXT, Markdown, DOCX, Text-PDF oder PNG/JPEG/WebP; je höchstens 512 KiB, höchstens ein Bild)
+        <input aria-label="Datei für Chat" type="file" multiple accept=".txt,.md,.markdown,.docx,.pdf,.png,.jpg,.jpeg,.webp"
           style={{ display: 'block', maxWidth: '100%', marginTop: 8 }}
           disabled={!configured || busy || provider !== 'ollama' || !!active?.archived_at}
           onChange={(event) => {
-            const file = event.target.files?.[0] || null;
+            const files = Array.from(event.target.files || []);
             event.currentTarget.value = '';
-            if (file && file.size > 512 * 1024) {
-              setError('Chatanhang überschreitet 512 KiB'); setSelectedFile(null);
-            } else { setError(''); setSelectedFile(file); }
+            if (files.length > 3) { setError('Höchstens drei Dateien je Nachricht wählen'); setSelectedFiles([]); }
+            else if (files.filter((file) => isImageFile(file.name)).length > 1) {
+              setError('Höchstens ein Bild je Nachricht wählen'); setSelectedFiles([]);
+            }
+            else if (files.some((file) => file.size > 512 * 1024)) {
+              setError('Ein Chatanhang überschreitet 512 KiB'); setSelectedFiles([]);
+            }
+            else { setError(''); setSelectedFiles(files); }
           }} /></label>
-        {selectedFile && <p style={{ overflowWrap: 'anywhere' }}>Gewählt: {selectedFile.name} · {selectedFile.size} Bytes
-          <button type="button" onClick={() => setSelectedFile(null)} disabled={busy}>Datei entfernen</button></p>}
+        {selectedFiles.map((file, index) => <p key={`${file.name}-${index}`} style={{ overflowWrap: 'anywhere' }}>
+          {index + 1}. {file.name} · {file.size} Bytes <button type="button"
+            onClick={() => setSelectedFiles((current) => current.filter((_, position) => position !== index))}
+            disabled={busy}>Datei entfernen</button></p>)}
         {imagePreview && <img src={imagePreview} alt="Vorschau des gewählten Bildes"
           style={{ display: 'block', maxWidth: '100%', maxHeight: 300 }} />}
-        {selectedFile && isImageFile(selectedFile.name) && <p>Dieses Bild wird nur für die nächste Antwort an das lokale Bildmodell gesendet. Für weitere Bildfragen erneut anhängen.</p>}
-        {selectedFile && provider !== 'ollama' && <p>Chatanhänge können nur an lokales Ollama gesendet werden.</p>}
+        {selectedImage && <p>Dieses Bild wird nur für die nächste Antwort an das lokale Bildmodell gesendet. Für weitere Bildfragen erneut anhängen.</p>}
+        {selectedFiles.length > 0 && provider !== 'ollama' && <p>Chatanhänge können nur an lokales Ollama gesendet werden.</p>}
         {hasChatAttachments && provider === 'openrouter' && <p>Dieses Gespräch enthält lokale Dateianhänge. Für OpenRouter ein neues Gespräch ohne Anhang beginnen.</p>}
       </section>
       <div className="composer"><textarea ref={composerRef} aria-label="Nachricht" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} disabled={!configured || busy || suggestionBusy || compactionBusy || navigating || !!active?.archived_at} placeholder="Schreibe eine Nachricht…" />
-        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (!!selectedFile && provider !== 'ollama')}>Senden</button>}
+        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')}>Senden</button>}
       </div>
       {selectedAnswerId && <section className="card"><h3>Antwort bewerten</h3><p>Prüfe den Antworttext und mögliche Quellen selbst. Die Quellenbewertung ist deine Einschätzung.</p>
         <div className="memory-form"><label>Aufgabenerfolg <select aria-label="Erfolg der Antwort" value={verdict} onChange={(event) => setVerdict(event.target.value)}><option value="achieved">Ziel erreicht</option><option value="partial">Teilweise erreicht</option><option value="failed">Ziel verfehlt</option><option value="unclear">Unklar</option></select></label>

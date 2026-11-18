@@ -138,7 +138,8 @@ class ChatAttachmentStore:
 
     def get(self, chat_id: str, attachment_id: str, *, include_text: bool = False) -> dict | None:
         with self.db.connect() as db:
-            row = db.execute("""SELECT * FROM chat_attachments WHERE id=? AND chat_id=?""",
+            row = db.execute("""SELECT rowid AS upload_order,* FROM chat_attachments
+                WHERE id=? AND chat_id=?""",
                              (attachment_id, chat_id)).fetchone()
         if row is None:
             return None

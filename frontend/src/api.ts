@@ -98,11 +98,11 @@ export async function uploadChatAttachment(chatId: string, file: File,
 export async function streamChat(
   chatId: string, content: string, signal: AbortSignal, allowCloud: boolean,
   onEvent: (name: string, payload: Record<string, unknown>) => void, skillId: string | null = null,
-  memoryProposalIds: string[] = [], attachmentId: string | null = null,
+  memoryProposalIds: string[] = [], attachmentIds: string[] = [],
 ): Promise<void> {
   const response = await requestWithSession(`/chats/${chatId}/stream`, {
     method: 'POST', body: JSON.stringify({ content, allow_cloud: allowCloud, skill_id: skillId,
-      memory_proposal_ids: memoryProposalIds, attachment_id: attachmentId }), signal,
+      memory_proposal_ids: memoryProposalIds, attachment_ids: attachmentIds }), signal,
     credentials: 'same-origin',
   });
   if (!response.ok) throw await responseError(response);

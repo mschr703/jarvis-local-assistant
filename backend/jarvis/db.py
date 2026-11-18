@@ -1061,7 +1061,7 @@ class Database:
             attachments: dict[str, list[dict]] = {}
             for attached in db.execute("""SELECT id,message_id,filename,sha256,size,text
                 FROM chat_attachments WHERE chat_id=? AND message_id IS NOT NULL
-                ORDER BY created_at,id""", (chat_id,)):
+                ORDER BY rowid""", (chat_id,)):
                 entry = dict(attached)
                 if not include_attachment_text:
                     entry.pop("text")
@@ -1187,8 +1187,9 @@ class Database:
                     memory_context: list[dict] | None = None,
                     attachment_ids: list[str] | None = None, **usage) -> dict:
         message_id, now = str(uuid4()), utcnow()
-        if attachment_ids and (role != "user" or len(attachment_ids) > 1):
-            raise ValueError("Nur eine gewählte Datei je Nutzernachricht")
+        if attachment_ids and (role != "user" or len(attachment_ids) > 3
+                               or len(set(attachment_ids)) != len(attachment_ids)):
+            raise ValueError("Höchstens drei verschiedene Dateien je Nutzernachricht")
         with self.connect() as db:
             db.execute(
                 """INSERT INTO messages(id,chat_id,role,content,status,created_at,provider,model,

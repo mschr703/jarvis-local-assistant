@@ -132,6 +132,102 @@ def test_chat_attachment_message_reload_context_backup_and_delete(tmp_path, monk
         assert not list((restored / "chat-attachments").iterdir())
 
 
+def test_multiple_attachments_keep_upload_order_and_survive_backup(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    provider = CaptureProvider()
+    monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: provider)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        selected = [upload(client, chat, name, raw, headers).json()
+                    for name, raw in (("A.txt", b"Alpha one"),
+                                      ("B.md", b"Beta two"),
+                                      ("C.txt", b"Gamma three"))]
+        # The server uses upload order even if API callers present the IDs differently.
+        response = client.post(f"/chats/{chat}/stream", headers=headers,
+                               json={"content": "Vergleiche die Quellen",
+                                     "attachment_ids": [item["id"] for item in reversed(selected)]})
+        assert response.status_code == 200, response.text
+        content = provider.calls[0][-1]["content"]
+        assert content.index("A.txt") < content.index("B.md") < content.index("C.txt")
+        saved = client.get(f"/chats/{chat}").json()["messages"][0]
+        assert [item["id"] for item in saved["attachments"]] == [item["id"] for item in selected]
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Was war in B?"}).status_code == 200
+        assert "Beta two" in " ".join(item["content"] for item in provider.calls[1])
+    archive = tmp_path / "multi-backup.zip"
+    create_backup(data_dir, archive)
+    restored = tmp_path / "restored"
+    restore_backup(archive, restored)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        restored_items = client.get(f"/chats/{chat}").json()["messages"][0]["attachments"]
+        assert [item["filename"] for item in restored_items] == ["A.txt", "B.md", "C.txt"]
+        assert client.delete(f"/chats/{chat}", headers=headers).status_code == 200
+        assert not list((restored / "chat-attachments").iterdir())
+
+
+def test_multiple_attachments_reject_bad_selection_without_partial_link(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    provider = CaptureProvider()
+    monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: provider)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        other = client.post("/chats", headers=headers).json()["id"]
+        first = upload(client, chat, "A.txt", b"Alpha", headers).json()["id"]
+        second = upload(client, chat, "B.txt", b"Beta", headers).json()["id"]
+        foreign = upload(client, other, "F.txt", b"Foreign", headers).json()["id"]
+        for ids in ([first, first], [first, foreign], [first, "missing"],
+                    [first, second, foreign, "fourth"]):
+            assert client.post(f"/chats/{chat}/stream", headers=headers,
+                               json={"content": "Prüfen", "attachment_ids": ids}).status_code == 422
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Prüfen", "attachment_id": first,
+                                 "attachment_ids": [second]}).status_code == 422
+        db = Database(data_dir / "jarvis.db")
+        with pytest.raises(ValueError, match="Chatanhang nicht gefunden"):
+            db.add_message(chat, "user", "Atomar", attachment_ids=[first, foreign])
+        assert db.list_messages(chat) == []
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Jetzt", "attachment_ids": [first, second]}).status_code == 200
+        assert len(client.get(f"/chats/{chat}").json()["messages"][0]["attachments"]) == 2
+
+
+def test_image_and_text_share_one_local_vision_call(tmp_path, monkeypatch):
+    provider = CaptureProvider()
+    models = []
+
+    def make(settings):
+        models.append(settings.ollama_model)
+        return provider
+
+    monkeypatch.setattr("jarvis.app.make_provider", make)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=tmp_path / "data",
+                                        JARVIS_OLLAMA_MODEL="text-fixture",
+                                        JARVIS_OLLAMA_VISION_MODEL="vision-fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        text_item = upload(client, chat, "Notiz.txt", b"Das Schild ist rot.", headers).json()
+        image_item = upload(client, chat, "Rot.png", image_bytes(), headers).json()
+        response = client.post(f"/chats/{chat}/stream", headers=headers,
+                               json={"content": "Was zeigen Bild und Notiz?",
+                                     "attachment_ids": [text_item["id"], image_item["id"]]})
+        assert response.status_code == 200, response.text
+        assert models == ["vision-fixture"]
+        assert "Schild ist rot" in provider.calls[0][-1]["content"]
+        assert len(provider.calls[0][-1]["images"]) == 1
+        assert [item["filename"] for item in client.get(f"/chats/{chat}").json()["messages"][0]["attachments"]] == ["Notiz.txt", "Rot.png"]
+        another = upload(client, chat, "Blau.png", image_bytes(), headers).json()
+        third = upload(client, chat, "Gruen.png", image_bytes(), headers).json()
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Zwei Bilder", "attachment_ids": [another["id"],
+                                 third["id"]]}).status_code == 422
+
+
 def test_attachment_rejects_bad_inputs_and_tampering(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     provider = CaptureProvider()
