@@ -5,6 +5,7 @@ import MarkdownEditor from './MarkdownEditor';
 export type Source = { passage_id: number; document_id: string; path: string; page: number | null; text: string; policy: string; sha256: string; source_status?: 'current' | 'needs_reindex' };
 type Folder = { id: string; path: string; policy: 'local_only' | 'cloud_allowed' };
 type Document = { id: string; folder_id: string; path: string; policy: string; status: string; excluded: number; error: string | null; sha256: string | null; indexed_at: string | null };
+type Freshness = { folder_id: string; checked: number; current: number; stale: number; limited: boolean; stale_sources: { document_id: string; path: string; status: string }[] };
 type Memory = { id: string; text: string; source_ref: string; policy: 'local_only' | 'cloud_allowed'; updated_at: string };
 
 export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, visible }: {
@@ -21,6 +22,8 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
   const [selected, setSelected] = useState<number[]>([]);
   const [indexing, setIndexing] = useState(false);
   const indexingRef = useRef(false);
+  const [checkingFolder, setCheckingFolder] = useState<string | null>(null);
+  const [freshness, setFreshness] = useState<Record<string, Freshness>>({});
   const [memoryText, setMemoryText] = useState('');
   const [memorySource, setMemorySource] = useState('');
   const [memoryPolicy, setMemoryPolicy] = useState<Memory['policy']>('local_only');
@@ -71,12 +74,23 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
     setIndexing(true);
     try {
       const counts = await api<Record<string, number>>(`/folders/${id}/index`, { method: 'POST' });
+      setFreshness((prior) => { const next = { ...prior }; delete next[id]; return next; });
       setNotice(`Index aktualisiert: ${counts.indexed} neu/geändert, ${counts.unchanged} unverändert, ${counts.ocr_pending} OCR ausstehend, ${counts.errors} Fehler.${counts.limited ? ' Scanlimit erreicht; vorhandene übrige Indexeinträge bleiben erhalten.' : ''}`);
       clearResults();
       onSourcesInvalidated();
       await refresh();
     } catch (error) { setNotice((error as Error).message); }
     finally { indexingRef.current = false; setIndexing(false); }
+  };
+  const checkFreshness = async (id: string) => {
+    if (checkingFolder) return;
+    setCheckingFolder(id);
+    try {
+      const report = await api<Freshness>(`/folders/${id}/freshness`);
+      setFreshness((prior) => ({ ...prior, [id]: report }));
+      setNotice(`Frischecheck: ${report.current} aktuell, ${report.stale} geändert oder fehlend.`);
+    } catch (error) { setNotice((error as Error).message); }
+    finally { setCheckingFolder(null); }
   };
   const changePolicy = async (folder: Folder) => {
     const policy = folder.policy === 'local_only' ? 'cloud_allowed' : 'local_only';
@@ -91,6 +105,7 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
   const removeFolder = async (folder: Folder) => {
     try {
       await api(`/folders/${folder.id}`, { method: 'DELETE' });
+      setFreshness((prior) => { const next = { ...prior }; delete next[folder.id]; return next; });
       if (documents.some((document) => document.folder_id === folder.id && document.id === editingMarkdown)) setEditingMarkdown(null);
       clearResults();
       onSourcesInvalidated();
@@ -103,6 +118,7 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
       await api<Document>(`/documents/${document.id}/excluded`, {
         method: 'PATCH', body: JSON.stringify({ excluded: !document.excluded }),
       });
+      setFreshness((prior) => { const next = { ...prior }; delete next[document.folder_id]; return next; });
       if (!document.excluded && editingMarkdown === document.id) setEditingMarkdown(null);
       clearResults();
       onSourcesInvalidated();
@@ -164,7 +180,7 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
       <div className="inline-form"><input aria-label="Absoluter Ordnerpfad" placeholder="C:\\Pfad\\zum\\Ordner" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} />
         <select aria-label="Cloud-Freigabe" value={folderPolicy} onChange={(event) => setFolderPolicy(event.target.value as Folder['policy'])}><option value="local_only">Nur lokal</option><option value="cloud_allowed">Cloud erlaubt</option></select>
         <button className="primary" onClick={() => void addFolder()} disabled={!folderPath.trim()}>Freigeben</button></div>
-      <div className="item-list">{folders.map((folder) => <div key={folder.id} className="item-row"><div><strong>{folder.path}</strong><small>{folder.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'}</small></div><div className="item-actions"><button disabled={indexing} onClick={() => void index(folder.id)}>{indexing ? 'Indexiere…' : 'Index aktualisieren'}</button><button onClick={() => void changePolicy(folder)}>{folder.policy === 'local_only' ? 'Cloud für ausgewählte Ausschnitte erlauben' : 'Cloud-Freigabe entfernen'}</button><button onClick={() => void removeFolder(folder)}>Ordnerfreigabe entfernen</button></div></div>)}</div>
+      <div className="item-list">{folders.map((folder) => <div key={folder.id} className="item-row"><div><strong>{folder.path}</strong><small>{folder.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'}</small>{freshness[folder.id] && <div role="status"><small>Frischecheck: {freshness[folder.id].current} aktuell, {freshness[folder.id].stale} geändert oder fehlend (von {freshness[folder.id].checked} geprüft). {freshness[folder.id].limited && 'Auf 100 Dokumente begrenzt; weitere Dateien wurden nicht geprüft.'}</small>{freshness[folder.id].stale_sources.map((source) => <small key={source.document_id}>Neu indexieren: {source.path}</small>)}</div>}</div><div className="item-actions"><button disabled={indexing || checkingFolder !== null} onClick={() => void checkFreshness(folder.id)}>{checkingFolder === folder.id ? 'Prüfe…' : 'Frische prüfen'}</button><button disabled={indexing || checkingFolder !== null} onClick={() => void index(folder.id)}>{indexing ? 'Indexiere…' : 'Index aktualisieren'}</button><button onClick={() => void changePolicy(folder)}>{folder.policy === 'local_only' ? 'Cloud für ausgewählte Ausschnitte erlauben' : 'Cloud-Freigabe entfernen'}</button><button onClick={() => void removeFolder(folder)}>Ordnerfreigabe entfernen</button></div></div>)}</div>
     </section>
     <section className="card"><h3>Dokumente</h3>{documents.length === 0 ? <p>Noch keine Dokumente indexiert.</p> : <div className="item-list">{documents.map((document) => <div key={document.id} className="item-row"><div><strong>{document.path}</strong><small>{document.excluded ? 'Ausgeschlossen' : document.status === 'ocr_pending' ? 'OCR ausstehend: keine Textschicht' : document.status === 'pending_index' ? 'Index ausstehend' : document.status}{document.error && ` · ${document.error}`} · {document.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}</small>{!document.excluded && document.sha256 && document.indexed_at && document.status === 'indexed' && <small>Indexstand: {new Date(document.indexed_at).toLocaleString('de-DE')} · SHA-256 {document.sha256}</small>}</div><div className="item-actions">{!document.excluded && document.status === 'indexed' && /\.(?:md|markdown)$/i.test(document.path) && <button disabled={indexing} onClick={() => setEditingMarkdown(document.id)}>Markdown bearbeiten</button>}<button disabled={indexing} onClick={() => void toggleDocument(document)}>{document.excluded ? 'Einbeziehen' : 'Ausschließen'}</button></div></div>)}</div>}</section>
     {editingMarkdown && <MarkdownEditor key={editingMarkdown} documentId={editingMarkdown} onClose={() => setEditingMarkdown(null)} onChanged={async () => { clearResults(); onSourcesInvalidated(); await refresh(); }} />}

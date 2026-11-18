@@ -165,6 +165,45 @@ class DocumentStore:
         """Verify one indexed source against its granted original before citing it."""
         return DocumentStore._current_source_bytes(document) is not None
 
+    def folder_freshness(self, folder_id: str) -> dict:
+        """Inspect a bounded set of indexed originals without changing the index."""
+        folder = self.get_folder(folder_id)
+        if folder is None:
+            raise LookupError("Freigabeordner nicht gefunden")
+        self.granted_root(folder)
+        with self.db.connect() as db:
+            rows = [dict(row) for row in db.execute("""
+                SELECT d.*,f.path AS folder_path FROM documents d
+                JOIN folders f ON f.id=d.folder_id
+                WHERE d.folder_id=? AND d.status='indexed' AND d.excluded=0
+                ORDER BY d.path LIMIT 101
+            """, (folder_id,))]
+        limited = len(rows) > 100
+        checked = rows[:100]
+        stale = []
+        for row in checked:
+            if not self.source_is_current(row):
+                stale.append({"document_id": row["id"], "path": row["path"],
+                              "status": "needs_reindex"})
+        with self.db.connect() as db:
+            current_folder = db.execute("SELECT path FROM folders WHERE id=?", (folder_id,)).fetchone()
+            if current_folder is None or current_folder["path"] != folder["path"]:
+                raise LookupError("Freigabeordner nicht mehr vorhanden")
+            ids = [row["id"] for row in checked]
+            current = {row["id"]: row for row in db.execute(f"""
+                SELECT id,path,sha256,size FROM documents
+                WHERE folder_id=? AND status='indexed' AND excluded=0
+                  AND id IN ({','.join('?' for _ in ids)})
+            """, (folder_id, *ids))} if ids else {}
+        if any((row["id"] not in current
+                or any(current[row["id"]][key] != row[key]
+                       for key in ("path", "sha256", "size"))) for row in checked):
+            raise ValueError("Index während der Prüfung geändert; erneut prüfen")
+        self.granted_root(folder)
+        return {"folder_id": folder_id, "checked": len(checked),
+                "current": len(checked) - len(stale), "stale": len(stale),
+                "limited": limited, "stale_sources": stale}
+
     def original_bytes(self, document_id: str) -> tuple[dict, bytes]:
         """Serve a verified snapshot, never a later unverified filesystem read."""
         with self.db.connect() as db:

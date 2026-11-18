@@ -1699,6 +1699,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (ValueError, OSError) as exc:
             raise HTTPException(422, str(exc)) from exc
 
+    @app.get("/folders/{folder_id}/freshness")
+    async def folder_freshness(folder_id: str):
+        try:
+            return await run_in_threadpool(documents.folder_freshness, folder_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.get("/code-projects/{folder_id}/overview")
     async def code_project_overview(folder_id: str):
         try:
