@@ -29,5 +29,6 @@ data/
 *.log
 vault_credentials.json
 browser-profile/
+chat-attachments/
 backups/
 .jarvis-dev.json

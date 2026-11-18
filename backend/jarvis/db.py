@@ -42,7 +42,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 52:
+            if version > 53:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -929,6 +929,23 @@ class Database:
                     ALTER TABLE memory_proposal_events ADD COLUMN valid_until TEXT;
                     PRAGMA user_version=52;
                 """)
+            if version < 53:
+                apply_migration("""
+                    CREATE TABLE IF NOT EXISTS chat_attachments (
+                        id TEXT PRIMARY KEY,
+                        chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+                        message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+                        filename TEXT NOT NULL,
+                        suffix TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        size INTEGER NOT NULL,
+                        text TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS chat_attachments_chat_message
+                        ON chat_attachments(chat_id,message_id);
+                    PRAGMA user_version=53;
+                """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:
         now = datetime.now(UTC)
@@ -1009,7 +1026,7 @@ class Database:
             row = db.execute("SELECT * FROM chats WHERE id=?", (chat_id,)).fetchone()
             return dict(row) if row else None
 
-    def list_messages(self, chat_id: str) -> list[dict]:
+    def list_messages(self, chat_id: str, *, include_attachment_text: bool = False) -> list[dict]:
         with self.connect() as db:
             rows = [dict(row) for row in db.execute("""SELECT m.*,
                 u.created_at AS usage_started_at,u.updated_at AS usage_finished_at,
@@ -1029,8 +1046,17 @@ class Database:
                 WHERE chat_id=? ORDER BY used_at,proposal_id""", (chat_id,)):
                 entry = dict(used)
                 memory_uses.setdefault(entry.pop("assistant_message_id"), []).append(entry)
+            attachments: dict[str, list[dict]] = {}
+            for attached in db.execute("""SELECT id,message_id,filename,sha256,size,text
+                FROM chat_attachments WHERE chat_id=? AND message_id IS NOT NULL
+                ORDER BY created_at,id""", (chat_id,)):
+                entry = dict(attached)
+                if not include_attachment_text:
+                    entry.pop("text")
+                attachments.setdefault(entry.pop("message_id"), []).append(entry)
             for row in rows:
                 row["memory_context"] = memory_uses.get(row["id"], [])
+                row["attachments"] = attachments.get(row["id"], [])
                 row["usage_duration_seconds"] = (
                     max(0.0, (datetime.fromisoformat(row["usage_finished_at"])
                               - datetime.fromisoformat(row["usage_started_at"])).total_seconds())
@@ -1146,8 +1172,11 @@ class Database:
                 "created_by": created_by, "created_at": now}
 
     def add_message(self, chat_id: str, role: str, content: str, status: str = "complete",
-                    memory_context: list[dict] | None = None, **usage) -> dict:
+                    memory_context: list[dict] | None = None,
+                    attachment_ids: list[str] | None = None, **usage) -> dict:
         message_id, now = str(uuid4()), utcnow()
+        if attachment_ids and (role != "user" or len(attachment_ids) > 1):
+            raise ValueError("Nur eine gewählte Datei je Nutzernachricht")
         with self.connect() as db:
             db.execute(
                 """INSERT INTO messages(id,chat_id,role,content,status,created_at,provider,model,
@@ -1166,6 +1195,12 @@ class Database:
                  usage.get("context_latest_omitted_id")),
             )
             db.execute("UPDATE chats SET updated_at=? WHERE id=?", (now, chat_id))
+            for attachment_id in attachment_ids or []:
+                linked = db.execute("""UPDATE chat_attachments SET message_id=?
+                    WHERE id=? AND chat_id=? AND message_id IS NULL""",
+                    (message_id, attachment_id, chat_id)).rowcount
+                if linked != 1:
+                    raise ValueError("Chatanhang nicht gefunden oder bereits verwendet")
             if role == "assistant" and memory_context:
                 for selected in memory_context:
                     db.execute("""INSERT INTO memory_context_uses

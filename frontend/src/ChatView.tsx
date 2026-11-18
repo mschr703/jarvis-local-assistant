@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, streamChat, transcribeAudio, type Chat, type ChatCompaction, type ChatSummary, type Message } from './api';
+import { api, streamChat, transcribeAudio, uploadChatAttachment, type Chat,
+  type ChatCompaction, type ChatSummary, type Message } from './api';
 import type { Skill } from './SkillView';
 
 type Props = {
@@ -77,6 +78,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [active, setActive] = useState<Chat | null>(null);
   const [streamed, setStreamed] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [navigating, setNavigating] = useState(false);
   const [error, setError] = useState('');
   const [speechBusyId, setSpeechBusyId] = useState('');
@@ -115,6 +117,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const evaluationAction = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const latestMessage = active?.messages[active.messages.length - 1];
+  const hasChatAttachments = active?.messages.some((message) =>
+    (message.attachments?.length ?? 0) > 0) || false;
   const latestAnswer = latestMessage?.role === 'assistant' && latestMessage.status === 'complete'
     ? latestMessage : null;
   useEffect(() => {
@@ -241,7 +245,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     navigationRef.current = true; setNavigating(true); setError('');
     try { const [chat, states] = await Promise.all([api<Chat>(`/chats/${id}`),
       api<ChatCompaction[]>(`/chats/${id}/compactions`)]);
-      setActive(chat); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
+      setActive(chat); setSelectedFile(null); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
       setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice(''); }
     catch (cause) { setError((cause as Error).message); }
     finally { navigationRef.current = false; setNavigating(false); }
@@ -283,7 +287,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     navigationRef.current = true; setNavigating(true); setError('');
     try {
       const chat = await api<ChatSummary>('/chats', { method: 'POST' });
-      setActive({ ...chat, messages: [] }); setSelectedAnswerId('');
+      setActive({ ...chat, messages: [] }); setSelectedFile(null); setSelectedAnswerId('');
       setCompactions([]); setCompactionNotice(''); setResetCandidate(false);
       setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice('');
       setShowArchived(false); setSearchText(''); setAppliedSearch('');
@@ -391,7 +395,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   };
 
   const send = async (fromVoice = false) => {
-    if (!draft.trim() || busy || suggestionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && !allowCloud)) return;
+    if (!draft.trim() || busy || suggestionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFile && provider !== 'ollama')) return;
     const content = draft.trim();
     const voiceGenerationEpoch = voiceEpoch.current;
     const memoryIds = [...selectedMemoryIds];
@@ -402,18 +406,23 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     const abort = new AbortController(); controller.current = abort;
     let chat = active;
     let streamCompleted = false;
+    let uploadedAttachmentId = '';
     try {
       if (!chat) {
         const item = await api<ChatSummary>('/chats', { method: 'POST' });
         chat = { ...item, messages: [] }; setActive(chat);
       }
+      const uploaded = selectedFile ? await uploadChatAttachment(chat.id, selectedFile, abort.signal) : null;
+      uploadedAttachmentId = uploaded?.id || '';
       setActive({ ...chat, messages: [...chat.messages, {
         id: 'pending-user', role: 'user', content, status: 'complete', created_at: new Date().toISOString(),
+        attachments: uploaded ? [uploaded] : [],
       }] });
       await streamChat(chat.id, content, abort.signal, allowCloud, (name, payload) => {
         if (name === 'delta') setStreamed((previous) => previous + String(payload.text || ''));
-      }, selectedSkillId || null, memoryIds);
+      }, selectedSkillId || null, memoryIds, uploadedAttachmentId || null);
       streamCompleted = true;
+      setSelectedFile(null);
       const updated = await api<Chat>(`/chats/${chat.id}`);
       setActive(updated);
       await refreshList();
@@ -440,6 +449,11 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         } catch { /* Verbindung kann gerade ausgefallen sein. */ }
       }
       if (!userMessageSaved) { setDraft((current) => current || content); setSelectedMemoryIds(memoryIds); }
+      else setSelectedFile(null);
+      if (!userMessageSaved && uploadedAttachmentId && chat) {
+        try { await api(`/chats/${chat.id}/attachments/${uploadedAttachmentId}`, { method: 'DELETE' }); }
+        catch { /* Der ungesendete Anhang bleibt im lokalen Chat, bis der Chat gelöscht wird. */ }
+      }
     } finally { setBusy(false); setStreamed(''); controller.current = null; }
   };
 
@@ -481,6 +495,16 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         {active?.messages.map((message) => <article id={`chat-message-${message.id}`} key={message.id} className={`message ${message.role}`}><strong>{message.role === 'user' ? 'Du' : 'Jarvis'}</strong><p>{message.content || (message.status !== 'complete' ? '(keine Ausgabe)' : '')}</p><Usage message={message} />{(message.memory_context?.length ?? 0) > 0 && <details><summary>Bewusst verwendete Erinnerungen ({message.memory_context?.length})</summary><ul>{message.memory_context?.map((item) => <li key={item.proposal_id}>{item.text_snapshot} · Originalstelle: „{item.source_quote}“</li>)}</ul></details>}{message.role === 'assistant' && <><div className="item-actions"><button onClick={() => selectEvaluation(message)}>Antwort bewerten</button>{message.status === 'complete' && message.content.trim() && <button onClick={() => void readAnswer(message)} disabled={!!speechBusyId}>{speechBusyId === message.id ? 'VoiceStudio erzeugt Audio…' : speechActiveId === message.id ? 'Wiedergeben' : 'Vorlesen'}</button>}{message.evaluation && <small>Bewertung: {verdictLabels[message.evaluation.verdict]} · {sourceLabels[message.evaluation.source_quality]}</small>}</div>{speechActiveId === message.id && speechUrl && <div className="speech-player"><small>Stimme: {speechVoice}</small><audio ref={audioRef} controls autoPlay src={speechUrl} aria-label="Jarvis-Antwort als Audio" /><button onClick={stopSpeech}>Stoppen</button></div>}{speechBusyId === message.id && <small role="status">Lokale Audioerzeugung läuft. Der Antworttext bleibt erhalten.</small>}</>}{speechError && message.id === speechErrorId && <p className="notice error" role="alert">{speechError}</p>}</article>)}
         {busy && <article className="message assistant"><strong>Jarvis · antwortet</strong><p>{streamed || 'Warte auf Modell…'}</p></article>}
       </div>
+      {active?.messages.some((message) => (message.attachments?.length ?? 0) > 0) &&
+        <section className="card" aria-label="Dateianhänge im Gespräch"><h3>Dateianhänge im Gespräch</h3>
+          <div className="item-list">{active.messages.flatMap((message) =>
+            (message.attachments || []).map((attachment) => <div className="item-row" key={attachment.id}>
+              <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>{attachment.filename}</strong>
+                <small>Nachricht: {message.content.slice(0, 90)} · {attachment.size} Bytes · SHA-256 {attachment.sha256}</small>
+                <a href={`/api/chats/${encodeURIComponent(active.id)}/attachments/${encodeURIComponent(attachment.id)}`}
+                  download={attachment.filename}>Unveränderte Kopie herunterladen</a></div>
+            </div>))}</div>
+        </section>}
       {active && (canCompact || compactions.length > 0) && <section className="card chat-compactions">
         <h3>Ältere Beiträge im Kontext behalten</h3><p>Ein Klick lässt lokales Ollama einen begrenzten alten Abschnitt zusammenfassen. Die letzten acht fertigen Nachrichten bleiben roh. Jeder Punkt nennt die ursprünglichen Nachrichten; prüfe die Angaben vor weiterer Nutzung. Die vollständige Historie bleibt erhalten.</p>
         {!active.archived_at && provider === 'ollama' && <button onClick={() => void compactChat()} disabled={!canCompact || compactionBusy || suggestionBusy || busy || navigating || !configured}>{compactionBusy ? 'Ollama fasst zusammen…' : 'Ältere Beiträge zusammenfassen'}</button>}
@@ -516,15 +540,31 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           {voiceEnabled && (voiceRecorder.current?.state === 'recording'
             ? <button onClick={finishVoiceRecording}>Aufnahme beenden</button>
             : <button onClick={() => void startVoiceRecording()} disabled={!!voiceAbort.current}>Mikrofon starten / Antwort unterbrechen</button>)}
-          {voiceEnabled && voiceTranscript && <button className="primary" onClick={() => void send(true)} disabled={busy || !draft.trim() || !!voiceAbort.current || !!active?.archived_at || !configured || (provider === 'openrouter' && !allowCloud)}>Transkript senden und vorlesen</button>}
+          {voiceEnabled && voiceTranscript && <button className="primary" onClick={() => void send(true)} disabled={busy || !draft.trim() || !!voiceAbort.current || !!active?.archived_at || !configured || (provider === 'openrouter' && (!allowCloud || hasChatAttachments))}>Transkript senden und vorlesen</button>}
         </div>
         <small role="status">{voiceStatus}. Mikrofon wird nur während einer Aufnahme verwendet.</small>
         {voiceTranscript && <p>Erkannt: „{voiceTranscript}“ · Vor dem Senden im Nachrichtenfeld korrigierbar.</p>}
         {voiceLatency && <small>{voiceLatency}</small>}
         {voiceError && <p className="notice error" role="alert">{voiceError}</p>}
       </section>
+      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown oder DOCX; höchstens 512 KiB)
+        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx"
+          style={{ display: 'block', maxWidth: '100%', marginTop: 8 }}
+          disabled={!configured || busy || provider !== 'ollama' || !!active?.archived_at}
+          onChange={(event) => {
+            const file = event.target.files?.[0] || null;
+            event.currentTarget.value = '';
+            if (file && file.size > 512 * 1024) {
+              setError('Chatanhang überschreitet 512 KiB'); setSelectedFile(null);
+            } else { setError(''); setSelectedFile(file); }
+          }} /></label>
+        {selectedFile && <p style={{ overflowWrap: 'anywhere' }}>Gewählt: {selectedFile.name} · {selectedFile.size} Bytes
+          <button type="button" onClick={() => setSelectedFile(null)} disabled={busy}>Datei entfernen</button></p>}
+        {selectedFile && provider !== 'ollama' && <p>Chatanhänge können nur an lokales Ollama gesendet werden.</p>}
+        {hasChatAttachments && provider === 'openrouter' && <p>Dieses Gespräch enthält lokale Dateianhänge. Für OpenRouter ein neues Gespräch ohne Anhang beginnen.</p>}
+      </section>
       <div className="composer"><textarea ref={composerRef} aria-label="Nachricht" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} disabled={!configured || busy || suggestionBusy || compactionBusy || navigating || !!active?.archived_at} placeholder="Schreibe eine Nachricht…" />
-        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && !allowCloud)}>Senden</button>}
+        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (!!selectedFile && provider !== 'ollama')}>Senden</button>}
       </div>
       {selectedAnswerId && <section className="card"><h3>Antwort bewerten</h3><p>Prüfe den Antworttext und mögliche Quellen selbst. Die Quellenbewertung ist deine Einschätzung.</p>
         <div className="memory-form"><label>Aufgabenerfolg <select aria-label="Erfolg der Antwort" value={verdict} onChange={(event) => setVerdict(event.target.value)}><option value="achieved">Ziel erreicht</option><option value="partial">Teilweise erreicht</option><option value="failed">Ziel verfehlt</option><option value="unclear">Unklar</option></select></label>

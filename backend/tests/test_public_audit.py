@@ -41,7 +41,8 @@ def test_sensitive_filenames_and_public_example():
     for name in (".env", ".env.local", "prod.env.production", "service.env",
                  "vault_credentials.json", "backup.zip", "private.key",
                  "certificate.p12", "jarvis.db", "jarvis.db-journal", "app.log",
-                 "browser-profile/Default/Cookies"):
+                 "browser-profile/Default/Cookies",
+                 "chat-attachments/123.txt", "nested/chat-attachments/123.txt"):
         assert sensitive_path(Path(name)), name
     assert sensitive_path(Path(".env.example")) is None
     assert sensitive_path(Path("README.md")) is None

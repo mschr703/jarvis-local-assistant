@@ -39,7 +39,8 @@ def sensitive_path(relative: Path) -> str | None:
         return "archive requiring private-data review"
     if name.endswith(".log"):
         return "local log file"
-    if parts and parts[0] in {"data", "backups", "browser-profile"}:
+    if "chat-attachments" in parts or (parts and parts[0] in
+                                       {"data", "backups", "browser-profile"}):
         return "local application data"
     return None
 

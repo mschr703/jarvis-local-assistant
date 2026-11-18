@@ -17,7 +17,7 @@ from jarvis.instance import InstanceLock
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_FILE_COUNT = 10_000
 MAX_DIRECTORY_COUNT = 2_000
-SUPPORTED_SCHEMA = 52
+SUPPORTED_SCHEMA = 53
 
 
 def sha256(path: Path) -> str:
@@ -80,6 +80,29 @@ def verified_exports(database_path: Path, stage: Path, schema: int) -> list[tupl
     return verified
 
 
+def verified_chat_attachments(database_path: Path, stage: Path, schema: int) -> None:
+    if schema < 53:
+        return
+    try:
+        with closing(sqlite3.connect(database_path)) as db:
+            rows = db.execute("SELECT id,suffix,sha256,size FROM chat_attachments").fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise ValueError("Chatanhangbelege in der Datenbank sind nicht lesbar") from exc
+    for attachment_id, suffix, expected_hash, expected_size in rows:
+        try:
+            if (str(UUID(attachment_id)) != attachment_id
+                    or suffix not in {".txt", ".md", ".markdown", ".docx"}
+                    or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
+                    or type(expected_size) is not int or not 0 < expected_size <= 512 * 1024):
+                raise ValueError("Ungültiger Chatanhangbeleg")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Ungültiger Chatanhangbeleg") from exc
+        original = stage / "chat-attachments" / f"{attachment_id}{suffix}"
+        if (not original.is_file() or original.stat().st_size != expected_size
+                or sha256(original) != expected_hash):
+            raise ValueError("Chatanhang fehlt oder weicht vom Original ab")
+
+
 def create_backup(data_dir: Path, destination: Path,
                   *, owned_lock: InstanceLock | None = None) -> dict:
     data_dir, destination = Path(data_dir).resolve(), Path(destination).resolve()
@@ -123,7 +146,8 @@ def create_backup(data_dir: Path, destination: Path,
             if schema > SUPPORTED_SCHEMA:
                 raise ValueError("Datenbank-Schema ist neuer als diese Jarvis-Version")
             visited_directories = 0
-            for dirname in ("outputs", "notes", "browser-screenshots", "cad-models"):
+            for dirname in ("outputs", "notes", "browser-screenshots", "cad-models",
+                            "chat-attachments"):
                 folder = data_dir / dirname
                 if folder.is_symlink() or folder.is_junction():
                     raise ValueError("Ausgabeordner darf kein Link oder Junction sein")
@@ -158,6 +182,7 @@ def create_backup(data_dir: Path, destination: Path,
                                                          MAX_ARCHIVE_BYTES - staged_bytes)
                             files.append((staged, name))
             verified_exports(stage / "jarvis.db", stage, schema)
+            verified_chat_attachments(stage / "jarvis.db", stage, schema)
             if len(files) > MAX_FILE_COUNT:
                 raise ValueError("Backup enthält zu viele Dateien")
             manifest = {"format": "jarvis-backup-v1", "schema": schema,
@@ -240,11 +265,14 @@ def restore_backup(archive_path: Path, target_dir: Path) -> dict:
                         or name != path.as_posix()
                         or (os.name == "nt" and os.path.isreserved(name))
                         or path.parts[0] not in {"jarvis.db", "checkpoints.db", "outputs", "notes",
-                                                 "browser-screenshots", "cad-models"}):
+                                                 "browser-screenshots", "cad-models",
+                                                 "chat-attachments"}):
                     raise ValueError("Unsicherer Dateiname im Backup")
-                if path.parts[0] not in {"outputs", "notes", "browser-screenshots", "cad-models"} and len(path.parts) != 1:
+                if path.parts[0] not in {"outputs", "notes", "browser-screenshots", "cad-models",
+                                        "chat-attachments"} and len(path.parts) != 1:
                     raise ValueError("Unsicherer Datenbankpfad im Backup")
-                if path.parts[0] in {"outputs", "notes", "browser-screenshots", "cad-models"} and len(path.parts) < 2:
+                if path.parts[0] in {"outputs", "notes", "browser-screenshots", "cad-models",
+                                       "chat-attachments"} and len(path.parts) < 2:
                     raise ValueError("Unsicherer Ausgabe- oder Notizpfad im Backup")
                 if archive.getinfo(name).file_size != meta["size"]:
                     raise ValueError("Dateigröße stimmt nicht mit dem Manifest überein")
@@ -271,6 +299,7 @@ def restore_backup(archive_path: Path, target_dir: Path) -> dict:
                         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                             raise ValueError("Backup-Checkpoints sind nicht intakt")
                 exports = verified_exports(stage / "jarvis.db", stage, schema)
+                verified_chat_attachments(stage / "jarvis.db", stage, schema)
                 if exports:
                     with closing(sqlite3.connect(stage / "jarvis.db")) as db:
                         db.executemany(

@@ -66,9 +66,9 @@ def test_search_archive_restore_delete_and_backup(tmp_path):
                             json={"archived": "invalid"}).status_code == 422
 
     archive = tmp_path / "chats.zip"
-    assert create_backup(root, archive)["schema"] == 52
+    assert create_backup(root, archive)["schema"] == 53
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 52
+    assert restore_backup(archive, restored)["schema"] == 53
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
                                         JARVIS_OLLAMA_MODEL="fixture"))) as client:
         headers = token(client)
@@ -126,7 +126,7 @@ def test_schema37_migration_keeps_chat_messages(tmp_path):
     assert migrated.list_messages(chat["id"])[0]["content"] == "Alte Unterhaltung"
     assert migrated.list_chats("alte")[0]["id"] == chat["id"]
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 52
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 53
 
 
 def test_active_stream_blocks_archive_and_delete(tmp_path, monkeypatch):

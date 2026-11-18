@@ -1,10 +1,10 @@
 # Projektstatus
 
-Stand: 18.11.2026, 00:58 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 18.11.2026, 01:27 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A10a: DOCX-Haupttext aus ausdrücklich freigegebenen Ordnern wird lokal indexiert. Der Parser begrenzt ZIP-Einträge und entpacktes XML, sperrt DTD/Entitäten und zeigt beschädigte oder zu große Dateien einzeln als Fehler. Die vollständige Backend-Regression bestand mit 541 Tests und zwei erwarteten Windows-Skips; nach Ergänzung des ZIP-Eintragstests bestanden alle vier gezielten DOCX-Tests erneut. 23 Frontendtests, Build, Ruff und ein isolierter Edge-Pfad (Freigeben, Indexieren, Suchen, Aktualisieren, 390 Pixel) bestanden. Der Public-Audit meldete in 308 Dateien und der Historie null Funde; Push und CI folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A07a: Kleine TXT-, Markdown- und DOCX-Dateien können für eine lokale Chatnachricht hochgeladen werden. Originalkopie, SHA-256, Nachrichtenbezug, Folgekontext und Backup/Restore sind implementiert. Ein Gespräch mit Anhang wird für OpenRouter gesperrt, damit auch spätere Nachrichten nicht unbeabsichtigt in die Cloud gelangen. Die vollständige Backend-Suite bestand mit 545 Tests und zwei erwarteten Windows-Skips; sechs gezielte Anhangtests, 23 Frontendtests, Build, Ruff und der echte Edge/Ollama-Pfad mit Anhang, Reload, Originaldownload und mobiler Breite bestanden. Der Public-Audit meldet in 311 veröffentlichbaren Dateien und der bisherigen Historie null Funde. Die letzten gezielten Regressionstests nach der Download-Absicherung laufen; Commit, Push und Trello-Abschluss folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 
@@ -19,6 +19,8 @@ Stand: 18.11.2026, 00:58 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf
 - Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
 ## Zuletzt geprüft
+
+- A10a: DOCX-Haupttext aus ausdrücklich freigegebenen Ordnern wird lokal indexiert. Der Parser begrenzt ZIP-Einträge und entpacktes XML, sperrt DTD/Entitäten und zeigt beschädigte oder zu große Dateien einzeln als Fehler. Die vollständige Backend-Regression bestand mit 541 Tests und zwei erwarteten Windows-Skips; nach Ergänzung des ZIP-Eintragstests bestanden alle vier gezielten DOCX-Tests erneut. 23 Frontendtests, Build, Ruff und ein isolierter Edge-Pfad (Freigeben, Indexieren, Suchen, Aktualisieren, 390 Pixel) bestanden. Der Public-Audit meldete in 308 Dateien und der Historie null Funde. Commit `4cad86e` ist öffentlich, GitHub-Lauf [44204023323](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44204023323) grün und die Trello-Teilkarte erledigt.
 
 - A11a: Die gemeinsame lokale Suche über indexierte Dokumente, bewusst gespeicherte Erinnerungen und Arbeitsstände ist veröffentlicht. Die vollständige Backend-Regression bestand mit 537 Tests und zwei erwarteten Windows-Skips; nach einer gezielten Korrektur für Unicode-Dateinamen bestanden alle fünf Suchtests erneut. 23 Frontendtests, Build, Ruff und ein isolierter Edge-Test mit drei Quellarten, Dateinamen, leerer Suche, mobiler Breite und null Modellaufrufen bestanden. Der Public-Audit meldete in 306 Dateien und der Historie null Funde. Commit `788ad0f` ist öffentlich, GitHub-Lauf [44201966883](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44201966883) grün und die Trello-Teilkarte erledigt.
 

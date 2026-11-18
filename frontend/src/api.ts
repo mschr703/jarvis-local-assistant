@@ -14,9 +14,12 @@ export type Message = {
   usage_id?: string | null; usage_duration_seconds?: number | null;
   memory_context?: { proposal_id: string; memory_id: string; text_snapshot: string;
     source_quote: string; used_at: string }[];
+  attachments?: ChatAttachment[];
   evaluation?: { message_id: string; verdict: string; source_quality: string; reason: string;
     regression_case: number; expected_result: string; version: number; updated_at: string } | null;
 };
+export type ChatAttachment = { id: string; filename: string; sha256: string;
+  size: number; message_id?: string | null; status?: string };
 export type Chat = ChatSummary & { messages: Message[] };
 export type ChatCompaction = { chat_id: string; version: number;
   covered_message_ids: string[]; entries: { kind: 'goal' | 'decision' | 'open_question' | 'source';
@@ -81,14 +84,26 @@ export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise
   return response.json();
 }
 
+export async function uploadChatAttachment(chatId: string, file: File,
+  signal: AbortSignal): Promise<ChatAttachment> {
+  const response = await requestWithSession(
+    `/chats/${chatId}/attachments?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST', body: file, signal,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+  if (!response.ok) throw await responseError(response);
+  return response.json() as Promise<ChatAttachment>;
+}
+
 export async function streamChat(
   chatId: string, content: string, signal: AbortSignal, allowCloud: boolean,
   onEvent: (name: string, payload: Record<string, unknown>) => void, skillId: string | null = null,
-  memoryProposalIds: string[] = [],
+  memoryProposalIds: string[] = [], attachmentId: string | null = null,
 ): Promise<void> {
   const response = await requestWithSession(`/chats/${chatId}/stream`, {
     method: 'POST', body: JSON.stringify({ content, allow_cloud: allowCloud, skill_id: skillId,
-      memory_proposal_ids: memoryProposalIds }), signal, credentials: 'same-origin',
+      memory_proposal_ids: memoryProposalIds, attachment_id: attachmentId }), signal,
+    credentials: 'same-origin',
   });
   if (!response.ok) throw await responseError(response);
   if (!response.body) throw new Error('Antwortstream fehlt');
