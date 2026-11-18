@@ -74,6 +74,36 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function verifiedDocumentForLocalChat(documentId: string,
+  expectedPath: string, expectedSha256: string): Promise<File> {
+  const item = await api<{ path: string; size: number; sha256: string | null;
+    status: string; excluded: number }>(`/documents/${encodeURIComponent(documentId)}`);
+  if (item.status !== 'indexed' || item.excluded || item.path !== expectedPath
+      || item.sha256 !== expectedSha256)
+    throw new Error('Der Suchtreffer ist nicht mehr aktuell. Erneut suchen oder das Dokument neu indexieren.');
+  const filename = item.path.split(/[\\/]/).at(-1) || '';
+  if (!/\.(?:txt|md|markdown|docx|pdf)$/i.test(filename))
+    throw new Error('Für den lokalen Chat werden nur TXT, Markdown, DOCX und Text-PDF unterstützt.');
+  if (!filename || filename.length > 120 || /[<>:"|?*\x00-\x1f]/.test(filename))
+    throw new Error('Der Dateiname ist für einen Chatanhang nicht geeignet.');
+  if (!Number.isSafeInteger(item.size) || item.size <= 0 || item.size > 512 * 1024)
+    throw new Error('Der lokale Chatanhang muss zwischen 1 Byte und 512 KiB groß sein.');
+  const response = await requestWithSession(`/documents/${encodeURIComponent(documentId)}/original`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  const declared = Number(response.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > 512 * 1024)
+    throw new Error('Die Originaldatei überschreitet 512 KiB.');
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength !== item.size)
+    throw new Error('Die Originaldatei hat sich während der Übernahme geändert. Erneut suchen.');
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const sha256 = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  if (sha256 !== expectedSha256)
+    throw new Error('Die Originaldatei stimmt nicht mehr mit dem Suchtreffer überein. Erneut suchen.');
+  return new File([bytes], filename, { type: 'application/octet-stream' });
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {

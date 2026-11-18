@@ -52,3 +52,60 @@ test('API zeigt Validierungsfehler als lesbare Meldung', async () => {
   await expect(api('/evening-plans/preview', { method: 'POST', body: '{}' }))
     .rejects.toThrow('Ungültige Eingabe: Input should be greater than or equal to 5');
 });
+
+test('Suchdokument wird nur mit geprüftem Original als lokaler Chatanhang vorbereitet', async () => {
+  const bytes = new TextEncoder().encode('Ein lokaler Quellenbeleg.');
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
+    (value) => value.toString(16).padStart(2, '0')).join('');
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'C:\\Belege\\quelle.md',
+      size: bytes.length, sha256, status: 'indexed', excluded: 0 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(bytes, { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedDocumentForLocalChat } = await import('./api');
+  const file = await verifiedDocumentForLocalChat('dokument-a', 'C:\\Belege\\quelle.md', sha256);
+  expect(file.name).toBe('quelle.md');
+  expect(await file.text()).toBe('Ein lokaler Quellenbeleg.');
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/session', '/api/documents/dokument-a', '/api/documents/dokument-a/original',
+  ]);
+  expect((fetchMock.mock.calls[2][1] as RequestInit).cache).toBe('no-store');
+});
+
+test('Suchdokument mit geändertem Index oder zu großem Original wird nicht geladen', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'C:\\Belege\\quelle.txt',
+      size: 10, sha256: 'neu', status: 'indexed', excluded: 0 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'C:\\Belege\\quelle.txt',
+      size: 512 * 1024 + 1, sha256: 'alt', status: 'indexed', excluded: 0 }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedDocumentForLocalChat } = await import('./api');
+  await expect(verifiedDocumentForLocalChat('dokument-a', 'C:\\Belege\\quelle.txt', 'alt')).rejects.toThrow('nicht mehr aktuell');
+  await expect(verifiedDocumentForLocalChat('dokument-a', 'C:\\Belege\\quelle.txt', 'alt')).rejects.toThrow('512 KiB');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+test('Suchdokument mit verändertem Original wird trotz HTTP 200 abgelehnt', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: '/belege/quelle.txt',
+      size: 4, sha256: 'alt', status: 'indexed', excluded: 0 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response('neu!', { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedDocumentForLocalChat } = await import('./api');
+  await expect(verifiedDocumentForLocalChat('dokument-a', '/belege/quelle.txt', 'alt')).rejects.toThrow('stimmt nicht mehr');
+});
+
+test('Suchdokument mit anderem Pfad wird auch bei gleichem Hash nicht übernommen', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: '/belege/andere.txt',
+      size: 4, sha256: 'gleich', status: 'indexed', excluded: 0 }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedDocumentForLocalChat } = await import('./api');
+  await expect(verifiedDocumentForLocalChat('dokument-a', '/belege/quelle.txt', 'gleich'))
+    .rejects.toThrow('nicht mehr aktuell');
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});

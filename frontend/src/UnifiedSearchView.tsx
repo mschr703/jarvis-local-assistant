@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api } from './api';
+import { api, verifiedDocumentForLocalChat } from './api';
 import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project';
@@ -39,8 +39,9 @@ function draftSource(hit: Hit | SemanticHit): Source | null {
     policy: hit.policy, sha256: hit.sha256, source_status: 'current' };
 }
 
-export default function UnifiedSearchView({ onDraft, onOpenSource }: {
-  onDraft: (sources: Source[]) => void; onOpenSource: (kind: Kind, id: string) => void }) {
+export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, localChatReady }: {
+  onDraft: (sources: Source[]) => void; onOpenSource: (kind: Kind, id: string) => void;
+  onLocalChat: (file: File) => void; localChatReady: boolean }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
@@ -57,6 +58,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource }: {
   const [preferredId, setPreferredId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [preparingChat, setPreparingChat] = useState('');
   useEffect(() => { void api<Folder[]>('/folders').then(setFolders).catch(() => setFolders([])); }, []);
   useEffect(() => { void api<Document[]>('/documents').then(setDocuments).catch(() => setDocuments([])); }, []);
   const refreshModelStatus = async () => {
@@ -137,6 +139,19 @@ export default function UnifiedSearchView({ onDraft, onOpenSource }: {
           [...current, source] : current)} />Für Entwurf auswählen</label>
       <button type="button" onClick={() => onDraft([source])}>
         Mit dieser Fundstelle Entwurf starten</button></div>;
+  };
+  const localChatAction = (hit: Hit | SemanticHit) => {
+    if (hit.kind !== 'document' || !hit.document_id || !hit.sha256
+        || !['current', 'updated'].includes(hit.source_status || '')) return null;
+    const key = `${hit.document_id}:${hit.sha256}`;
+    return <button type="button" disabled={!localChatReady || !!preparingChat}
+      title={!localChatReady ? 'Nur mit lokalem Ollama verfügbar' : undefined}
+      onClick={async () => {
+        setPreparingChat(key); setError('');
+        try { onLocalChat(await verifiedDocumentForLocalChat(hit.document_id!, hit.source, hit.sha256!)); }
+        catch (cause) { setError((cause as Error).message); }
+        finally { setPreparingChat(''); }
+      }}>{preparingChat === key ? 'Original wird geprüft…' : 'Im lokalen Chat verwenden'}</button>;
   };
   const candidates = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
@@ -249,6 +264,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource }: {
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
           <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
+          {localChatAction(hit)}
           {draftActions(hit)}
         </div>
       </article>)}</div>
@@ -298,6 +314,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource }: {
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
           <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
+          {localChatAction(hit)}
           {draftActions(hit)}
         </div>
       </article>)}</div>
