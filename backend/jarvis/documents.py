@@ -135,28 +135,58 @@ class DocumentStore:
         return current
 
     @staticmethod
-    def source_is_current(document: dict) -> bool:
-        """Verify one indexed source against its granted original before citing it."""
+    def _current_source_bytes(document: dict) -> bytes | None:
+        """Return the exact indexed bytes only while the granted original still matches."""
         if (document["excluded"] or document["status"] != "indexed"
-                or not document["sha256"] or not document["size"]):
-            return False
+                or not document["sha256"] or not isinstance(document["size"], int)
+                or not 0 < document["size"] <= MAX_FILE_BYTES):
+            return None
         try:
             root = DocumentStore.granted_root({"path": document["folder_path"]})
             path = Path(document["path"])
             if (path.is_symlink() or path.is_junction()
                     or path.resolve(strict=True) != path
                     or not path.is_relative_to(root)
-                    or path.stat().st_size != document["size"]
-                    or document["size"] > MAX_FILE_BYTES):
-                return False
+                    or path.stat().st_size != document["size"]):
+                return None
             with path.open("rb") as source:
                 contents = source.read(document["size"] + 1)
-            return (len(contents) == document["size"]
+            if (len(contents) == document["size"]
                     and path.resolve(strict=True) == path
                     and path.stat().st_size == document["size"]
-                    and hashlib.sha256(contents).hexdigest() == document["sha256"])
+                    and hashlib.sha256(contents).hexdigest() == document["sha256"]):
+                return contents
         except (OSError, ValueError):
-            return False
+            pass
+        return None
+
+    @staticmethod
+    def source_is_current(document: dict) -> bool:
+        """Verify one indexed source against its granted original before citing it."""
+        return DocumentStore._current_source_bytes(document) is not None
+
+    def original_bytes(self, document_id: str) -> tuple[dict, bytes]:
+        """Serve a verified snapshot, never a later unverified filesystem read."""
+        with self.db.connect() as db:
+            row = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                              JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                             (document_id,)).fetchone()
+        if row is None or row["excluded"] or row["status"] != "indexed":
+            raise LookupError("Indexiertes Dokument nicht gefunden")
+        item = dict(row)
+        contents = self._current_source_bytes(item)
+        if contents is None:
+            raise ValueError("Originaldatei weicht vom Index ab; zuerst neu indexieren")
+        with self.db.connect() as db:
+            current = db.execute("""SELECT d.sha256,d.size,d.status,d.excluded,d.path,
+                                  f.path AS folder_path FROM documents d
+                                  JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                                 (document_id,)).fetchone()
+        if current is None or any(current[key] != item[key] for key in
+                                  ("sha256", "size", "status", "excluded", "path",
+                                   "folder_path")):
+            raise ValueError("Dokumentfreigabe oder Index hat sich geändert")
+        return item, contents
 
     def set_folder_policy(self, folder_id: str, policy: str) -> dict:
         if policy not in {"local_only", "cloud_allowed"}:

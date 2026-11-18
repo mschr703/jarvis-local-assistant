@@ -1760,6 +1760,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Dokument nicht gefunden")
         return item
 
+    @app.get("/documents/{document_id}/original")
+    async def download_document_original(document_id: str):
+        try:
+            item, original = await run_in_threadpool(documents.original_bytes, document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return Response(original, media_type="application/octet-stream",
+                        headers={"Content-Disposition":
+                                 f"attachment; filename*=UTF-8''{quote(Path(item['path']).name)}",
+                                 "Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
+
     @app.get("/documents/{document_id}/markdown")
     async def markdown_read(document_id: str):
         try:

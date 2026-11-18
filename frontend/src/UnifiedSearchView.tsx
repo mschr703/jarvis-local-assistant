@@ -114,6 +114,9 @@ export default function UnifiedSearchView() {
             {hit.policy ? ` · ${hit.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}` : ''}
             {hit.kind === 'project' ? ` · ID ${hit.id}` : ''}
             {` · Ähnlichkeit ${hit.similarity.toFixed(2)}`}</small>
+          {hit.kind === 'document' && hit.document_id && hit.source_status === 'current' &&
+            <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
+              download={hit.title}>Geprüftes Original herunterladen</a>}
         </div>
       </article>)}</div>
     </section>}
@@ -158,6 +161,9 @@ export default function UnifiedSearchView() {
             {hit.passage_id != null ? ` · Fundstelle ${hit.passage_id}` : ''}
             {hit.kind === 'project' ? ` · ID ${hit.id}` : ''}
           </small>
+          {hit.kind === 'document' && hit.document_id && hit.source_status &&
+            <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
+              download={hit.title}>Geprüftes Original herunterladen</a>}
         </div>
       </article>)}</div>
     </section>}
