@@ -24,7 +24,7 @@ type PairingCode = { code: string; expires_at: string };
 type BackupSchedule = { configured: boolean; enabled: boolean; directory?: string;
   time_local?: string; timezone?: string; keep?: number; last_status: string;
   last_error: string | null; last_success_at?: string | null; last_archive?: string | null;
-  last_archive_sha256?: string | null };
+  last_archive_sha256?: string | null; suggested_directory?: string };
 const purposeLabels: Record<string, string> = { chat: 'Chat', draft: 'Entwurf', plan: 'Plan', research: 'Recherche' };
 const statusLabels: Record<string, string> = {
   complete: 'abgeschlossen', running: 'läuft', interrupted: 'unterbrochen',
@@ -56,6 +56,11 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
   const [backupError, setBackupError] = useState('');
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupDownloadBusy, setBackupDownloadBusy] = useState(false);
+  const [backupAction, setBackupAction] = useState<'run' | 'configure' | 'disable' | null>(null);
+  const [backupDisableConfirm, setBackupDisableConfirm] = useState(false);
+  const [backupForm, setBackupForm] = useState({ directory: '', time_local: '03:00',
+    timezone: 'Europe/Paris', keep: 7, passphrase: '', confirm: '' });
+  const backupFormInitialized = useRef(false);
   const backupBusyRef = useRef(false);
   const backupRequest = useRef(0);
   const savingRef = useRef(false);
@@ -97,7 +102,18 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
     const request = ++backupRequest.current;
     try {
       const result = await api<BackupSchedule>('/backups/schedule');
-      if (request === backupRequest.current) { setBackupSchedule(result); setBackupError(''); }
+      if (request === backupRequest.current) {
+        setBackupSchedule(result); setBackupError('');
+        if (!result.enabled) setBackupDisableConfirm(false);
+        if (!backupFormInitialized.current) {
+          backupFormInitialized.current = true;
+          setBackupForm((current) => ({ ...current,
+            directory: result.directory || result.suggested_directory || '',
+            time_local: result.time_local || current.time_local,
+            timezone: result.timezone || current.timezone,
+            keep: result.keep || current.keep }));
+        }
+      }
     } catch (error) {
       if (request === backupRequest.current) setBackupError((error as Error).message);
     }
@@ -162,9 +178,46 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
     backupBusyRef.current = true;
     ++backupRequest.current;
     setBackupBusy(true);
+    setBackupAction('run');
     try { setBackupSchedule(await api<BackupSchedule>('/backups/schedule/run', { method: 'POST' })); setBackupError(''); }
     catch (error) { setBackupError((error as Error).message); }
-    finally { backupBusyRef.current = false; setBackupBusy(false); }
+    finally { backupBusyRef.current = false; setBackupBusy(false); setBackupAction(null); }
+  };
+  const configureBackup = async () => {
+    if (backupBusyRef.current) return;
+    const submitted = backupForm;
+    setBackupForm((current) => ({ ...current, passphrase: '', confirm: '' }));
+    if (submitted.passphrase !== submitted.confirm) {
+      setBackupError('Backup-Passwörter stimmen nicht überein');
+      return;
+    }
+    backupBusyRef.current = true;
+    ++backupRequest.current;
+    setBackupBusy(true);
+    setBackupAction('configure');
+    try {
+      const result = await api<BackupSchedule>('/backups/schedule/configure', { method: 'POST',
+        body: JSON.stringify({ directory: submitted.directory.trim(),
+          time_local: submitted.time_local, timezone: submitted.timezone.trim(),
+          keep: submitted.keep, passphrase: submitted.passphrase }) });
+      setBackupSchedule(result);
+      setBackupDisableConfirm(false);
+      setBackupError('');
+    } catch (error) { setBackupError((error as Error).message); }
+    finally { backupBusyRef.current = false; setBackupBusy(false); setBackupAction(null); }
+  };
+  const disableBackup = async () => {
+    if (backupBusyRef.current) return;
+    backupBusyRef.current = true;
+    ++backupRequest.current;
+    setBackupBusy(true);
+    setBackupAction('disable');
+    try {
+      setBackupSchedule(await api<BackupSchedule>('/backups/schedule/disable', { method: 'POST' }));
+      setBackupDisableConfirm(false);
+      setBackupError('');
+    } catch (error) { setBackupError((error as Error).message); }
+    finally { backupBusyRef.current = false; setBackupBusy(false); setBackupAction(null); }
   };
   const downloadBackup = async () => {
     if (backupDownloadBusy) return;
@@ -209,7 +262,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
     <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Speichere…' : 'Einstellungen speichern'}</button>
     {message && <span className="form-message" role="status">{message}</span>}
     <h4>Geplante verschlüsselte Backups</h4>
-    <p>Einmalig bei gestopptem Jarvis mit <code>scripts/backup_schedule.py configure</code> einrichten. Die Sicherung läuft nur, während Jarvis auf diesem Laptop gestartet ist.</p>
+    <p>Den täglichen Zeitplan hier einrichten oder ändern. Die Sicherung läuft nur, während Jarvis auf diesem Laptop gestartet ist. Archive regelmäßig auf ein anderes Laufwerk kopieren; die Passphrase getrennt aufbewahren.</p>
     {backupError && <p className="notice error" role="status">Backup-Status: {backupError}</p>}
     {!backupSchedule ? <p>Lade Backup-Status…</p> : !backupSchedule.configured ?
       <p>Keine automatische Sicherung eingerichtet.</p> : <>
@@ -218,10 +271,37 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
         {backupSchedule.last_error && <p className="notice error" role="status">Backupfehler: {backupSchedule.last_error}</p>}
         {backupSchedule.last_archive && <p className="hint">Letztes geprüftes Archiv: {backupSchedule.last_archive}{backupSchedule.last_archive_sha256 && <> · SHA-256 {backupSchedule.last_archive_sha256}</>}</p>}
         <div className="item-actions"><button onClick={() => void loadBackupSchedule()}>Backup-Status aktualisieren</button>
-          {backupSchedule.enabled && <button disabled={backupBusy} onClick={() => void runBackupNow()}>{backupBusy ? 'Sichere und prüfe…' : 'Jetzt sichern und prüfen'}</button>}
+          {backupSchedule.enabled && <button disabled={backupBusy || backupDownloadBusy} onClick={() => void runBackupNow()}>{backupAction === 'run' ? 'Sichere und prüfe…' : 'Jetzt sichern und prüfen'}</button>}
           {backupSchedule.last_archive_sha256 && <button disabled={backupBusy || backupDownloadBusy} onClick={() => void downloadBackup()}>{backupDownloadBusy ? 'Prüfe Archiv…' : 'Geprüftes Archiv herunterladen'}</button>}</div>
         {backupSchedule.last_archive_sha256 && <p className="hint">Die Passphrase getrennt vom Archiv aufbewahren. Zum Wiederherstellen siehe README „Backup und Wiederherstellung“.</p>}
       </>}
+    {backupSchedule && <>
+      <form className="backup-schedule-form" onSubmit={(event) => { event.preventDefault(); void configureBackup(); }}>
+        <div className="form-grid">
+          <label>Backup-Zielordner (absoluter Pfad)<input required value={backupForm.directory} maxLength={1000}
+            onChange={(event) => setBackupForm((current) => ({ ...current, directory: event.target.value }))} /></label>
+          <label>Tageszeit<input required type="time" value={backupForm.time_local}
+            onChange={(event) => setBackupForm((current) => ({ ...current, time_local: event.target.value }))} /></label>
+          <label>Zeitzone (IANA)<input required value={backupForm.timezone} maxLength={100}
+            onChange={(event) => setBackupForm((current) => ({ ...current, timezone: event.target.value }))} /></label>
+          <label>Archive behalten<input required type="number" min="1" max="30" value={backupForm.keep}
+            onChange={(event) => setBackupForm((current) => ({ ...current, keep: Number(event.target.value) }))} /></label>
+          <label>Backup-Passphrase (mindestens 12 Zeichen)<input required type="password" autoComplete="new-password"
+            minLength={12} maxLength={256} value={backupForm.passphrase}
+            onChange={(event) => setBackupForm((current) => ({ ...current, passphrase: event.target.value }))} /></label>
+          <label>Passphrase wiederholen<input required type="password" autoComplete="new-password"
+            minLength={12} maxLength={256} value={backupForm.confirm}
+            onChange={(event) => setBackupForm((current) => ({ ...current, confirm: event.target.value }))} /></label>
+        </div>
+        <button className="primary" type="submit" disabled={backupBusy || backupDownloadBusy}>{backupAction === 'configure' ? 'Speichere Zeitplan…' : backupSchedule.configured ? 'Backup-Zeitplan ändern' : 'Backup-Zeitplan einrichten'}</button>
+      </form>
+      {backupSchedule.enabled && <div className="backup-disable">
+        {!backupDisableConfirm ? <button disabled={backupBusy || backupDownloadBusy} onClick={() => setBackupDisableConfirm(true)}>Zeitplan deaktivieren</button> :
+          <><p>Keine weiteren automatischen Sicherungen; vorhandene Archive bleiben erhalten.</p>
+            <div className="item-actions"><button disabled={backupBusy || backupDownloadBusy} onClick={() => void disableBackup()}>{backupAction === 'disable' ? 'Deaktiviere…' : 'Ja, Zeitplan deaktivieren'}</button>
+              <button disabled={backupBusy || backupDownloadBusy} onClick={() => setBackupDisableConfirm(false)}>Abbrechen</button></div></>}
+      </div>}
+    </>}
     <h4>Letzte Modellläufe</h4>
     <div className="item-actions"><button onClick={() => void loadUsage()}>Belege aktualisieren</button></div>
     {usageError ? <p className="notice error">Kostenbelege konnten nicht geladen werden: {usageError}</p> :

@@ -480,6 +480,17 @@ class CredentialInput(BaseModel):
     secret: Any
 
 
+class BackupScheduleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    directory: str = Field(min_length=1, max_length=1000)
+    time_local: str = Field(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    timezone: str = Field(min_length=1, max_length=100)
+    keep: int = Field(ge=1, le=30, strict=True)
+    # Handprüfung: FastAPI würde bei Field-Fehlern den Klartext als "input" ausgeben.
+    passphrase: Any = Field(repr=False)
+
+
 class CredentialRotateInput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -949,6 +960,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/backups/schedule")
     async def backup_schedule_status():
         return await run_in_threadpool(scheduled_backups.status)
+
+    @app.post("/backups/schedule/configure")
+    async def backup_schedule_configure(request: Request):
+        try:
+            data = BackupScheduleInput.model_validate(await request.json())
+        except (ValueError, TypeError):
+            # Keine FastAPI-Validierungsdetails: sie könnten die Passphrase enthalten.
+            raise HTTPException(422, "Backup-Eingaben sind ungültig") from None
+        if not isinstance(data.passphrase, str) or not 12 <= len(data.passphrase) <= 256:
+            raise HTTPException(422, "Backup-Passwort benötigt 12 bis 256 Zeichen")
+        try:
+            return await run_in_threadpool(scheduled_backups.configure,
+                                           Path(data.directory), data.time_local,
+                                           data.timezone, data.keep,
+                                           data.passphrase, in_process=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/backups/schedule/disable")
+    async def backup_schedule_disable():
+        try:
+            return await run_in_threadpool(scheduled_backups.disable, in_process=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.post("/backups/schedule/run")
     async def backup_schedule_run():

@@ -110,6 +110,27 @@ def test_rotation_retains_just_created_archive_even_with_future_named_file(tmp_p
     assert current.exists() and manual.exists() and not future.exists()
 
 
+def test_backup_configuration_errors_never_echo_passphrase(tmp_path):
+    data = tmp_path / "data"
+    settings = Settings(JARVIS_DATA_DIR=data, JARVIS_OLLAMA_MODEL="fixture")
+    password = "synthetische lange Testpassphrase"
+    payload = {"directory": str(tmp_path / "backups"), "time_local": "03:00",
+               "timezone": "Europe/Paris", "keep": 2, "passphrase": password}
+    with TestClient(create_app(settings)) as client:
+        token = client.get("/session").json()["csrf"]
+        for invalid in ({"passphrase": "kurz"}, {"time_local": "25:99"},
+                        {"keep": "zwei"}, {"directory": "relative/backups"}):
+            response = client.post("/backups/schedule/configure", json=payload | invalid,
+                                   headers={"x-jarvis-csrf": token})
+            assert response.status_code == 422
+            assert password not in response.text
+            assert "kurz" not in response.text
+        missing = {key: value for key, value in payload.items() if key != "keep"}
+        response = client.post("/backups/schedule/configure", json=missing,
+                               headers={"x-jarvis-csrf": token})
+        assert response.status_code == 422 and password not in response.text
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
 def test_dpapi_user_secret_roundtrip_and_tamper():
     password = "Testpassphrase mit vielen Wörtern"
@@ -272,6 +293,86 @@ def test_download_last_verified_archive_and_restore(profile, tmp_path):
         config["last_archive"] = str(foreign)
         schedule.path.write_text(json.dumps(config), encoding="utf-8")
         assert client.get("/backups/schedule/latest").status_code == 409
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
+def test_api_configure_and_disable_while_app_runs(profile):
+    data, _, directory = profile
+    settings = Settings(JARVIS_DATA_DIR=data, JARVIS_OLLAMA_MODEL="fixture")
+    password = "lange API Testpassphrase"
+    payload = {"directory": str(directory), "time_local": "00:00",
+               "timezone": "Europe/Paris", "keep": 2, "passphrase": password}
+    with TestClient(create_app(settings)) as client:
+        token = client.get("/session").json()["csrf"]
+        assert client.post("/backups/schedule/configure", json=payload).status_code == 403
+        bad = client.post("/backups/schedule/configure", json=payload | {"passphrase": "kurz"},
+                          headers={"x-jarvis-csrf": token})
+        assert bad.status_code == 422 and "kurz" not in bad.text
+        missing = client.post("/backups/schedule/configure",
+                              json={key: value for key, value in payload.items() if key != "keep"},
+                              headers={"x-jarvis-csrf": token})
+        assert missing.status_code == 422 and password not in missing.text
+        invalid_time = client.post("/backups/schedule/configure",
+                                   json=payload | {"time_local": "25:99"},
+                                   headers={"x-jarvis-csrf": token})
+        assert invalid_time.status_code == 422 and password not in invalid_time.text
+        relative = client.post("/backups/schedule/configure",
+                               json=payload | {"directory": "relative/backups"},
+                               headers={"x-jarvis-csrf": token})
+        assert relative.status_code == 422 and "absoluter Pfad" in relative.text
+        inside = client.post("/backups/schedule/configure",
+                             json=payload | {"directory": str(data / "backups")},
+                             headers={"x-jarvis-csrf": token})
+        assert inside.status_code == 422 and password not in inside.text
+        assert not (data / "backups").exists()
+        response = client.post("/backups/schedule/configure", json=payload,
+                               headers={"x-jarvis-csrf": token})
+        assert response.status_code == 200 and response.json()["enabled"]
+        assert password not in response.text
+        assert "secret_b64" not in client.get("/backups/schedule").text
+        assert password not in (data / "backup_schedule.json").read_text(encoding="utf-8")
+        created = client.post("/backups/schedule/run", headers={"x-jarvis-csrf": token})
+        assert created.status_code == 200 and created.json()["last_status"] == "succeeded"
+        archive = Path(created.json()["last_archive"])
+        assert archive.exists()
+        assert client.post("/backups/schedule/disable").status_code == 403
+        disabled = client.post("/backups/schedule/disable", headers={"x-jarvis-csrf": token})
+        assert disabled.status_code == 200 and not disabled.json()["enabled"]
+        assert archive.exists()
+        assert client.post("/backups/schedule/run", headers={"x-jarvis-csrf": token}).status_code == 409
+    with TestClient(create_app(settings)) as restarted:
+        restarted.get("/session")
+        assert not restarted.get("/backups/schedule").json()["enabled"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
+def test_live_configuration_waits_for_running_backup(profile):
+    data, _, directory = profile
+    lock = InstanceLock(data / "jarvis.lock")
+    lock.acquire()
+    schedule = ScheduledBackup(data, lock)
+    errors = []
+    schedule._tick_lock.acquire()
+    try:
+        worker = threading.Thread(
+            target=lambda: _capture_configure_error(schedule, directory, errors), daemon=True)
+        worker.start()
+        time.sleep(0.1)
+        assert worker.is_alive() and not schedule.path.exists()
+    finally:
+        schedule._tick_lock.release()
+        worker.join(timeout=5)
+        lock.release()
+    assert not worker.is_alive() and not errors
+    assert schedule.status()["enabled"]
+
+
+def _capture_configure_error(schedule, directory, errors):
+    try:
+        schedule.configure(directory, "03:00", "Europe/Paris", 2,
+                           "lange Testpassphrase", in_process=True)
+    except Exception as exc:  # noqa: BLE001 - Threadfehler im Haupttest sichtbar machen.
+        errors.append(exc)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")

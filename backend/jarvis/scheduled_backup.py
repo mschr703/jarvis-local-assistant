@@ -94,7 +94,8 @@ class ScheduledBackup:
         return config
 
     def configure(self, directory: Path, time_local: str, timezone: str,
-                  keep: int, passphrase: str, *, now: datetime | None = None) -> dict:
+                  keep: int, passphrase: str, *, now: datetime | None = None,
+                  in_process: bool = False) -> dict:
         if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", time_local):
             raise ValueError("Backup-Uhrzeit im Format HH:MM angeben")
         try:
@@ -105,7 +106,12 @@ class ScheduledBackup:
             raise ValueError("Aufbewahrung muss 1 bis 30 Backups umfassen")
         if not isinstance(passphrase, str) or len(passphrase) < 12:
             raise ValueError("Backup-Passwort benötigt mindestens 12 Zeichen")
-        directory = Path(directory).resolve()
+        directory = Path(directory)
+        if not directory.is_absolute():
+            raise ValueError("Backup-Ziel muss ein absoluter Pfad sein")
+        if directory.is_symlink() or directory.is_junction():
+            raise ValueError("Backup-Ziel darf kein Link oder Junction sein")
+        directory = directory.resolve()
         if directory.is_relative_to(self.data_dir):
             raise ValueError("Backup-Ziel muss außerhalb des Jarvis-Datenordners liegen")
         if directory.is_symlink() or directory.is_junction():
@@ -121,29 +127,49 @@ class ScheduledBackup:
                                         if current.strftime("%H:%M") >= time_local else None),
                   "last_status": "configured", "last_error": None, "last_success_at": None,
                   "last_archive": None, "last_archive_sha256": None}
-        if self.owned_lock is not None:
-            raise RuntimeError("Backup-Planung nur bei gestopptem Jarvis ändern")
-        lock = InstanceLock(self.data_dir / "jarvis.lock")
-        lock.acquire()
-        try:
-            _save(self.path, config)
-        finally:
-            lock.release()
+        if in_process:
+            if self.owned_lock is None:
+                raise RuntimeError("Backup-Planung läuft nicht in Jarvis")
+            with self._tick_lock:
+                if self._closing:
+                    raise RuntimeError("Backup-Dienst wird beendet")
+                _save(self.path, config)
+        else:
+            if self.owned_lock is not None:
+                raise RuntimeError("Backup-Planung nur bei gestopptem Jarvis ändern")
+            lock = InstanceLock(self.data_dir / "jarvis.lock")
+            lock.acquire()
+            try:
+                _save(self.path, config)
+            finally:
+                lock.release()
         return self.status()
 
-    def disable(self) -> dict:
-        if self.owned_lock is not None:
-            raise RuntimeError("Backup-Planung nur bei gestopptem Jarvis ändern")
-        lock = InstanceLock(self.data_dir / "jarvis.lock")
-        lock.acquire()
-        try:
-            config = self._load()
-            if config is None:
-                raise ValueError("Keine Backup-Planung eingerichtet")
-            config["enabled"] = False
-            _save(self.path, config)
-        finally:
-            lock.release()
+    def disable(self, *, in_process: bool = False) -> dict:
+        if in_process:
+            if self.owned_lock is None:
+                raise RuntimeError("Backup-Planung läuft nicht in Jarvis")
+            with self._tick_lock:
+                if self._closing:
+                    raise RuntimeError("Backup-Dienst wird beendet")
+                config = self._load()
+                if config is None:
+                    raise ValueError("Keine Backup-Planung eingerichtet")
+                config["enabled"] = False
+                _save(self.path, config)
+        else:
+            if self.owned_lock is not None:
+                raise RuntimeError("Backup-Planung nur bei gestopptem Jarvis ändern")
+            lock = InstanceLock(self.data_dir / "jarvis.lock")
+            lock.acquire()
+            try:
+                config = self._load()
+                if config is None:
+                    raise ValueError("Keine Backup-Planung eingerichtet")
+                config["enabled"] = False
+                _save(self.path, config)
+            finally:
+                lock.release()
         return self.status()
 
     def status(self) -> dict:
@@ -151,14 +177,17 @@ class ScheduledBackup:
             config = self._load()
         except ValueError as exc:
             return {"configured": True, "enabled": False, "last_status": "failed",
-                    "last_error": str(exc)}
+                    "last_error": str(exc),
+                    "suggested_directory": str(Path.home() / "JarvisBackups")}
         if config is None:
             return {"configured": False, "enabled": False, "last_status": "not_configured",
-                    "last_error": None}
+                    "last_error": None,
+                    "suggested_directory": str(Path.home() / "JarvisBackups")}
         public = ("enabled", "directory", "time_local", "timezone", "keep",
                   "last_attempt_date", "last_status", "last_error", "last_success_at",
                   "last_archive", "last_archive_sha256")
-        return {key: config.get(key) for key in public} | {"configured": True}
+        return {key: config.get(key) for key in public} | {
+            "configured": True, "suggested_directory": str(Path.home() / "JarvisBackups")}
 
     def open_verified_archive(self):
         """Öffnet ausschließlich das zuletzt geprüfte, unveränderte Auto-Archiv."""

@@ -521,7 +521,9 @@ Der Restore benötigt einen **neuen**, noch nicht vorhandenen Zielordner. Er ent
 
 ### Tägliche verschlüsselte Sicherung
 
-Jarvis **stoppen**, dann einen Zielordner außerhalb von `%LOCALAPPDATA%\JarvisLocal` und die gewünschte lokale Uhrzeit festlegen:
+In der laufenden Oberfläche **Übersicht → Geplante verschlüsselte Backups** öffnen. Einen absoluten Zielordner außerhalb des Jarvis-Datenprofils (vorgeschlagen: `%USERPROFILE%\JarvisBackups`), eine Tageszeit, IANA-Zeitzone, 1–30 aufzubewahrende Archive und eine mindestens zwölf Zeichen lange Passphrase mit Wiederholung eingeben. **„Backup-Zeitplan einrichten“** speichert den Plan; das Passwortfeld wird danach geleert. Danach mit **„Jetzt sichern und prüfen“** sofort ein Testarchiv erstellen und mit **„Geprüftes Archiv herunterladen“** eine externe Kopie sichern. **„Zeitplan deaktivieren“** verlangt einen zweiten Klick; bereits erzeugte Archive bleiben erhalten. Zum Ändern des Zeitplans alle Werte einschließlich Passphrase erneut eingeben. Ein neuer Plan setzt den angezeigten letzten Lauf zurück, löscht vorhandene Archive aber nicht.
+
+Alternativ kann der Plan bei **gestopptem** Jarvis über die CLI eingerichtet werden:
 
 ```powershell
 .\scripts\stop.ps1
@@ -530,7 +532,7 @@ python -m uv run --project backend python scripts/backup_schedule.py configure -
 python scripts/dev.py
 ```
 
-Die CLI fragt eine mindestens zwölf Zeichen lange Passphrase zweimal ohne Anzeige ab. Nur eine mit **Windows-DPAPI für diesen Benutzer auf diesem Laptop geschützte** Fassung liegt in `%LOCALAPPDATA%\JarvisLocal\backup_schedule.json`; sie ist nicht im eigentlichen Backup enthalten. Die `.jbackup`-Archive bleiben mit der gemerkten Passphrase auch auf einem anderen Gerät wiederherstellbar. Nach Wiederherstellung auf einem anderen Gerät muss der Zeitplan neu eingerichtet werden.
+Die CLI fragt die Passphrase zweimal ohne Anzeige ab; das Formular prüft ebenfalls beide Eingaben. Nur eine mit **Windows-DPAPI für diesen Benutzer auf diesem Laptop geschützte** Fassung liegt in `%LOCALAPPDATA%\JarvisLocal\backup_schedule.json`; sie ist nicht im eigentlichen Backup enthalten. API-Antworten geben die Passphrase nie zurück. Die `.jbackup`-Archive bleiben mit der gemerkten Passphrase auch auf einem anderen Gerät wiederherstellbar. Nach Wiederherstellung auf einem anderen Gerät muss der Zeitplan neu eingerichtet werden.
 
 Solange Jarvis läuft, prüft ein lokaler Worker einmal pro Minute den Termin. Er sichert höchstens einmal pro lokalem Kalendertag; eine fehlende Winterzeitstunde wird danach nachgeholt, die doppelte Stunde löst nur einmal aus. War Jarvis zur Uhrzeit aus, holt es den Lauf beim nächsten Start **am selben Tag** nach. Ein erzeugtes Archiv wird vor Erfolgsmeldung in ein temporäres Profil zurückgespielt und geprüft. Danach bleiben höchstens die gewählten Anzahl automatisch erzeugter `jarvis-auto-*.jbackup`-Dateien im Zielordner; manuelle Archive werden nicht gelöscht. Der Status, der letzte Erfolg und Fehler stehen in **Übersicht → Geplante verschlüsselte Backups**. Dort kann auch „Jetzt sichern und prüfen“ bewusst gestartet werden. Der Healthcheck zeigt einen fehlgeschlagenen Lauf als gestörten Dienst.
 
