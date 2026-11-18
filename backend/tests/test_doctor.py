@@ -68,3 +68,15 @@ def test_json_output_is_ascii_and_has_no_configuration_value(monkeypatch, capsys
     output = capsys.readouterr().out
     assert output.isascii() and "\\u00fc" in output
     assert json.loads(output)["ok"] is True
+
+
+def test_python_command_is_required_even_when_script_uses_an_absolute_interpreter(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(doctor, "program_check",
+                        lambda name, *_args: name != "python")
+    monkeypatch.setattr(doctor, "installed_models", lambda _url: {doctor.CHAT_MODEL})
+    report = doctor.build_report(tmp_path)
+    python = next(item for item in report["checks"] if item["name"] == "Python")
+    assert python["ok"] is False and python["required"] is True
+    assert report["ok"] is False

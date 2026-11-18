@@ -98,9 +98,9 @@ def build_report(root: Path = ROOT) -> dict:
 
     add("Windows", platform.system() == "Windows", True,
         "Windows 11 verwenden." if platform.system() != "Windows" else "Windows erkannt.")
-    add("Python", sys.version_info >= (3, 13), True,
-        "Python 3.13 oder neuer installieren." if sys.version_info < (3, 13)
-        else "Python-Version geeignet.")
+    python_ready = sys.version_info >= (3, 13) and program_check("python", (3, 13))
+    add("Python", python_ready, True,
+        "Python 3.13 oder neuer installieren und den Befehl python zum PATH hinzufügen.")
     add("Node.js", program_check("node", (24,)), True,
         "Node.js 24 oder neuer installieren, falls dieser Punkt fehlt.")
     add("pnpm", program_check("pnpm", (11,)), True,
