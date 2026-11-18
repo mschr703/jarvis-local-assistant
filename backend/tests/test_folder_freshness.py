@@ -107,3 +107,23 @@ def test_freshness_api_requires_session_and_returns_bounded_report(tmp_path):
         assert response.json()["stale"] == 1
         assert response.json()["stale_sources"][0]["path"] == str(one)
         assert client.get("/folders/missing/freshness").status_code == 404
+
+
+def test_single_document_open_check_tracks_changed_original_and_removal(tmp_path):
+    db, store, folder, one, _ = sample(tmp_path)
+    document = next(item for item in store.documents() if item["path"] == str(one))
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        url = f"/documents/{document['id']}/freshness"
+        assert client.get(url).status_code == 401
+        client.get("/session")
+        current = client.get(url)
+        assert current.status_code == 200 and current.json()["status"] == "current"
+        assert "Wohnung und Kaution" not in current.text
+        one.write_text("Eins: Wohnung und Vertrag", encoding="utf-8")
+        stale = client.get(url)
+        assert stale.status_code == 200 and stale.json()["status"] == "needs_reindex"
+        store.index_folder(folder["id"])
+        assert client.get(url).json()["status"] == "current"
+        store.remove_folder(folder["id"])
+        assert client.get(url).status_code == 404

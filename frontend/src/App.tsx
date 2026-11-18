@@ -25,6 +25,9 @@ const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
 
 type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
 type QuickCapture = { text: string; files: string[]; notice: string };
+type SearchSourceRequest =
+  | { kind: 'project'; id: string; serial: number }
+  | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
 const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
@@ -55,6 +58,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
   const [selectedSources, setSelectedSources] = useState<Source[]>([]);
+  const [requestedSource, setRequestedSource] = useState<SearchSourceRequest | null>(null);
+  const sourceOpenSequence = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [suggestedTaskTitle, setSuggestedTaskTitle] = useState('');
   const [suggestedResearchQuestion, setSuggestedResearchQuestion] = useState('');
@@ -93,7 +98,9 @@ export default function App() {
   const healthRequest = useRef(0);
   const unreadRequest = useRef(0);
   const modelReady = Boolean(health?.configured) && !error;
-  const navigate = (target: Page) => {
+  const navigate = (target: Page, fromSearchSource = false) => {
+    if (!fromSearchSource && (target === 'documents' || target === 'work_states'))
+      setRequestedSource(null);
     if (target === 'documents') setDocumentsOpened(true);
     if (target === 'unified_search') setUnifiedSearchOpened(true);
     if (target === 'file_graph') setFileGraphOpened(true);
@@ -223,8 +230,8 @@ export default function App() {
         page === 'activity' ? null :
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
-      {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
-      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} /></div>}
+      {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} requestedSource={requestedSource?.kind === 'document' || requestedSource?.kind === 'memory' ? requestedSource : null} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
+      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id) => { setRequestedSource({ kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
       {learningOpened && <div hidden={page !== 'learning'}><LearningView visible={page === 'learning'} sources={selectedSources} configured={modelReady} provider={health?.provider || 'ollama'} onDocuments={() => navigate('documents')} /></div>}
@@ -233,7 +240,7 @@ export default function App() {
       {tasksOpened && <div hidden={page !== 'tasks'}><TaskView visible={page === 'tasks'} onNotificationsChanged={refreshUnreadReminders} suggestedTitle={suggestedTaskTitle} onSuggestionTaken={() => setSuggestedTaskTitle('')} /></div>}
       {timeModelOpened && <div hidden={page !== 'time_model'}><TimeModelView visible={page === 'time_model'} /></div>}
       {eveningPlansOpened && <div hidden={page !== 'evening_plans'}><EveningPlanView visible={page === 'evening_plans'} /></div>}
-      {workStatesOpened && <div hidden={page !== 'work_states'}><WorkStateView visible={page === 'work_states'} onTasks={() => navigate('tasks')} onResearch={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
+      {workStatesOpened && <div hidden={page !== 'work_states'}><WorkStateView visible={page === 'work_states'} requestedSource={requestedSource?.kind === 'project' ? requestedSource : null} onTasks={() => navigate('tasks')} onResearch={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
       {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} onChatEvidence={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} onResearchEvidence={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}

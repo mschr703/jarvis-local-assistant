@@ -1875,6 +1875,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Dokument nicht gefunden")
         return item
 
+    @app.get("/documents/{document_id}/freshness")
+    async def document_freshness(document_id: str):
+        try:
+            return await run_in_threadpool(documents.document_freshness, document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @app.get("/documents/{document_id}/original")
     async def download_document_original(document_id: str):
         try:

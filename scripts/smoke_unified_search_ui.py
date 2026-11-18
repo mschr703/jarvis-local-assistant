@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,9 +34,11 @@ def main() -> None:
         docs = DocumentStore(db)
         folder = docs.add_folder(str(allowed), "local_only")
         assert docs.index_folder(folder["id"])["indexed"] == 1
-        docs.add_memory("Orion braucht den Vertrag am Freitag.", "Eigene Notiz", "local_only")
-        WorkStateStore(db, docs, TaskStore(db)).create("Projekt Orion", "Vertrag liegt vor",
-                                                       "", "Unterlagen sammeln", [], [], [])
+        memory = docs.add_memory("Orion braucht den Vertrag am Freitag.", "Eigene Notiz", "local_only")
+        states = WorkStateStore(db, docs, TaskStore(db))
+        project = states.create("Projekt Orion", "Vertrag liegt vor",
+                                "", "Unterlagen sammeln", [], [], [])
+        document = docs.documents()[0]
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -60,6 +63,21 @@ def main() -> None:
                         expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
                         expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
                         expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()
+                        for label, kind, source_id in (
+                            ("Vertrag_Orion.md", "document", document["id"]),
+                            ("Eigene Notiz", "memory", memory["id"]),
+                            ("Arbeitsstand v1", "project", project["id"]),
+                        ):
+                            results.locator("article").filter(has_text=label).get_by_role(
+                                "button", name="Quelle öffnen").click()
+                            target = page.locator(f"#search-source-{kind}-{source_id}")
+                            expect(target).to_be_visible()
+                            expect(target).to_have_class(re.compile("source-opened"))
+                            if kind == "document":
+                                page.get_by_label("Erinnerungstext durchsuchen").fill("nicht-vorhanden")
+                                page.get_by_role("button", name="Wissen suchen").click()
+                            page.get_by_role("button", name="Suche", exact=True).click()
+                            expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible()
                         document_hit = results.locator("article").filter(has_text="Vertrag_Orion.md")
                         document_hit.get_by_role("button", name="Mit dieser Fundstelle Entwurf starten").click()
                         expect(page.get_by_role("heading", name="Entwürfe", exact=True)).to_be_visible()
@@ -74,9 +92,33 @@ def main() -> None:
                         page.get_by_label("Gemeinsame Suche").fill("Saturn")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         expect(results.get_by_text("Keine passenden gespeicherten Quellen gefunden.")).to_be_visible(timeout=30000)
+                        page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible()
+                        states.delete(project["id"], project["version"])
+                        results.locator("article").filter(has_text="Arbeitsstand v1").get_by_role(
+                            "button", name="Quelle öffnen").click()
+                        expect(page.get_by_text("Arbeitsstand nicht gefunden", exact=False)).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        docs.delete_memory(memory["id"])
+                        results.locator("article").filter(has_text="Eigene Notiz").get_by_role(
+                            "button", name="Quelle öffnen").click()
+                        expect(page.get_by_text("Die gesuchte Quelle ist nicht mehr vorhanden.", exact=False)).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        file.write_text("Projekt Orion: Der Vertrag wurde geändert.", encoding="utf-8")
+                        results.locator("article").filter(has_text="Vertrag_Orion.md").get_by_role(
+                            "button", name="Quelle öffnen").click()
+                        expect(page.get_by_text("Das Original hat sich seit der Suche geändert", exact=False)).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_role("button", name="Dokumente", exact=True).click()
+                        expect(page.locator(f"#search-source-document-{document['id']}")).not_to_have_class(
+                            re.compile("source-opened"))
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
-                        print(json.dumps({"sources": 3, "draft_source": "selected_without_model",
+                        print(json.dumps({"sources": 3, "source_navigation": "current_and_stale",
+                                          "draft_source": "selected_without_model",
                                           "filename": "found",
                                           "empty": "shown", "mobile_width": "fits", "model_calls": 0}))
                     finally:

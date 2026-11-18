@@ -143,8 +143,9 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
   fehlt: 'Datei fehlt', ausgeschlossen: 'Ausgeschlossen', freigabe_entfernt: 'Freigabe entfernt',
   pfad_geaendert: 'Pfad geändert', index_ausstehend: 'Index ausstehend', nicht_verfuegbar: 'Nicht verfügbar' };
 
-export default function WorkStateView({ visible, onTasks, onResearch }: {
-  visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void }) {
+export default function WorkStateView({ visible, onTasks, onResearch, requestedSource }: {
+  visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void;
+  requestedSource: { kind: 'project'; id: string; serial: number } | null }) {
   const [items, setItems] = useState<WorkSummary[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -225,7 +226,7 @@ export default function WorkStateView({ visible, onTasks, onResearch }: {
     setPersonTasks(await api<PersonTaskLink[]>(`/work-states/${id}/person-tasks`));
   };
 
-  const refresh = async () => {
+  const refresh = async (skipActive = false) => {
     setConnections(null); setGraph(null); setGraphNeighbors(null); setGraphPaths(null);
     const current = ++request.current;
     const [nextItems, nextDocuments, nextTasks] = await Promise.all([
@@ -233,7 +234,7 @@ export default function WorkStateView({ visible, onTasks, onResearch }: {
     ]);
     if (current !== request.current) return;
     setItems(nextItems); setDocuments(nextDocuments); setTasks(nextTasks);
-    if (active) {
+    if (active && !skipActive) {
       const [refreshed, schedule, reports, research, refreshedPeople, refreshedPersonTasks, refreshedAliases, refreshedMerges, refreshedMemories] = await Promise.all([
         api<ProjectCheck>(`/work-states/${active.id}/check`),
         api<ReviewSchedule | null>(`/work-states/${active.id}/reviews/schedule`),
@@ -257,9 +258,25 @@ export default function WorkStateView({ visible, onTasks, onResearch }: {
     }
   };
   useEffect(() => {
-    if (visible) void refresh().catch((error: Error) => setNotice(error.message));
-    return () => { ++request.current; };
-  }, [visible]);
+    let current = true;
+    if (visible) void refresh(Boolean(requestedSource))
+      .then(() => {
+        if (current && requestedSource) {
+          setActive(null); setProjectCheck(null); setEditingId(null); setNotice('');
+          select(requestedSource.id);
+        }
+      })
+      .catch((error: Error) => { if (current) setNotice(error.message); });
+    return () => { current = false; ++request.current; };
+  }, [visible, requestedSource?.serial]);
+  useEffect(() => {
+    if (!visible || !requestedSource || active?.id !== requestedSource.id) return;
+    const frame = window.requestAnimationFrame(() => {
+      window.document.getElementById(`search-source-project-${requestedSource.id}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [visible, requestedSource?.serial, active?.id]);
 
   const withBusy = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -587,7 +604,9 @@ export default function WorkStateView({ visible, onTasks, onResearch }: {
         <div className="item-row" key={item.id}><div><strong>{item.project}</strong><small>Weiter: {item.next_step} · {new Date(item.updated_at).toLocaleString('de-DE')}</small></div>
           <button disabled={busy} onClick={() => select(item.id)}>Öffnen</button></div>)}</div>}
     </section>
-    {active && !editingId && <section className="card"><div className="card-heading"><h3>{active.project}</h3><small>Stand {active.version}</small></div>
+    {active && !editingId && <section id={`search-source-project-${active.id}`}
+      className={`card${requestedSource?.id === active.id ? ' source-opened' : ''}`}>
+      <div className="card-heading"><h3>{active.project}</h3><small>Stand {active.version}</small></div>
       <div className="work-sections"><div><strong>Bestätigte Ergebnisse</strong><p>{active.confirmed || 'Keine eingetragen'}</p></div>
         <div><strong>Offene Fragen</strong><p>{active.open_questions || 'Keine eingetragen'}</p></div>
         <div><strong>Nächster Schritt</strong><p>{active.next_step}</p></div></div>

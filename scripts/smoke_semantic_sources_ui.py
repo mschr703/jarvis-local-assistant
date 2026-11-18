@@ -38,6 +38,7 @@ def main() -> None:
         states = WorkStateStore(db, docs, TaskStore(db))
         project = states.create("Umzug", "Mietvertrag unterschrieben", "",
                                 "Schlüssel am Freitag abholen", [], [], [])
+        document = docs.documents()[0]
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -65,6 +66,17 @@ def main() -> None:
                         expect(results.get_by_text("Ähnlichkeit", exact=False).first).to_be_visible()
                         assert "Kuchen.md" not in results.locator("article").first.inner_text()
                         assert not overflow_nodes(page), overflow_nodes(page)
+
+                        for label, kind, source_id in (
+                            ("Kuchen.md", "document", document["id"]),
+                            ("Gespräch vom Dienstag", "memory", memory["id"]),
+                            ("Umzug", "project", project["id"]),
+                        ):
+                            results.locator("article").filter(has_text=label).get_by_role(
+                                "button", name="Quelle öffnen").click()
+                            expect(page.locator(f"#search-source-{kind}-{source_id}")).to_be_visible()
+                            page.get_by_role("button", name="Suche", exact=True).click()
+                            expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible()
 
                         kind_select = page.get_by_label("Quelltyp der gemeinsamen Suche")
                         for kind, label in (("memory", "0 Dokumente · 1 Erinnerungen · 0 Arbeitsstände"),
@@ -115,6 +127,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"source_kinds": 3, "filters": "lexical_and_semantic",
+                                          "source_navigation": "all_three_semantic",
                                           "draft_source": "selected_without_model",
                                           "updates": "current",
                                           "mobile_width": "fits", "cloud_calls": 0}))

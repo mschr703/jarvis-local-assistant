@@ -39,7 +39,8 @@ function draftSource(hit: Hit | SemanticHit): Source | null {
     policy: hit.policy, sha256: hit.sha256, source_status: 'current' };
 }
 
-export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Source[]) => void }) {
+export default function UnifiedSearchView({ onDraft, onOpenSource }: {
+  onDraft: (sources: Source[]) => void; onOpenSource: (kind: Kind, id: string) => void }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
@@ -247,6 +248,7 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
           {hit.kind === 'document' && hit.document_id && hit.source_status === 'current' &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
+          <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
           {draftActions(hit)}
         </div>
       </article>)}</div>
@@ -295,6 +297,7 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
           {hit.kind === 'document' && hit.document_id && hit.source_status &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
+          <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
           {draftActions(hit)}
         </div>
       </article>)}</div>

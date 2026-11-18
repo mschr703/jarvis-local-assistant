@@ -165,6 +165,28 @@ class DocumentStore:
         """Verify one indexed source against its granted original before citing it."""
         return DocumentStore._current_source_bytes(document) is not None
 
+    def document_freshness(self, document_id: str) -> dict:
+        """Prüft eine einzelne Originaldatei vor dem Öffnen aus der Suche."""
+        with self.db.connect() as db:
+            row = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                                JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                             (document_id,)).fetchone()
+        if row is None:
+            raise LookupError("Dokument nicht mehr vorhanden")
+        snapshot = dict(row)
+        current = self.source_is_current(snapshot)
+        with self.db.connect() as db:
+            latest = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                                   JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                                (document_id,)).fetchone()
+        if latest is None or any(latest[key] != snapshot[key] for key in
+                                 ("folder_id", "folder_path", "path", "sha256", "size",
+                                  "status", "excluded", "policy")):
+            raise ValueError("Index während der Prüfung geändert; erneut prüfen")
+        return {"document_id": document_id,
+                "status": "current" if current else "needs_reindex",
+                "index_sha256": snapshot["sha256"]}
+
     def folder_freshness(self, folder_id: str) -> dict:
         """Inspect a bounded set of indexed originals without changing the index."""
         folder = self.get_folder(folder_id)
