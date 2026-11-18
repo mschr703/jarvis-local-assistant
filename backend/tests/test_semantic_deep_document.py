@@ -29,7 +29,7 @@ def sample(tmp_path):
     return db, docs, folder, document, file
 
 
-def fake_embed(_url, texts):
+def fake_embed(_url, texts, _cache_path=None):
     return [[1.0, 0.0] if "Kaution" in text else [0.0, 1.0] for text in texts]
 
 

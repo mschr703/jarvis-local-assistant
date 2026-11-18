@@ -9,6 +9,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from jarvis.semantic_cache import PersistentEmbeddingCache
+
+SEARCH_SOURCE_CHANGED = {
+    "folder_indexed", "folder_removed", "folder_policy_changed",
+    "document_excluded", "document_included", "memory_updated", "memory_deleted",
+    "memory_correct", "memory_delete",
+    "work_state_updated", "work_state_deleted",
+}
+
 
 def utcnow() -> str:
     return datetime.now(UTC).isoformat()
@@ -1255,6 +1264,8 @@ class Database:
     def log(self, kind: str, detail: str) -> None:
         with self.connect() as db:
             db.execute("INSERT INTO activity VALUES(?,?,?,?)", (str(uuid4()), kind, detail, utcnow()))
+        if kind in SEARCH_SOURCE_CHANGED:
+            PersistentEmbeddingCache(self.path.parent / "semantic-embeddings.sqlite").clear()
 
     def list_activity(self, limit: int = 100) -> list[dict]:
         with self.connect() as db:

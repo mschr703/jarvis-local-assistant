@@ -32,7 +32,7 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
     db, docs, _, memory, project, source = sample(tmp_path)
     observed = []
 
-    def fake_embed(_url, texts):
+    def fake_embed(_url, texts, _cache_path=None):
         observed.extend(texts)
         return [[1.0, 0.0] for _ in texts]
 
@@ -56,7 +56,7 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
 def test_changed_memory_and_project_are_not_displayed(tmp_path, monkeypatch):
     db, _, _, memory, project, _ = sample(tmp_path)
 
-    def change_during_embed(_url, texts):
+    def change_during_embed(_url, texts, _cache_path=None):
         with db.connect() as connection:
             connection.execute("UPDATE memories SET text=? WHERE id=?",
                                ("Neue Erinnerung", memory["id"]))
@@ -85,7 +85,7 @@ def test_semantic_search_works_without_documents_and_bounds_saved_sources(tmp_pa
     monkeypatch.setattr(module, "MAX_PROJECTS", 2)
     observed = []
 
-    def fake_embed(_url, texts):
+    def fake_embed(_url, texts, _cache_path=None):
         observed.extend(texts)
         return [[1.0] for _ in texts]
 
@@ -100,7 +100,7 @@ def test_semantic_search_works_without_documents_and_bounds_saved_sources(tmp_pa
 def test_semantic_source_api_returns_evidence(tmp_path, monkeypatch):
     db, _, _, memory, project, _ = sample(tmp_path)
     monkeypatch.setattr("jarvis.semantic_search.embed_texts",
-                        lambda _url, texts: [[1.0] for _ in texts])
+                        lambda _url, texts, _cache_path=None: [[1.0] for _ in texts])
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
                                         JARVIS_OLLAMA_MODEL="fixture"))) as client:
         client.get("/session")

@@ -11,6 +11,8 @@ import httpx
 
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
+from jarvis.semantic_cache import PersistentEmbeddingCache
 
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
@@ -19,7 +21,6 @@ MAX_MEMORIES = 30
 MAX_PROJECTS = 20
 MAX_RESULTS = 10
 MAX_DEEP_RESULTS = 5
-CACHE_LIMIT = 200
 _cache_lock = threading.Lock()
 _embedding_cache: OrderedDict[tuple[str, str, str], list[float]] = OrderedDict()
 _active_digest: dict[str, str] = {}
@@ -111,11 +112,12 @@ def _embed_request(client: httpx.Client, url: str, texts: list[str]) -> list[lis
     return vectors
 
 
-def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
+def embed_texts(url: str, texts: list[str], cache_path: Path | None = None) -> list[list[float]]:
     if not _local_ollama_url(url):
         raise SemanticSearchError("Semantische Suche benötigt eine lokale Ollama-Adresse")
     with httpx.Client(timeout=120, trust_env=False) as client:
         digest = _model_digest(client, url) if len(texts) > 1 else None
+        disk_cache = PersistentEmbeddingCache(cache_path) if digest and cache_path else None
         hits: dict[int, list[float]] = {}
         missing = list(range(1, len(texts)))
         if digest:
@@ -130,11 +132,28 @@ def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
                         hits[index] = cached
                         _embedding_cache.move_to_end(key)
                 missing = [index for index in missing if index not in hits]
+            if disk_cache and missing:
+                hashes = {index: hashlib.sha256(texts[index].encode("utf-8")).hexdigest()
+                          for index in missing}
+                saved = disk_cache.read(digest, list(hashes.values()))
+                with _cache_lock:
+                    if _active_digest.get(url) == digest:
+                        for index, text_hash in hashes.items():
+                            if text_hash in saved:
+                                hits[index] = saved[text_hash]
+                                key = (url, digest, text_hash)
+                                _embedding_cache[key] = saved[text_hash]
+                                _embedding_cache.move_to_end(key)
+                        while len(_embedding_cache) > CACHE_LIMIT:
+                            _embedding_cache.popitem(last=False)
+                missing = [index for index in missing if index not in hits]
         request = [texts[0]] + [texts[index] for index in missing]
         vectors = _embed_request(client, url, request)
         if any(len(vector) != len(vectors[0]) for vector in hits.values()):
             with _cache_lock:
                 _embedding_cache.clear()
+            if disk_cache:
+                disk_cache.clear()
             hits.clear()
             missing = list(range(1, len(texts)))
             vectors = _embed_request(client, url, texts)
@@ -157,6 +176,10 @@ def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
                         _embedding_cache.move_to_end(key)
                     while len(_embedding_cache) > CACHE_LIMIT:
                         _embedding_cache.popitem(last=False)
+                    if disk_cache:
+                        disk_cache.write(digest, {
+                            hashlib.sha256(texts[index].encode("utf-8")).hexdigest(): result[index]
+                            for index in missing})
         return result
 
 
@@ -266,6 +289,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
               + [('memory', row, f'{row["source_ref"]}\n{row["text"]}') for row in memories]
               + [('project', row, f'{row["project"]}\n{_project_body(row)}') for row in projects])
     if not corpus:
+        if stale:
+            PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
         return {"query": cleaned, "results": [], "stale_sources": stale,
                 "changed_sources": [], "limited": limited, "model": MODEL,
                 "checked_passages": checked_passages, "checked_memories": 0,
@@ -274,7 +299,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                                  "path": item["path"], "status": item["status"]}
                                 for item in preferences],
                 "counts": {kind: 0 for kind in ("document", "memory", "project")}}
-    vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus])
+    vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus],
+                          db.path.parent / "semantic-embeddings.sqlite")
     question = vectors[0]
     preferences = [] if document_id else _preferences(db, cleaned)
     preferred_status = {item["document_id"]: item["status"] for item in preferences
@@ -339,6 +365,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                           len({row["document_id"] for _, kind, row, _ in ranked_results
                                if kind == "document"}) > MAX_RESULTS)
                or len(memories) > MAX_RESULTS or len(projects) > MAX_RESULTS)
+    if stale or changed_sources:
+        PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
     return {"query": cleaned, "results": selected, "stale_sources": stale,
             "changed_sources": changed_sources, "limited": limited,
             "model": MODEL, "checked_passages": checked_passages,

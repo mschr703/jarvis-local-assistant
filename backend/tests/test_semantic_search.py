@@ -7,6 +7,7 @@ from jarvis.app import create_app
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.semantic_cache import PersistentEmbeddingCache
 from jarvis.semantic_search import SemanticSearchError, embed_texts, search
 
 
@@ -24,7 +25,7 @@ def fixture_store(tmp_path):
     return db, docs, folder, agreement, cake
 
 
-def fake_embed(_url, texts):
+def fake_embed(_url, texts, _cache_path=None):
     assert texts[0] == "Wo liegt mein Mietvertrag?"
     return [[1.0, 0.0] if "Vereinbarung" in text or "Mietvertrag" in text
             else [0.0, 1.0] for text in texts]
@@ -58,8 +59,10 @@ def test_changed_and_excluded_sources_never_reach_embedding_model(tmp_path, monk
 
 def test_source_changed_during_embedding_is_not_returned(tmp_path, monkeypatch):
     db, _, _, agreement, cake = fixture_store(tmp_path)
+    cache = PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite")
+    cache.write("a" * 64, {"b" * 64: [1.0]})
 
-    def mutate(_url, texts):
+    def mutate(_url, texts, _cache_path=None):
         agreement.write_text("Änderung während des Aufrufs", encoding="utf-8")
         return fake_embed(_url, texts)
 
@@ -67,6 +70,7 @@ def test_source_changed_during_embedding_is_not_returned(tmp_path, monkeypatch):
     found = search(db, "Wo liegt mein Mietvertrag?", "http://127.0.0.1:11434")
     assert [item["source"] for item in found["results"]] == [str(cake.resolve())]
     assert found["stale_sources"][0]["path"] == str(agreement.resolve())
+    assert cache.read("a" * 64, ["b" * 64]) == {}
 
 
 def test_passage_limit_and_first_three_per_document_are_visible(tmp_path, monkeypatch):
@@ -81,15 +85,18 @@ def test_passage_limit_and_first_three_per_document_are_visible(tmp_path, monkey
     import jarvis.semantic_search as module
     monkeypatch.setattr(module, "MAX_PASSAGES", 3)
     observed = []
+    cache_paths = []
 
-    def collect(_url, texts):
+    def collect(_url, texts, _cache_path=None):
         observed.extend(texts)
+        cache_paths.append(_cache_path)
         return [[1.0, 0.0] for _ in texts]
 
     monkeypatch.setattr(module, "embed_texts", collect)
     result = search(db, "Absatz?", "http://127.0.0.1:11434")
     assert result["limited"] and result["checked_passages"] == 3
     assert len(observed) == 4
+    assert cache_paths == [db.path.parent / "semantic-embeddings.sqlite"]
     assert len(result["results"]) == 1
 
 
@@ -101,7 +108,7 @@ def test_document_limit_bounds_original_checks(tmp_path, monkeypatch):
     docs.index_folder(folder["id"])
     import jarvis.semantic_search as module
     monkeypatch.setattr(module, "MAX_DOCUMENTS", 2)
-    monkeypatch.setattr(module, "embed_texts", lambda _url, texts: [[1.0] for _ in texts])
+    monkeypatch.setattr(module, "embed_texts", lambda _url, texts, _cache_path=None: [[1.0] for _ in texts])
     original = DocumentStore.source_is_current
     checked = []
 
@@ -125,7 +132,7 @@ def test_folder_filter_makes_later_corpus_accessible(tmp_path, monkeypatch):
     docs.index_folder(folder["id"])
     import jarvis.semantic_search as module
     monkeypatch.setattr(module, "MAX_DOCUMENTS", 1)
-    monkeypatch.setattr(module, "embed_texts", lambda _url, texts: [[1.0] for _ in texts])
+    monkeypatch.setattr(module, "embed_texts", lambda _url, texts, _cache_path=None: [[1.0] for _ in texts])
     found = search(db, "Wo liegt der Vertrag?", "http://127.0.0.1:11434", folder["id"])
     assert not found["limited"] and found["checked_passages"] == 1
     assert found["results"][0]["source"] == str(target.resolve())

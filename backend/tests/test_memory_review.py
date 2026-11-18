@@ -1,5 +1,6 @@
 """Chat memory proposals require literal user evidence and explicit decisions."""
 
+import hashlib
 import json
 import sqlite3
 
@@ -19,6 +20,7 @@ from jarvis.memory_review import (
     proposal_prompt,
 )
 from jarvis.provider import Completion
+from jarvis.semantic_cache import PersistentEmbeddingCache
 
 
 def csrf(client):
@@ -113,6 +115,10 @@ def test_memory_review_decisions_are_explicit_versioned_and_restorable(tmp_path,
         accepted_item = accepted.json()
         assert accepted_item["status"] == "accepted"
         assert client.get("/memories").json()[0]["text"] == "Ich wohne in Bremen."
+        embedding_cache = PersistentEmbeddingCache(data / "semantic-embeddings.sqlite")
+        text_hash = hashlib.sha256(b"Ich wohne in Bremen.").hexdigest()
+        embedding_cache.write("a" * 64, {text_hash: [1.0, 0.0]})
+        assert embedding_cache.read("a" * 64, [text_hash])
         assert client.post(f"/memory-proposals/{bremen['id']}/decision",
                            headers=token, json={"expected_version": 1,
                                                 "action": "correct",
@@ -124,6 +130,7 @@ def test_memory_review_decisions_are_explicit_versioned_and_restorable(tmp_path,
                                                      "text": "Ich wohne jetzt in Hamburg."})
         assert corrected.status_code == 200
         assert corrected.json()["version"] == 3
+        assert embedding_cache.read("a" * 64, [text_hash]) == {}
         assert client.get("/memories").json()[0]["text"] == "Ich wohne jetzt in Hamburg."
         memory = client.get("/memories").json()[0]
         external = {"text": "Anderer Ort", "source_ref": memory["source_ref"],
@@ -137,10 +144,12 @@ def test_memory_review_decisions_are_explicit_versioned_and_restorable(tmp_path,
         assert client.patch(f"/memories/{memory['id']}", headers=token,
                             json={**external, "text": "Ich wohne jetzt in Hamburg."}
                             ).status_code == 200
+        embedding_cache.write("a" * 64, {text_hash: [1.0, 0.0]})
         removed = client.post(f"/memory-proposals/{bremen['id']}/decision",
                               headers=token, json={"expected_version": 3,
                                                    "action": "delete"})
         assert removed.status_code == 200
+        assert embedding_cache.read("a" * 64, [text_hash]) == {}
         assert removed.json()["status"] == "deleted"
         assert client.get("/memories").json() == []
         assert [event["action"] for event in removed.json()["events"]] == [

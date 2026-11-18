@@ -26,7 +26,7 @@ def fixture_sources(tmp_path):
     return db, store, folder, target, target_id
 
 
-def fake_embed(_url, texts):
+def fake_embed(_url, texts, _cache_path=None):
     return [[1.0, 0.0] if "Vereinbarung" in text or text == QUESTION else [0.0, 1.0]
             for text in texts]
 
@@ -51,7 +51,7 @@ def test_stale_preference_never_reaches_model_or_exposes_old_excerpt(tmp_path, m
     target.write_text("Neuer Inhalt ohne Zitronenkuchen.", encoding="utf-8")
     observed = []
 
-    def collect(_url, texts):
+    def collect(_url, texts, _cache_path=None):
         observed.extend(texts)
         return fake_embed(_url, texts)
 
