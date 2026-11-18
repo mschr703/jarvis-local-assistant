@@ -23,6 +23,7 @@ type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   stale_sources: SearchResult['stale_sources'] };
 type SemanticStatus = { model: string; status: 'ready' | 'model_missing' | 'service_unavailable' | 'invalid_response' | 'invalid_url';
   service_available: boolean; ready: boolean; message: string };
+type CacheStatus = { entries: number; bytes: number; ram_entries: number; available: boolean };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
@@ -33,6 +34,8 @@ export default function UnifiedSearchView() {
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
   const [statusChecking, setStatusChecking] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderId, setFolderId] = useState('');
@@ -50,6 +53,21 @@ export default function UnifiedSearchView() {
     finally { setStatusChecking(false); }
   };
   useEffect(() => { void refreshModelStatus(); }, []);
+  const refreshCache = async () => {
+    setCacheBusy(true);
+    try { setCacheStatus(await api<CacheStatus>('/search/semantic/cache')); }
+    catch { setCacheStatus({ entries: 0, bytes: 0, ram_entries: 0, available: false }); }
+    finally { setCacheBusy(false); }
+  };
+  useEffect(() => { void refreshCache(); }, []);
+  const clearCache = async () => {
+    if (busy || cacheBusy) return;
+    setCacheBusy(true); setError('');
+    try {
+      setCacheStatus(await api<CacheStatus>('/search/semantic/cache', { method: 'DELETE' }));
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setCacheBusy(false); }
+  };
   const load = async (value: string) => {
     const [found, available] = await Promise.all([
       api<SearchResult>(`/search/unified?q=${encodeURIComponent(value)}`),
@@ -59,20 +77,21 @@ export default function UnifiedSearchView() {
   };
   const run = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || cacheBusy) return;
     setBusy(true); setError(''); setResult(null); setSemantic(null);
     try { await load(query.trim()); }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
-    if (busy || query.trim().length < 2) return;
+    if (busy || cacheBusy || query.trim().length < 2) return;
     setBusy(true); setError(''); setResult(null); setSemantic(null);
     try {
       const params = new URLSearchParams({ q: query.trim() });
       if (folderId) params.set('folder_id', folderId);
       if (documentId) params.set('document_id', documentId);
       setSemantic(await api<SemanticResult>(`/search/semantic?${params}`));
+      void refreshCache();
     }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
@@ -101,7 +120,7 @@ export default function UnifiedSearchView() {
           border: '1px solid #3b4b60', borderRadius: 8, padding: 9, color: '#e8ebef' }}
         maxLength={160} onChange={(event) => setQuery(event.target.value)}
         placeholder="Projektname, Thema oder Dokumenttitel" /></label>
-      <button className="primary" type="submit" disabled={busy || query.trim().length < 2}>
+      <button className="primary" type="submit" disabled={busy || cacheBusy || query.trim().length < 2}>
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
         <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId} disabled={busy}
@@ -115,12 +134,21 @@ export default function UnifiedSearchView() {
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
         </select></label>
-      <button type="button" disabled={busy || query.trim().length < 2}
+      <button type="button" disabled={busy || cacheBusy || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
       <div role="status"><small>{statusChecking ? 'Prüfe lokales Suchmodell…' :
         modelStatus?.message || 'Modellstatus noch nicht geprüft.'}</small>
         <button type="button" disabled={statusChecking} onClick={() => void refreshModelStatus()}>
           {statusChecking ? 'Prüfe…' : 'Modellstatus prüfen'}</button></div>
+      <div role="status"><small>{cacheStatus ? cacheStatus.available ?
+        `Suchcache: ${cacheStatus.entries} gespeicherte Vektoren (${Math.ceil(cacheStatus.bytes / 1024)} KiB), ${cacheStatus.ram_entries} im Arbeitsspeicher.` :
+        'Suchcache nicht lesbar. Datei im Datenordner nach dem Stoppen von Jarvis prüfen.' :
+        'Suchcache-Stand noch nicht geprüft.'}</small>
+        <button type="button" disabled={cacheBusy || busy} onClick={() => void refreshCache()}>
+          {cacheBusy ? 'Prüfe…' : 'Cache-Stand prüfen'}</button>
+        <button type="button" disabled={cacheBusy || busy} onClick={() => void clearCache()}>
+          Suchcache leeren</button></div>
+      <small>Leert nur berechnete Suchvektoren. Dokumente, Erinnerungen und Suchindex bleiben erhalten; die nächste sinngemäße Suche berechnet die Vektoren erneut.</small>
       <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
         'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
         'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>

@@ -1,5 +1,7 @@
 """Semantic search only exposes current, explicitly granted local documents."""
 
+import hashlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,6 +25,41 @@ def fixture_store(tmp_path):
     folder = docs.add_folder(str(root), "local_only")
     assert docs.index_folder(folder["id"])["indexed"] == 2
     return db, docs, folder, agreement, cake
+
+
+def test_cache_management_requires_session_and_preserves_sources(tmp_path):
+    data = tmp_path / "data"
+    settings = Settings(JARVIS_DATA_DIR=data, JARVIS_OLLAMA_MODEL="fixture")
+    path = data / "semantic-embeddings.sqlite"
+    with TestClient(create_app(settings)) as client:
+        token = {"x-jarvis-csrf": client.get("/session").json()["csrf"]}
+        initial = client.get("/search/semantic/cache")
+        assert initial.status_code == 200
+        assert initial.json()["entries"] == 0
+        assert not path.exists()
+        db = Database(data / "jarvis.db")
+        memory = DocumentStore(db).add_memory("Private Notiz", "Eigene Eingabe",
+                                              "local_only")
+        text_hash = hashlib.sha256(b"Private Notiz").hexdigest()
+        cache = PersistentEmbeddingCache(path)
+        cache.write("a" * 64, {text_hash: [1.0, 0.0]})
+        assert client.get("/search/semantic/cache").json()["entries"] == 1
+        assert client.delete("/search/semantic/cache").status_code == 403
+        cleared = client.delete("/search/semantic/cache", headers=token)
+        assert cleared.status_code == 200
+        assert cleared.json()["entries"] == 0
+        assert cache.read("a" * 64, [text_hash]) == {}
+        assert DocumentStore(db).get_memory(memory["id"])["text"] == "Private Notiz"
+
+
+def test_cache_clear_reports_disk_failure_instead_of_success(tmp_path, monkeypatch):
+    settings = Settings(JARVIS_DATA_DIR=tmp_path / "data", JARVIS_OLLAMA_MODEL="fixture")
+    monkeypatch.setattr(PersistentEmbeddingCache, "clear", lambda _self: False)
+    with TestClient(create_app(settings)) as client:
+        token = {"x-jarvis-csrf": client.get("/session").json()["csrf"]}
+        response = client.delete("/search/semantic/cache", headers=token)
+        assert response.status_code == 503
+        assert "nicht geleert" in response.json()["detail"]
 
 
 def fake_embed(_url, texts, _cache_path=None):

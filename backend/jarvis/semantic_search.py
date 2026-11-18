@@ -24,10 +24,29 @@ MAX_DEEP_RESULTS = 5
 _cache_lock = threading.Lock()
 _embedding_cache: OrderedDict[tuple[str, str, str], list[float]] = OrderedDict()
 _active_digest: dict[str, str] = {}
+_cache_generation = 0
 
 
 class SemanticSearchError(RuntimeError):
     """The local embedding service is unavailable or returned invalid vectors."""
+
+
+def cache_status(path: Path) -> dict[str, int | bool]:
+    with _cache_lock:
+        status = PersistentEmbeddingCache(path).stats()
+        return {**status, "ram_entries": len(_embedding_cache)}
+
+
+def clear_cache(path: Path) -> dict[str, int | bool]:
+    """Clear both caches and prevent in-flight searches from repopulating disk."""
+    global _cache_generation
+    with _cache_lock:
+        if not PersistentEmbeddingCache(path).clear():
+            raise SemanticSearchError("Lokaler Suchcache konnte nicht geleert werden")
+        _embedding_cache.clear()
+        _active_digest.clear()
+        _cache_generation += 1
+    return cache_status(path)
 
 
 def _local_ollama_url(url: str) -> bool:
@@ -122,6 +141,7 @@ def embed_texts(url: str, texts: list[str], cache_path: Path | None = None) -> l
         missing = list(range(1, len(texts)))
         if digest:
             with _cache_lock:
+                generation = _cache_generation
                 if _active_digest.get(url) != digest:
                     _embedding_cache.clear()
                     _active_digest[url] = digest
@@ -137,7 +157,7 @@ def embed_texts(url: str, texts: list[str], cache_path: Path | None = None) -> l
                           for index in missing}
                 saved = disk_cache.read(digest, list(hashes.values()))
                 with _cache_lock:
-                    if _active_digest.get(url) == digest:
+                    if _active_digest.get(url) == digest and generation == _cache_generation:
                         for index, text_hash in hashes.items():
                             if text_hash in saved:
                                 hits[index] = saved[text_hash]
@@ -169,7 +189,7 @@ def embed_texts(url: str, texts: list[str], cache_path: Path | None = None) -> l
             result[index] = vector
         if digest:
             with _cache_lock:
-                if _active_digest.get(url) == digest:
+                if _active_digest.get(url) == digest and generation == _cache_generation:
                     for index in missing:
                         key = (url, digest, hashlib.sha256(texts[index].encode("utf-8")).hexdigest())
                         _embedding_cache[key] = result[index]

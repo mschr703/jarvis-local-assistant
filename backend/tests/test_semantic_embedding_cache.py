@@ -2,6 +2,8 @@
 
 import hashlib
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import ClassVar
 
 import httpx
@@ -215,3 +217,54 @@ def test_disk_vector_with_wrong_dimension_is_recomputed(tmp_path, monkeypatch):
     assert vectors[1] == [7.0, 1.0]
     assert FakeClient.batches == [["Frage"], ["Frage", "Passage"]]
     assert PersistentEmbeddingCache(path).read("a" * 64, [text_hash])[text_hash] == [7.0, 1.0]
+
+
+def test_cache_status_and_manual_clear_do_not_create_a_cache(tmp_path):
+    path = tmp_path / "semantic-embeddings.sqlite"
+    assert semantic.cache_status(path) == {
+        "entries": 0, "bytes": 0, "available": True, "ram_entries": 0}
+    assert not path.exists()
+    assert semantic.clear_cache(path)["entries"] == 0
+    assert not path.exists()
+    cache = PersistentEmbeddingCache(path)
+    cache.write("a" * 64, {hashlib.sha256(b"Passage").hexdigest(): [1.0, 0.0]})
+    assert semantic.cache_status(path)["entries"] == 1
+    assert semantic.clear_cache(path)["entries"] == 0
+    assert semantic.cache_status(path)["entries"] == 0
+
+
+def test_manual_clear_recovers_a_corrupt_cache_file(tmp_path):
+    path = tmp_path / "semantic-embeddings.sqlite"
+    path.write_bytes(b"not a SQLite database")
+    assert semantic.cache_status(path)["available"] is False
+    assert semantic.clear_cache(path) == {
+        "entries": 0, "bytes": 0, "available": True, "ram_entries": 0}
+    assert not path.exists()
+
+
+def test_manual_clear_prevents_inflight_search_from_restoring_disk_cache(
+        tmp_path, monkeypatch):
+    install(monkeypatch)
+    path = tmp_path / "semantic-embeddings.sqlite"
+    url = "http://127.0.0.1:11434"
+    semantic.embed_texts(url, ["Erste Frage", "Passage"], path)
+    assert semantic.cache_status(path)["entries"] == 1
+    started, release = threading.Event(), threading.Event()
+
+    def blocked_embed(_client, _url, texts):
+        started.set()
+        assert release.wait(5)
+        return [[float(len(text)), 1.0] for text in texts]
+
+    monkeypatch.setattr(semantic, "_embed_request", blocked_embed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(semantic.embed_texts, url,
+                             ["Zweite Frage", "Passage"], path)
+        try:
+            assert started.wait(5)
+            assert semantic.clear_cache(path)["entries"] == 0
+        finally:
+            release.set()
+        assert future.result(timeout=5)[1] == [7.0, 1.0]
+    assert semantic.cache_status(path)["entries"] == 0
+    assert semantic.cache_status(path)["ram_entries"] == 0

@@ -84,12 +84,35 @@ class PersistentEmbeddingCache:
         except (OSError, sqlite3.Error):
             return
 
-    def clear(self) -> None:
+    def stats(self) -> dict[str, int | bool]:
+        """Report only counts and file size; never read or expose cached vectors."""
+        try:
+            if not self.path.is_file():
+                return {"entries": 0, "bytes": 0, "available": True}
+            size = self.path.stat().st_size
+            with closing(sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro",
+                                         uri=True, timeout=5)) as db:
+                count = db.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+            return {"entries": count, "bytes": size, "available": True}
+        except (OSError, sqlite3.Error):
+            return {"entries": 0, "bytes": 0, "available": False}
+
+    def clear(self) -> bool:
         if not self.path.is_file():
-            return
+            return True
         try:
             with closing(self._connect()) as db:
                 db.execute("DELETE FROM embeddings")
                 db.commit()
+            return True
+        except sqlite3.DatabaseError as exc:
+            if not any(marker in str(exc).lower() for marker in
+                       ("not a database", "malformed")):
+                return False
+            try:
+                self.path.unlink()
+                return True
+            except OSError:
+                return False
         except (OSError, sqlite3.Error):
-            return
+            return False

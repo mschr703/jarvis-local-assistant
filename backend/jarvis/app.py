@@ -113,6 +113,8 @@ from jarvis.research import (
 from jarvis.scheduled_backup import ScheduledBackup
 from jarvis.security import LocalApiBoundary
 from jarvis.semantic_search import SemanticSearchError
+from jarvis.semantic_search import cache_status as semantic_cache_status
+from jarvis.semantic_search import clear_cache as semantic_clear_cache
 from jarvis.semantic_search import model_status as semantic_model_status
 from jarvis.semantic_search import search as semantic_search
 from jarvis.skills import SkillConflict, SkillStore, skill_prompt
@@ -1063,6 +1065,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/search/semantic/status")
     async def semantic_search_status():
         return await run_in_threadpool(semantic_model_status, config.ollama_url)
+
+    @app.get("/search/semantic/cache")
+    async def semantic_cache_view():
+        return await run_in_threadpool(
+            semantic_cache_status, db.path.parent / "semantic-embeddings.sqlite")
+
+    @app.delete("/search/semantic/cache")
+    async def semantic_cache_delete():
+        try:
+            result = await run_in_threadpool(
+                semantic_clear_cache, db.path.parent / "semantic-embeddings.sqlite")
+        except SemanticSearchError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        db.log("semantic_cache_cleared", "Lokaler Suchcache manuell geleert")
+        return result
 
     @app.get("/search/semantic")
     async def semantic_search_view(q: str = Query(min_length=2, max_length=160),
