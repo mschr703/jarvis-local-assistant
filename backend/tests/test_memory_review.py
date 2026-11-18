@@ -150,9 +150,9 @@ def test_memory_review_decisions_are_explicit_versioned_and_restorable(tmp_path,
         assert client.delete(f"/chats/{chat['id']}", headers=token).status_code == 200
         assert MemoryReviewStore(db).get(bremen["id"])["source_available"] is False
     archive = tmp_path / "review.zip"
-    assert create_backup(data, archive)["schema"] == 53
+    assert create_backup(data, archive)["schema"] == 54
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 53
+    assert restore_backup(archive, restored)["schema"] == 54
     review = MemoryReviewStore(Database(restored / "jarvis.db"))
     assert review.get(biology["id"])["status"] == "rejected"
     assert review.get(bremen["id"])["events"][-1]["action"] == "deleted"
@@ -197,7 +197,7 @@ def test_schema_49_migrates_to_memory_review(tmp_path):
         connection.execute("PRAGMA user_version=49")
     Database(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 53
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 54
         assert connection.execute("SELECT COUNT(*) FROM memory_proposals").fetchone()[0] == 0
 
 
@@ -243,9 +243,9 @@ def test_memory_validity_is_reviewed_enforced_and_restored(tmp_path):
         assert [event["valid_until"] for event in current.json()["events"]] == [
             "2000-01-01", None, "2999-01-01"]
     archive = tmp_path / "validity.zip"
-    assert create_backup(data, archive)["schema"] == 53
+    assert create_backup(data, archive)["schema"] == 54
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 53
+    assert restore_backup(archive, restored)["schema"] == 54
     assert MemoryReviewStore(Database(restored / "jarvis.db")).get(item["id"])[
         "valid_until"] == "2999-01-01"
 

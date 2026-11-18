@@ -65,9 +65,9 @@ def test_chat_evaluation_api_evidence_conflict_and_restore(tmp_path, monkeypatch
         assert client.get("/chat-evaluation-cases").json() == []
         client.put(url, headers=headers, json={**body, "version": 2})
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 53
+    assert create_backup(data, archive)["schema"] == 54
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 53
+    assert restore_backup(archive, restored)["schema"] == 54
     reopened = Database(restored / "jarvis.db")
     cases = reopened.list_chat_evaluation_cases()
     assert len(cases) == 1 and cases[0]["question"] == "Wie viel ist zwei plus zwei?"

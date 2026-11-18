@@ -112,7 +112,7 @@ def test_replan_staleness_version_and_restore(tmp_path):
     with pytest.raises(EveningPlanConflict):
         plans.update(saved["id"], EveningPlanChange(**request.model_dump(), version=1))
     archive = tmp_path / "backup.zip"
-    assert create_backup(db.path.parent, archive)["schema"] == 53
+    assert create_backup(db.path.parent, archive)["schema"] == 54
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     other_db = Database(restored / "jarvis.db")

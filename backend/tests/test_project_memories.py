@@ -41,9 +41,9 @@ def test_memory_link_source_edit_confirm_delete_and_restore(tmp_path):
     with pytest.raises(ProjectMemoryConflict, match="Gelöschte"):
         store.confirm(state["id"], link["id"], 1, 2)
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 53
+    assert create_backup(root, archive)["schema"] == 54
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 53
+    assert restore_backup(archive, restored)["schema"] == 54
     with Database(restored / "jarvis.db").connect() as connection:
         row = connection.execute("SELECT memory_text,memory_policy FROM project_memory_links").fetchone()
         assert tuple(row) == ("Atlas hat vier Prüfschritte", "cloud_allowed")
@@ -129,5 +129,5 @@ def test_memory_link_limit_and_schema46_migration(tmp_path):
         connection.execute("PRAGMA user_version=46")
     migrated = Database(db.path)
     with sqlite3.connect(migrated.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 53
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 54
         assert connection.execute("SELECT count(*) FROM project_memory_links").fetchone()[0] == 0

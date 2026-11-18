@@ -42,7 +42,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 53:
+            if version > 54:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -945,6 +945,18 @@ class Database:
                     CREATE INDEX IF NOT EXISTS chat_attachments_chat_message
                         ON chat_attachments(chat_id,message_id);
                     PRAGMA user_version=53;
+                """)
+            if version < 54:
+                apply_migration("""
+                    CREATE TABLE IF NOT EXISTS source_preferences (
+                        query_key TEXT NOT NULL,
+                        document_id TEXT NOT NULL,
+                        path TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (query_key, document_id)
+                    );
+                    PRAGMA user_version=54;
                 """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:

@@ -1,11 +1,14 @@
 """Unified local search returns current, cited records from three existing stores."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from jarvis.app import create_app
+from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
 from jarvis.unified_search import search
 from jarvis.work_states import WorkStateStore
@@ -107,3 +110,98 @@ def test_search_api_requires_session_and_is_read_only(tmp_path):
         assert client.get("/search/unified", params={"q": "was ist das?"}).status_code == 422
         with db.connect() as connection:
             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
+
+
+def test_preferred_source_survives_reload_and_tracks_original_changes(tmp_path):
+    db, docs, _, folder, document, _, _, file = sample(tmp_path)
+    choices = SourcePreferences(db)
+    question = "Welche Nebenkosten fallen an?"
+    assert search(db, question)["counts"]["document"] == 0
+    saved = choices.add(question, document["id"])["preferences"][0]
+    assert saved["status"] == "current"
+    assert saved["saved_sha256"] == document["sha256"]
+    assert SourcePreferences(Database(db.path)).list(question.lower())["preferences"][0] == saved
+    result = search(db, question)
+    hit = next(item for item in result["results"] if item["kind"] == "document")
+    assert hit["preferred"] and hit["source_status"] == "current"
+    assert hit["source"] == str(file.resolve()) and hit["sha256"] == document["sha256"]
+    assert hit["passage_id"] and "Mietvertrag" in hit["excerpt"]
+
+    choices.add("Orion", document["id"])
+    file.write_text("Projekt Orion: Die Nebenkosten betragen 100 Euro.", encoding="utf-8")
+    stale = search(db, question)
+    assert stale["preferences"][0]["status"] == "needs_reindex"
+    assert stale["counts"]["document"] == 0
+    assert not any(item["id"] == document["id"] for item in search(db, "Orion")["results"])
+    assert docs.index_folder(folder["id"])["indexed"] == 1
+    updated = search(db, question)
+    assert updated["preferences"][0]["status"] == "updated"
+    assert updated["preferences"][0]["current_sha256"] != saved["saved_sha256"]
+    assert next(item for item in updated["results"] if item["kind"] == "document")["source_status"] == "updated"
+    assert choices.add(question, document["id"])["preferences"][0]["status"] == "current"
+
+    archive = tmp_path / "prefs.zip"
+    assert create_backup(db.path.parent, archive)["schema"] == 54
+    restored = tmp_path / "restored"
+    restore_backup(archive, restored)
+    assert SourcePreferences(Database(restored / "jarvis.db")).list(question)["preferences"][0]["status"] == "current"
+    assert choices.remove(question, document["id"])["preferences"] == []
+    assert search(db, question)["preferences"] == []
+
+
+def test_preferred_source_becomes_unavailable_when_excluded_or_removed(tmp_path):
+    db, docs, _, folder, document, _, _, file = sample(tmp_path)
+    choices = SourcePreferences(db)
+    choices.add("Wohnungskosten", document["id"])
+    docs.set_excluded(document["id"], True)
+    result = search(db, "Wohnungskosten")
+    assert result["preferences"][0]["status"] == "unavailable"
+    assert result["counts"]["document"] == 0
+    assert choices.remove("Wohnungskosten", document["id"])["preferences"] == []
+    docs.set_excluded(document["id"], False)
+    docs.index_folder(folder["id"])
+    choices.add("Wohnungskosten", document["id"])
+    file.unlink()
+    docs.index_folder(folder["id"])
+    result = search(db, "Wohnungskosten")
+    assert result["preferences"][0]["status"] == "unavailable"
+    assert result["counts"]["document"] == 0
+
+
+def test_source_preference_api_checks_session_scope_and_current_index(tmp_path):
+    db, docs, _, folder, document, _, _, file = sample(tmp_path)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        payload = {"query": "Welche Nebenkosten?", "document_id": document["id"]}
+        assert client.put("/search/unified/preferences", json=payload).status_code == 401
+        csrf = client.get("/session").json()["csrf"]
+        assert client.put("/search/unified/preferences", json=payload).status_code == 403
+        headers = {"x-jarvis-csrf": csrf}
+        assert client.put("/search/unified/preferences", json=payload, headers=headers).status_code == 200
+        assert client.get("/search/unified", params={"q": payload["query"]}).json()["preferences"][0]["status"] == "current"
+        assert client.put("/search/unified/preferences", json={**payload, "document_id": "missing"},
+                          headers=headers).status_code == 404
+        assert client.put("/search/unified/preferences", json={**payload, "query": "was ist das?"},
+                          headers=headers).status_code == 422
+        file.write_text("Geänderte lokale Datei", encoding="utf-8")
+        assert client.put("/search/unified/preferences", json=payload,
+                          headers=headers).status_code == 422
+        assert client.request("DELETE", "/search/unified/preferences", json=payload,
+                              headers=headers).status_code == 200
+        assert client.request("DELETE", "/search/unified/preferences", json=payload,
+                              headers=headers).status_code == 404
+    assert docs.get_folder(folder["id"]) is not None
+
+
+def test_source_preference_has_bounded_idempotent_selection(tmp_path):
+    db, docs, _, folder, document, _, _, file = sample(tmp_path)
+    for index in range(5):
+        file.with_name(f"Zusatz_{index}.md").write_text(f"Quelle {index}", encoding="utf-8")
+    assert docs.index_folder(folder["id"])["indexed"] == 5
+    choices = SourcePreferences(db)
+    available = [document] + [item for item in docs.documents() if item["id"] != document["id"]]
+    for item in available[:5]:
+        assert len(choices.add("Zusatzfrage", item["id"])["preferences"]) <= 5
+    assert len(choices.add("zusatzfrage", available[0]["id"])["preferences"]) == 5
+    with pytest.raises(ValueError, match="Höchstens fünf"):
+        choices.add("Zusatzfrage", available[5]["id"])

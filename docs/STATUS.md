@@ -1,10 +1,10 @@
 # Projektstatus
 
-Stand: 18.11.2026, 01:27 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 18.11.2026, 02:07 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A07a: Kleine TXT-, Markdown- und DOCX-Dateien können für eine lokale Chatnachricht hochgeladen werden. Originalkopie, SHA-256, Nachrichtenbezug, Folgekontext und Backup/Restore sind implementiert. Ein Gespräch mit Anhang wird für OpenRouter gesperrt, damit auch spätere Nachrichten nicht unbeabsichtigt in die Cloud gelangen. Die vollständige Backend-Suite bestand mit 545 Tests und zwei erwarteten Windows-Skips; sechs gezielte Anhangtests, 23 Frontendtests, Build, Ruff und der echte Edge/Ollama-Pfad mit Anhang, Reload, Originaldownload und mobiler Breite bestanden. Der Public-Audit meldet in 311 veröffentlichbaren Dateien und der bisherigen Historie null Funde. Die letzten gezielten Regressionstests nach der Download-Absicherung laufen; Commit, Push und Trello-Abschluss folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A12a: Für eine konkrete lokale Suchfrage kann ein indexiertes Dokument als zusätzliche Quelle vorgemerkt werden. Gespeicherter SHA-256, aktueller Indexstand, geänderte/fehlende Originaldatei und Rücknahme werden angezeigt. Die vollständige Backend-Suite bestand unbelastet mit 552 Tests und zwei erwarteten Windows-Skips; neun gezielte Suchtests, 23 Frontendtests, Build, Ruff und der isolierte Edge-Pfad mit Reload, Quelländerung, Rücknahme, 390 Pixel und null Modellaufrufen bestanden. Zwei vorangegangene Gesamtläufe hatten unter gleichzeitiger Modell-/Installationslast jeweils einen zeitabhängigen Fehler in fremden PDF- beziehungsweise Plan-Tests; beide bestanden isoliert. Public-Audit, Push und CI folgen. A07b Text-PDF im Chat ist unabhängig in Vorbereitung. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 
@@ -19,6 +19,8 @@ Stand: 18.11.2026, 01:27 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf
 - Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
 ## Zuletzt geprüft
+
+- A07a: Kleine TXT-, Markdown- und DOCX-Dateien können bewusst an lokale Chatnachrichten angehängt werden; Originalkopie, Hash, Nachrichtenbezug, Folgekontext, Backup/Restore und Löschung sind geprüft. Chats mit Anhängen sind für OpenRouter gesperrt. Die vollständige Backend-Suite bestand mit 545 Tests und zwei erwarteten Windows-Skips; nach der Download-Absicherung bestanden 44 gezielte Tests mit einem erwarteten Skip sowie der eigene Downloadtest. 23 Frontendtests, Build, Ruff, Edge/Ollama mit Reload/Download/390 Pixel und Public-Audit (311 Dateien, null Funde) bestanden. Commit `06f34b1` ist öffentlich, GitHub-Lauf [44207966279](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44207966279) grün und die Trello-Teilkarte erledigt.
 
 - A10a: DOCX-Haupttext aus ausdrücklich freigegebenen Ordnern wird lokal indexiert. Der Parser begrenzt ZIP-Einträge und entpacktes XML, sperrt DTD/Entitäten und zeigt beschädigte oder zu große Dateien einzeln als Fehler. Die vollständige Backend-Regression bestand mit 541 Tests und zwei erwarteten Windows-Skips; nach Ergänzung des ZIP-Eintragstests bestanden alle vier gezielten DOCX-Tests erneut. 23 Frontendtests, Build, Ruff und ein isolierter Edge-Pfad (Freigeben, Indexieren, Suchen, Aktualisieren, 390 Pixel) bestanden. Der Public-Audit meldete in 308 Dateien und der Historie null Funde. Commit `4cad86e` ist öffentlich, GitHub-Lauf [44204023323](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44204023323) grün und die Trello-Teilkarte erledigt.
 

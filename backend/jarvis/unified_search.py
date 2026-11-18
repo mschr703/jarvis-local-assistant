@@ -34,7 +34,10 @@ def _score(query: str, terms: list[str], title: str, body: str) -> int:
 
 
 def search(db: Database, query: str) -> dict:
+    from jarvis.source_preferences import SourcePreferences
+
     cleaned, terms = query_terms(query)
+    preferred = SourcePreferences(db).list(cleaned)["preferences"]
     match = " OR ".join(f'"{term}"*' for term in terms)
     with db.connect() as connection:
         connection.create_function("unicode_casefold", 1, str.casefold, deterministic=True)
@@ -83,6 +86,27 @@ def search(db: Database, query: str) -> dict:
         if prior is None or item["score"] > prior["score"]:
             by_document[row["document_id"]] = item
 
+    for preference in preferred:
+        if preference["status"] not in {"current", "updated"}:
+            by_document.pop(preference["document_id"], None)
+            continue
+        document_id = preference["document_id"]
+        prior = by_document.get(document_id)
+        if prior is not None:
+            prior["preferred"] = True
+            prior["source_status"] = preference["status"]
+            prior["score"] += 1000
+            continue
+        by_document[document_id] = {
+            "kind": "document", "id": document_id,
+            "title": Path(preference["path"]).name,
+            "excerpt": preference.get("excerpt", ""), "source": preference["path"],
+            "document_id": document_id, "passage_id": preference.get("passage_id"),
+            "page": preference.get("page"), "sha256": preference["current_sha256"],
+            "policy": preference["policy"], "score": 1000,
+            "preferred": True, "source_status": preference["status"],
+        }
+
     memory_items = [{"kind": "memory", "id": row["id"], "title": "Erinnerung",
                      "excerpt": row["text"][:500], "source": row["source_ref"],
                      "policy": row["policy"],
@@ -108,5 +132,6 @@ def search(db: Database, query: str) -> dict:
     selected.sort(key=lambda item: (-item["score"], item["kind"], item["title"].casefold(),
                                     item["id"]))
     return {"query": cleaned, "results": selected, "limited": limited,
+            "preferences": preferred,
             "counts": {kind: sum(item["kind"] == kind for item in selected)
                        for kind in ("document", "memory", "project")}}

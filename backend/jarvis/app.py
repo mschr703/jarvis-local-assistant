@@ -110,6 +110,7 @@ from jarvis.research import (
 from jarvis.scheduled_backup import ScheduledBackup
 from jarvis.security import LocalApiBoundary
 from jarvis.skills import SkillConflict, SkillStore, skill_prompt
+from jarvis.source_preferences import SourcePreferences
 from jarvis.speech import SpeechError, SpeechStore, SpeechValidationError
 from jarvis.style_polish import protected_changes, writing_signals
 from jarvis.tasks import ReminderConflict, TaskStore, resolve_due
@@ -303,6 +304,13 @@ class MemoryInput(BaseModel):
 
 class ExcludeInput(BaseModel):
     excluded: bool
+
+
+class SourcePreferenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=2, max_length=160)
+    document_id: str = Field(min_length=1, max_length=80)
 
 
 class MarkdownPreviewInput(BaseModel):
@@ -684,6 +692,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for key, value in persisted.items():
             setattr(config, key, value)
     documents = DocumentStore(db)
+    source_preferences = SourcePreferences(db)
     chat_attachments = ChatAttachmentStore(db)
     code_projects = CodeProjectStore(documents)
     markdown = MarkdownNotes(db, documents, secrets.token_bytes(32))
@@ -1033,6 +1042,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def unified_search_view(q: str = Query(min_length=2, max_length=160)):
         try:
             return await run_in_threadpool(unified_search, db, q)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.put("/search/unified/preferences")
+    async def add_source_preference(data: SourcePreferenceInput):
+        try:
+            return await run_in_threadpool(source_preferences.add, data.query, data.document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/search/unified/preferences")
+    async def remove_source_preference(data: SourcePreferenceInput):
+        try:
+            return await run_in_threadpool(source_preferences.remove, data.query, data.document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
