@@ -10,7 +10,8 @@ type Preference = { document_id: string; path: string; saved_sha256: string;
   current_sha256: string | null; status: 'current' | 'updated' | 'needs_reindex' | 'unavailable' };
 type Document = { id: string; path: string; status: string; excluded: number };
 type SearchResult = { query: string; results: Hit[]; limited: boolean;
-  counts: Record<Kind, number>; preferences: Preference[] };
+  counts: Record<Kind, number>; preferences: Preference[];
+  stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
@@ -49,7 +50,8 @@ export default function UnifiedSearchView() {
     finally { setBusy(false); }
   };
   const candidates = documents.filter((document) => document.status === 'indexed'
-    && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id));
+    && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
+    && !result?.stale_sources.some((item) => item.document_id === document.id));
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
     <p className="intro">Suche lokal in indexierten Dateien, bewusst gespeicherten Erinnerungen und Arbeitsständen. Treffer zeigen den gespeicherten Quellenstand; nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren. Die Suche ruft kein Modell und keine Cloud auf.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
@@ -65,6 +67,11 @@ export default function UnifiedSearchView() {
     {result && <section className="card" aria-label="Suchergebnisse">
       <h3>Treffer für „{result.query}“</h3>
       <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände</p>
+      {result.stale_sources.length > 0 && <div className="notice" role="status">
+        <strong>Originaldateien und Index weichen ab</strong><p>Unter „Dokumente“ den Ordner neu indexieren. Die alten Auszüge erscheinen nicht als aktuelle Treffer.</p>
+        <ul>{result.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>
+          {item.path} · bisheriger Index SHA-256 {item.index_sha256}</li>)}</ul>
+      </div>}
       <div className="item-list"><h4>Zusätzliche Dokumentquellen für diese Frage</h4>
         <p>Du wählst die Quelle selbst. Eine Vormerkung beweist keine Aussage; Jarvis zeigt den aktuellen Indexstand und den gesicherten Hash.</p>
         {result.preferences.map((item) => <div className="item-row" key={item.document_id}>

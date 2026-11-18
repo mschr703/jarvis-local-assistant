@@ -1,10 +1,7 @@
 """Explicit local document preferences for one normalized search question."""
 
-import hashlib
-from pathlib import Path
-
 from jarvis.db import Database, utcnow
-from jarvis.documents import MAX_FILE_BYTES, DocumentStore
+from jarvis.documents import DocumentStore
 from jarvis.unified_search import query_terms
 
 MAX_PREFERENCES = 5
@@ -28,19 +25,7 @@ class SourcePreferences:
 
     @staticmethod
     def _verified(document: dict) -> bool:
-        if (document["excluded"] or document["status"] != "indexed"
-                or not document["sha256"] or not document["size"]):
-            return False
-        try:
-            root = DocumentStore.granted_root({"path": document["folder_path"]})
-            path = Path(document["path"])
-            if (path.is_symlink() or path.is_junction()
-                    or not path.resolve(strict=True).is_relative_to(root)
-                    or path.stat().st_size > MAX_FILE_BYTES):
-                return False
-            return hashlib.sha256(path.read_bytes()).hexdigest() == document["sha256"]
-        except (OSError, ValueError):
-            return False
+        return DocumentStore.source_is_current(document)
 
     def add(self, query: str, document_id: str) -> dict:
         key = _query_key(query)

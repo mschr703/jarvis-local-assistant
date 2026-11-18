@@ -82,6 +82,89 @@ def test_search_finds_unicode_filename_without_matching_content(tmp_path):
     assert found["results"][0]["source"].endswith("Übersicht.md")
 
 
+def test_changed_original_is_marked_and_cannot_be_used_as_a_current_source(tmp_path):
+    db, docs, _, folder, document, _, _, file = sample(tmp_path)
+    passage = docs.search("Mietvertrag")[0]
+    assert passage["source_status"] == "current"
+    docs.set_folder_policy(folder["id"], "cloud_allowed")
+    assert docs.selected_passages([passage["passage_id"]], cloud_only=True)[0]["sha256"] == document["sha256"]
+    file.write_text("Projekt Orion: Mietvertrag für die alte Wohnung.", encoding="utf-8")
+    assert file.stat().st_size == document["size"]
+    stale = docs.search("Mietvertrag")[0]
+    assert stale["source_status"] == "needs_reindex"
+    assert stale["sha256"] == document["sha256"]
+    with pytest.raises(ValueError, match="Index aktualisieren"):
+        docs.selected_passages([passage["passage_id"]], cloud_only=True)
+    unified = search(db, "Mietvertrag")
+    assert unified["counts"]["document"] == 0
+    assert unified["stale_sources"] == [{"document_id": document["id"],
+                                         "path": str(file.resolve()),
+                                         "index_sha256": document["sha256"],
+                                         "status": "needs_reindex"}]
+    assert docs.index_folder(folder["id"])["indexed"] == 1
+    current = docs.search("Mietvertrag")[0]
+    assert current["source_status"] == "current"
+    assert current["sha256"] != document["sha256"]
+    assert search(db, "Mietvertrag")["stale_sources"] == []
+
+
+def test_missing_or_oversized_original_stays_out_of_current_results(tmp_path, monkeypatch):
+    db, docs, _, _, document, _, _, file = sample(tmp_path)
+    passage_id = docs.search("Orion")[0]["passage_id"]
+    file.unlink()
+    assert docs.search("Orion")[0]["source_status"] == "needs_reindex"
+    assert search(db, "Orion")["stale_sources"][0]["document_id"] == document["id"]
+    with pytest.raises(ValueError, match="Index aktualisieren"):
+        docs.selected_passages([passage_id])
+    file.write_text("Projekt Orion: Mietvertrag für die neue Wohnung.", encoding="utf-8")
+    with monkeypatch.context() as patch:
+        patch.setattr("jarvis.documents.MAX_FILE_BYTES", 16)
+        assert docs.search("Orion")[0]["source_status"] == "needs_reindex"
+    external = tmp_path / "outside.md"
+    external.write_text("Projekt Orion: Mietvertrag für die neue Wohnung.", encoding="utf-8")
+    file.unlink()
+    try:
+        file.symlink_to(external)
+    except OSError:
+        return  # Windows without developer-mode symlink permission.
+    assert docs.search("Orion")[0]["source_status"] == "needs_reindex"
+    assert search(db, "Orion")["stale_sources"][0]["document_id"] == document["id"]
+
+
+def test_draft_api_rejects_source_changed_after_selection(tmp_path):
+    db, docs, _, _, _, _, _, file = sample(tmp_path)
+    passage_id = docs.search("Mietvertrag")[0]["passage_id"]
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = {"x-jarvis-csrf": client.get("/session").json()["csrf"]}
+        file.write_text("Projekt Orion: Mietvertrag für die alte Wohnung.", encoding="utf-8")
+        result = client.post("/drafts/generate", headers=headers, json={
+            "kind": "text", "brief": "Mietvertrag zusammenfassen", "passage_ids": [passage_id]})
+        assert result.status_code == 422 and "Index aktualisieren" in result.text
+        with db.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
+
+
+def test_unified_search_bounds_original_hash_checks(tmp_path, monkeypatch):
+    db, docs, _, folder, _, _, _, file = sample(tmp_path)
+    for index in range(4):
+        file.with_name(f"Orion_{index}.md").write_text("Projekt Orion und Unterlagen.", encoding="utf-8")
+    docs.index_folder(folder["id"])
+    import jarvis.unified_search as module
+    original = DocumentStore.source_is_current
+    checks = []
+
+    def counted(document):
+        checks.append(document["path"])
+        return original(document)
+
+    monkeypatch.setattr(module, "MAX_FRESHNESS_CHECKS", 2)
+    monkeypatch.setattr(DocumentStore, "source_is_current", staticmethod(counted))
+    result = search(db, "Orion")
+    assert result["limited"] and result["counts"]["document"] == 2
+    assert len(checks) == 2
+
+
 def test_search_is_bounded_and_rejects_empty_words(tmp_path, monkeypatch):
     db, docs, _, _, _, _, _, _ = sample(tmp_path)
     docs.add_memory("Orion zweiter Hinweis", "Eigene Notiz", "local_only")

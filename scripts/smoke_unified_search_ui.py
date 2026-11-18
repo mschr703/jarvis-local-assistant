@@ -56,7 +56,7 @@ def main() -> None:
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         results = page.get_by_role("region", name="Suchergebnisse")
                         expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=30000)
-                        expect(results.get_by_text("Vertrag_Orion.md", exact=False).first).to_be_visible()
+                        expect(results.locator("article").filter(has_text="Vertrag_Orion.md")).to_be_visible()
                         expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
                         expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
                         expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()

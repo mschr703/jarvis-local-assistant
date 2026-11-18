@@ -134,6 +134,30 @@ class DocumentStore:
             raise ValueError("Freigabeordner wurde umgeleitet; Ordner erneut freigeben")
         return current
 
+    @staticmethod
+    def source_is_current(document: dict) -> bool:
+        """Verify one indexed source against its granted original before citing it."""
+        if (document["excluded"] or document["status"] != "indexed"
+                or not document["sha256"] or not document["size"]):
+            return False
+        try:
+            root = DocumentStore.granted_root({"path": document["folder_path"]})
+            path = Path(document["path"])
+            if (path.is_symlink() or path.is_junction()
+                    or path.resolve(strict=True) != path
+                    or not path.is_relative_to(root)
+                    or path.stat().st_size != document["size"]
+                    or document["size"] > MAX_FILE_BYTES):
+                return False
+            with path.open("rb") as source:
+                contents = source.read(document["size"] + 1)
+            return (len(contents) == document["size"]
+                    and path.resolve(strict=True) == path
+                    and path.stat().st_size == document["size"]
+                    and hashlib.sha256(contents).hexdigest() == document["sha256"])
+        except (OSError, ValueError):
+            return False
+
     def set_folder_policy(self, folder_id: str, policy: str) -> dict:
         if policy not in {"local_only", "cloud_allowed"}:
             raise ValueError("Ungültige Cloud-Freigabe")
@@ -352,13 +376,24 @@ class DocumentStore:
             return []
         with self.db.connect() as db:
             rows = db.execute("""SELECT p.id AS passage_id,p.document_id,p.page,p.text,
-                              d.path,d.policy,d.sha256, bm25(passages_fts) AS rank
+                              d.path,d.policy,d.sha256,d.size,d.status,d.excluded,
+                              f.path AS folder_path,bm25(passages_fts) AS rank
                               FROM passages_fts JOIN passages p ON p.id=passages_fts.rowid
                               JOIN documents d ON d.id=p.document_id
+                              JOIN folders f ON f.id=d.folder_id
                               WHERE passages_fts MATCH ? AND d.excluded=0 AND d.status='indexed'
                               AND (?=0 OR d.policy='cloud_allowed')
                               ORDER BY rank LIMIT ?""", (match, int(cloud_only), limit))
-            return [dict(row) for row in rows]
+            found = [dict(row) for row in rows]
+        freshness = {}
+        for item in found:
+            document_id = item["document_id"]
+            if document_id not in freshness:
+                freshness[document_id] = self.source_is_current(item)
+            item["source_status"] = "current" if freshness[document_id] else "needs_reindex"
+            for internal in ("size", "status", "excluded", "folder_path"):
+                item.pop(internal)
+        return found
 
     def selected_passages(self, passage_ids: list[int], *, cloud_only: bool = False) -> list[dict]:
         unique = list(dict.fromkeys(passage_ids))
@@ -369,14 +404,22 @@ class DocumentStore:
         placeholders = ",".join("?" for _ in unique)
         with self.db.connect() as db:
             rows = db.execute(
-                f"""SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,d.sha256
+                f"""SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,d.sha256,
+                    d.size,d.status,d.excluded,f.path AS folder_path
                     FROM passages p JOIN documents d ON d.id=p.document_id
+                    JOIN folders f ON f.id=d.folder_id
                     WHERE p.id IN ({placeholders}) AND d.excluded=0 AND d.status='indexed'
                     AND (?=0 OR d.policy='cloud_allowed')""", (*unique, int(cloud_only)))
             found = {row["passage_id"]: dict(row) for row in rows}
         if len(found) != len(unique):
             raise ValueError("Fundstelle fehlt oder ist für Cloud-Nutzung nicht freigegeben")
-        return [found[item] for item in unique]
+        selected = [found[item] for item in unique]
+        if not all(self.source_is_current(item) for item in selected):
+            raise ValueError("Originaldatei weicht vom Index ab; zuerst Index aktualisieren")
+        for item in selected:
+            for internal in ("size", "status", "excluded", "folder_path"):
+                item.pop(internal)
+        return selected
 
     def add_memory(self, text: str, source_ref: str, policy: str) -> dict:
         if not text.strip() or not source_ref.strip():

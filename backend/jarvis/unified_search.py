@@ -4,8 +4,10 @@ import re
 from pathlib import Path
 
 from jarvis.db import Database
+from jarvis.documents import DocumentStore
 
 MAX_CANDIDATES = 100
+MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
 MAX_PER_KIND = 10
 STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "welches",
@@ -42,7 +44,8 @@ def search(db: Database, query: str) -> dict:
     with db.connect() as connection:
         connection.create_function("unicode_casefold", 1, str.casefold, deterministic=True)
         passages = [dict(row) for row in connection.execute("""
-            SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,d.sha256
+            SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,d.sha256,
+                   d.size,d.status,d.excluded,f.path AS folder_path
             FROM passages_fts JOIN passages p ON p.id=passages_fts.rowid
             JOIN documents d ON d.id=p.document_id JOIN folders f ON f.id=d.folder_id
             WHERE passages_fts MATCH ? AND d.excluded=0 AND d.status='indexed'
@@ -52,7 +55,8 @@ def search(db: Database, query: str) -> dict:
                                       for _ in terms)
         paths = [dict(row) for row in connection.execute(f"""
             SELECT p.id AS passage_id,d.id AS document_id,p.page,p.text,
-                   d.path,d.policy,d.sha256
+                   d.path,d.policy,d.sha256,d.size,d.status,d.excluded,
+                   f.path AS folder_path
             FROM documents d JOIN folders f ON f.id=d.folder_id
             LEFT JOIN passages p ON p.id=(SELECT id FROM passages
                 WHERE document_id=d.id ORDER BY ordinal,id LIMIT 1)
@@ -81,6 +85,8 @@ def search(db: Database, query: str) -> dict:
                 "document_id": row["document_id"], "passage_id": row["passage_id"],
                 "page": row["page"], "sha256": row["sha256"],
                 "policy": row["policy"],
+                "path": row["path"], "size": row["size"], "status": row["status"],
+                "excluded": row["excluded"], "folder_path": row["folder_path"],
                 "score": _score(cleaned, terms, title, body)}
         prior = by_document.get(row["document_id"])
         if prior is None or item["score"] > prior["score"]:
@@ -95,6 +101,7 @@ def search(db: Database, query: str) -> dict:
         if prior is not None:
             prior["preferred"] = True
             prior["source_status"] = preference["status"]
+            prior["_verified_preference"] = True
             prior["score"] += 1000
             continue
         by_document[document_id] = {
@@ -105,7 +112,29 @@ def search(db: Database, query: str) -> dict:
             "page": preference.get("page"), "sha256": preference["current_sha256"],
             "policy": preference["policy"], "score": 1000,
             "preferred": True, "source_status": preference["status"],
+            "_verified_preference": True,
         }
+
+    ranked_documents = sorted(by_document.values(),
+                              key=lambda item: (-item["score"], item["title"].casefold(), item["id"]))
+    limited = limited or len(ranked_documents) > MAX_FRESHNESS_CHECKS
+    current_documents = []
+    stale_sources = []
+    stale_count = 0
+    for item in ranked_documents[:MAX_FRESHNESS_CHECKS]:
+        current = item.pop("_verified_preference", False) or DocumentStore.source_is_current(item)
+        if current:
+            item.setdefault("source_status", "current")
+            for internal in ("path", "size", "status", "excluded", "folder_path"):
+                item.pop(internal, None)
+            current_documents.append(item)
+        else:
+            stale_count += 1
+            if len(stale_sources) < MAX_PER_KIND:
+                stale_sources.append({"document_id": item["document_id"],
+                                      "path": item["source"], "index_sha256": item["sha256"],
+                                      "status": "needs_reindex"})
+    limited = limited or stale_count > MAX_PER_KIND
 
     memory_items = [{"kind": "memory", "id": row["id"], "title": "Erinnerung",
                      "excerpt": row["text"][:500], "source": row["source_ref"],
@@ -123,7 +152,7 @@ def search(db: Database, query: str) -> dict:
                                   "source": f"Arbeitsstand v{row['version']}",
                                   "version": row["version"], "score": score})
 
-    groups = [list(by_document.values()), memory_items, project_items]
+    groups = [current_documents, memory_items, project_items]
     selected = []
     for group in groups:
         group.sort(key=lambda item: (-item["score"], item["title"].casefold(), item["id"]))
@@ -132,6 +161,7 @@ def search(db: Database, query: str) -> dict:
     selected.sort(key=lambda item: (-item["score"], item["kind"], item["title"].casefold(),
                                     item["id"]))
     return {"query": cleaned, "results": selected, "limited": limited,
+            "stale_sources": stale_sources,
             "preferences": preferred,
             "counts": {kind: sum(item["kind"] == kind for item in selected)
                        for kind in ("document", "memory", "project")}}
