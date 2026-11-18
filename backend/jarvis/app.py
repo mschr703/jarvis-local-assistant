@@ -18,6 +18,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from starlette.background import BackgroundTask
 
 from jarvis.cad import HolderProposalArgs, register_cad_tools, validate_dimension_proposal
 from jarvis.chat_attachments import (
@@ -954,6 +955,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not scheduled_backups.status().get("enabled"):
             raise HTTPException(409, "Geplante Backups sind nicht aktiviert")
         return await run_in_threadpool(scheduled_backups.tick, force=True)
+
+    @app.get("/backups/schedule/latest/check")
+    async def backup_schedule_latest_check(response: Response):
+        try:
+            archive, name, size = await run_in_threadpool(scheduled_backups.open_verified_archive)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        archive.close()
+        response.headers["Cache-Control"] = "no-store"
+        return {"name": name, "size": size}
+
+    @app.get("/backups/schedule/latest")
+    async def backup_schedule_latest_download():
+        try:
+            archive, name, size = await run_in_threadpool(scheduled_backups.open_verified_archive)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return StreamingResponse(iter(lambda: archive.read(256 * 1024), b""),
+                                 media_type="application/octet-stream",
+                                 background=BackgroundTask(archive.close),
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                          "Content-Length": str(size),
+                                          "Cache-Control": "no-store",
+                                          "X-Content-Type-Options": "nosniff"})
 
     @app.post("/extension-management/code")
     async def extension_pairing_code():

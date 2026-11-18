@@ -13,6 +13,7 @@ from smoke_ui import ROOT, port_free, stop_test_server, wait_ready
 sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.encrypted_backup import restore_encrypted_backup
 from jarvis.scheduled_backup import ScheduledBackup
 
 
@@ -22,7 +23,7 @@ def main() -> None:
     with TemporaryDirectory(prefix="jarvis-backup-ui-") as temporary:
         root = Path(temporary)
         data, destination = root / "data", root / "backups"
-        DocumentStore(Database(data / "jarvis.db")).add_memory(
+        memory = DocumentStore(Database(data / "jarvis.db")).add_memory(
             "Backup-Browserprobe", "UI", "local_only")
         ScheduledBackup(data).configure(destination, "00:00", "Europe/Paris", 2,
                                         "lange lokale Testpassphrase")
@@ -48,8 +49,19 @@ def main() -> None:
                         expect(section).to_contain_text("Letzter Lauf: succeeded", timeout=60_000)
                         archives = list(destination.glob("jarvis-auto-*.jbackup"))
                         assert len(archives) == 1
+                        with page.expect_download() as captured:
+                            section.get_by_role("button", name="Geprüftes Archiv herunterladen").click()
+                        downloaded = root / "browser-download.jbackup"
+                        captured.value.save_as(downloaded)
+                        restored = root / "browser-restore"
+                        restore_encrypted_backup(downloaded, restored,
+                                                 "lange lokale Testpassphrase")
+                        assert (DocumentStore(Database(restored / "jarvis.db"))
+                                .get_memory(memory["id"])["text"] == memory["text"])
                         moved = root / "temporarily-unavailable"
                         destination.rename(moved)
+                        section.get_by_role("button", name="Geprüftes Archiv herunterladen").click()
+                        expect(section).to_contain_text("Backup-Status: Backup-Zielordner fehlt")
                         button.click()
                         expect(section).to_contain_text("Backupfehler: Backup-Zielordner fehlt")
                         moved.rename(destination)
@@ -59,6 +71,7 @@ def main() -> None:
                         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                         print(json.dumps({"first_archive": archives[0].name,
                                           "failure_visible": True, "retry": "succeeded",
+                                          "download_restore": "succeeded",
                                           "mobile_width": "fits"}))
                     finally:
                         browser.close()

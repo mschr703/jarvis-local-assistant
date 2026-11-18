@@ -1,9 +1,11 @@
 """Tägliche verschlüsselte Sicherung der laufenden Windows-Instanz."""
 
 import base64
+import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 import threading
 import time
@@ -12,7 +14,12 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from jarvis.encrypted_backup import create_encrypted_backup, restore_encrypted_backup
+from jarvis.encrypted_backup import (
+    MAGIC,
+    MAX_CIPHERTEXT_BYTES,
+    create_encrypted_backup,
+    restore_encrypted_backup,
+)
 from jarvis.instance import InstanceLock
 from jarvis.windows_secret import protect_secret, unprotect_secret
 
@@ -113,7 +120,7 @@ class ScheduledBackup:
                   "last_attempt_date": (current.date().isoformat()
                                         if current.strftime("%H:%M") >= time_local else None),
                   "last_status": "configured", "last_error": None, "last_success_at": None,
-                  "last_archive": None}
+                  "last_archive": None, "last_archive_sha256": None}
         if self.owned_lock is not None:
             raise RuntimeError("Backup-Planung nur bei gestopptem Jarvis ändern")
         lock = InstanceLock(self.data_dir / "jarvis.lock")
@@ -150,8 +157,54 @@ class ScheduledBackup:
                     "last_error": None}
         public = ("enabled", "directory", "time_local", "timezone", "keep",
                   "last_attempt_date", "last_status", "last_error", "last_success_at",
-                  "last_archive")
+                  "last_archive", "last_archive_sha256")
         return {key: config.get(key) for key in public} | {"configured": True}
+
+    def open_verified_archive(self):
+        """Öffnet ausschließlich das zuletzt geprüfte, unveränderte Auto-Archiv."""
+        config = self._load()
+        if config is None:
+            raise ValueError("Keine Backup-Planung eingerichtet")
+        original = config.get("last_archive")
+        expected_hash = config.get("last_archive_sha256")
+        if (not isinstance(original, str) or not isinstance(expected_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)):
+            raise ValueError("Noch kein herunterladbares geprüftes Archiv; Sicherung erneut starten")
+        directory = self._validate_destination(config)
+        archive = Path(original)
+        if (not ARCHIVE_NAME.fullmatch(archive.name) or archive.parent != directory
+                or archive.is_symlink() or archive.is_junction()
+                or archive.resolve() != directory / archive.name):
+            raise ValueError("Backup-Archivpfad ist ungültig")
+        try:
+            handle = archive.open("rb")
+        except OSError as exc:
+            raise ValueError("Geprüftes Backup-Archiv fehlt") from exc
+        try:
+            opened = os.fstat(handle.fileno())
+            current = archive.stat()
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_ino != current.st_ino
+                    or opened.st_dev != current.st_dev or archive.is_symlink()
+                    or archive.is_junction() or archive.resolve() != directory / archive.name):
+                raise ValueError("Backup-Archiv wurde ersetzt")
+            if not len(MAGIC) < opened.st_size <= MAX_CIPHERTEXT_BYTES:
+                raise ValueError("Backup-Archivgröße ist ungültig")
+            digest = hashlib.sha256()
+            if handle.read(len(MAGIC)) != MAGIC:
+                raise ValueError("Backup-Archivformat ist ungültig")
+            handle.seek(0)
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+            if digest.hexdigest() != expected_hash:
+                raise ValueError("Backup-Archiv wurde seit der Prüfung verändert")
+            handle.seek(0)
+            return handle, archive.name, opened.st_size
+        except OSError as exc:
+            handle.close()
+            raise ValueError("Geprüftes Backup-Archiv ist nicht lesbar") from exc
+        except BaseException:
+            handle.close()
+            raise
 
     def _validate_destination(self, config: dict) -> Path:
         directory = Path(config["directory"])
@@ -162,13 +215,18 @@ class ScheduledBackup:
             raise ValueError("Backup-Zielordner fehlt")
         return directory.resolve()
 
-    def _rotate(self, directory: Path, keep: int) -> None:
+    def _rotate(self, directory: Path, keep: int, current: Path) -> None:
         archives = []
         for path in directory.iterdir():
             if (ARCHIVE_NAME.fullmatch(path.name) and path.is_file()
                     and not path.is_symlink() and path.resolve().parent == directory):
                 archives.append(path)
-        for old in sorted(archives, key=lambda path: path.name, reverse=True)[keep:]:
+        others = sorted((path for path in archives if path != current),
+                        key=lambda path: path.name, reverse=True)
+        keep_names = {current, *others[:keep - 1]}
+        for old in archives:
+            if old in keep_names:
+                continue
             old.unlink()
 
     def tick(self, *, now: datetime | None = None, force: bool = False) -> dict:
@@ -209,11 +267,16 @@ class ScheduledBackup:
             create_encrypted_backup(self.data_dir, archive, secret, owned_lock=self.owned_lock)
             with tempfile.TemporaryDirectory(prefix="jarvis-auto-verify-") as temporary:
                 restore_encrypted_backup(archive, Path(temporary) / "restored", secret)
-            self._rotate(directory, config["keep"])
+            digest = hashlib.sha256()
+            with archive.open("rb") as verified:
+                for block in iter(lambda: verified.read(1024 * 1024), b""):
+                    digest.update(block)
+            self._rotate(directory, config["keep"], archive)
             config["last_status"] = "succeeded"
             config["last_error"] = None
             config["last_success_at"] = datetime.now(UTC).isoformat()
             config["last_archive"] = str(archive)
+            config["last_archive_sha256"] = digest.hexdigest()
         except Exception as exc:  # noqa: BLE001 - Fehler im Status sichtbar halten.
             config["last_status"] = "failed"
             config["last_error"] = str(exc)[:300]

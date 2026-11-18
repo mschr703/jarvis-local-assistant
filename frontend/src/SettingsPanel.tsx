@@ -23,7 +23,8 @@ type ExtensionPair = { extension_id: string; created_at: string };
 type PairingCode = { code: string; expires_at: string };
 type BackupSchedule = { configured: boolean; enabled: boolean; directory?: string;
   time_local?: string; timezone?: string; keep?: number; last_status: string;
-  last_error: string | null; last_success_at?: string | null; last_archive?: string | null };
+  last_error: string | null; last_success_at?: string | null; last_archive?: string | null;
+  last_archive_sha256?: string | null };
 const purposeLabels: Record<string, string> = { chat: 'Chat', draft: 'Entwurf', plan: 'Plan', research: 'Recherche' };
 const statusLabels: Record<string, string> = {
   complete: 'abgeschlossen', running: 'läuft', interrupted: 'unterbrochen',
@@ -54,6 +55,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
   const [backupSchedule, setBackupSchedule] = useState<BackupSchedule | null>(null);
   const [backupError, setBackupError] = useState('');
   const [backupBusy, setBackupBusy] = useState(false);
+  const [backupDownloadBusy, setBackupDownloadBusy] = useState(false);
   const backupBusyRef = useRef(false);
   const backupRequest = useRef(0);
   const savingRef = useRef(false);
@@ -164,6 +166,19 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
     catch (error) { setBackupError((error as Error).message); }
     finally { backupBusyRef.current = false; setBackupBusy(false); }
   };
+  const downloadBackup = async () => {
+    if (backupDownloadBusy) return;
+    setBackupDownloadBusy(true);
+    try {
+      const available = await api<{ name: string; size: number }>('/backups/schedule/latest/check');
+      const link = document.createElement('a');
+      link.href = '/api/backups/schedule/latest';
+      link.download = available.name;
+      link.click();
+      setBackupError('');
+    } catch (error) { setBackupError((error as Error).message); }
+    finally { setBackupDownloadBusy(false); }
+  };
   return <section className="card settings">
     <h3>Modell und Limits</h3>
     <p>OpenRouter-Schlüssel unter „Zugänge“ mit „OpenRouter-Eintrag vorbereiten“ für diesen Windows-Benutzer geschützt speichern oder vor dem Start als Backend-Prozessvariable setzen. Die Prozessvariable hat Vorrang. Den Schlüssel nicht im Projektordner speichern. Cloud-Verarbeitung verlangt weiterhin eine bewusste Freigabe je Anfrage.</p>
@@ -201,9 +216,11 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
         <p>{backupSchedule.enabled ? 'Aktiv' : 'Deaktiviert'} · täglich {backupSchedule.time_local} {backupSchedule.timezone} · {backupSchedule.keep} Archive behalten</p>
         <p>Letzter Lauf: {backupSchedule.last_status}{backupSchedule.last_success_at ? ` · Erfolg ${new Date(backupSchedule.last_success_at).toLocaleString('de-DE')}` : ''}</p>
         {backupSchedule.last_error && <p className="notice error" role="status">Backupfehler: {backupSchedule.last_error}</p>}
-        {backupSchedule.last_archive && <p className="hint">Letztes geprüftes Archiv: {backupSchedule.last_archive}</p>}
+        {backupSchedule.last_archive && <p className="hint">Letztes geprüftes Archiv: {backupSchedule.last_archive}{backupSchedule.last_archive_sha256 && <> · SHA-256 {backupSchedule.last_archive_sha256}</>}</p>}
         <div className="item-actions"><button onClick={() => void loadBackupSchedule()}>Backup-Status aktualisieren</button>
-          {backupSchedule.enabled && <button disabled={backupBusy} onClick={() => void runBackupNow()}>{backupBusy ? 'Sichere und prüfe…' : 'Jetzt sichern und prüfen'}</button>}</div>
+          {backupSchedule.enabled && <button disabled={backupBusy} onClick={() => void runBackupNow()}>{backupBusy ? 'Sichere und prüfe…' : 'Jetzt sichern und prüfen'}</button>}
+          {backupSchedule.last_archive_sha256 && <button disabled={backupBusy || backupDownloadBusy} onClick={() => void downloadBackup()}>{backupDownloadBusy ? 'Prüfe Archiv…' : 'Geprüftes Archiv herunterladen'}</button>}</div>
+        {backupSchedule.last_archive_sha256 && <p className="hint">Die Passphrase getrennt vom Archiv aufbewahren. Zum Wiederherstellen siehe README „Backup und Wiederherstellung“.</p>}
       </>}
     <h4>Letzte Modellläufe</h4>
     <div className="item-actions"><button onClick={() => void loadUsage()}>Belege aktualisieren</button></div>

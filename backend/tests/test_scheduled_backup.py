@@ -1,5 +1,6 @@
 """Geplante Windows-Backups mit echtem Restore und begrenzter Rotation."""
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -16,6 +17,7 @@ from jarvis.app import create_app
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.encrypted_backup import MAGIC
 from jarvis.instance import InstanceLock
 from jarvis.scheduled_backup import ScheduledBackup, _save
 from jarvis.windows_secret import protect_secret, unprotect_secret
@@ -52,6 +54,60 @@ def test_schedule_config_atomic_replace_recovers_from_short_windows_lock(tmp_pat
     assert json.loads(path.read_text(encoding="utf-8")) == {"version": 1}
     assert attempts == 3
     assert list(tmp_path.glob("*.partial")) == []
+
+
+def test_verified_archive_rejects_changed_bytes_and_foreign_path(tmp_path):
+    data, directory = tmp_path / "data", tmp_path / "backups"
+    data.mkdir()
+    directory.mkdir()
+    archive = directory / "jarvis-auto-20261118T220000-abcdef12.jbackup"
+    original = MAGIC + b"synthetische verschluesselte Bytes"
+    archive.write_bytes(original)
+    config = {"version": 1, "enabled": False, "directory": str(directory),
+              "time_local": "03:00", "timezone": "Europe/Paris", "keep": 2,
+              "secret_b64": "ZmFrZQ==", "last_archive": str(archive),
+              "last_archive_sha256": hashlib.sha256(original).hexdigest()}
+    schedule = ScheduledBackup(data)
+    _save(schedule.path, config)
+    handle, name, size = schedule.open_verified_archive()
+    with handle:
+        assert handle.read() == original
+    assert name == archive.name and size == len(original)
+    archive.write_bytes(original + b"x")
+    with pytest.raises(ValueError, match="verändert"):
+        schedule.open_verified_archive()
+    archive.write_bytes(original)
+    invalid = b"kein verschluesseltes Archiv"
+    archive.write_bytes(invalid)
+    config["last_archive_sha256"] = hashlib.sha256(invalid).hexdigest()
+    _save(schedule.path, config)
+    with pytest.raises(ValueError, match="format"):
+        schedule.open_verified_archive()
+    archive.write_bytes(original)
+    config["last_archive_sha256"] = hashlib.sha256(original).hexdigest()
+    foreign = tmp_path / archive.name
+    foreign.write_bytes(original)
+    config["last_archive"] = str(foreign)
+    _save(schedule.path, config)
+    with pytest.raises(ValueError, match="pfad"):
+        schedule.open_verified_archive()
+    config["last_archive"] = str(archive)
+    config["last_archive_sha256"] = 42
+    _save(schedule.path, config)
+    with pytest.raises(ValueError, match="Noch kein"):
+        schedule.open_verified_archive()
+
+
+def test_rotation_retains_just_created_archive_even_with_future_named_file(tmp_path):
+    data, directory = tmp_path / "data", tmp_path / "backups"
+    directory.mkdir()
+    current = directory / "jarvis-auto-20261118T220000-abcdef12.jbackup"
+    future = directory / "jarvis-auto-20990101T000000-abcdef12.jbackup"
+    manual = directory / "manual.jbackup"
+    for path in (current, future, manual):
+        path.write_bytes(b"synthetisch")
+    ScheduledBackup(data)._rotate(directory, 1, current)
+    assert current.exists() and manual.exists() and not future.exists()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
@@ -164,6 +220,58 @@ def test_api_status_csrf_run_and_restart(profile):
             schedule.disable()
         finally:
             lock.release()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
+def test_download_last_verified_archive_and_restore(profile, tmp_path):
+    data, memory, directory = profile
+    schedule = ScheduledBackup(data)
+    schedule.configure(directory, "00:00", "Europe/Paris", 2,
+                       "lange geplante Testpassphrase", now=datetime.now(UTC))
+    settings = Settings(JARVIS_DATA_DIR=data, JARVIS_OLLAMA_MODEL="fixture")
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/backups/schedule/latest").status_code == 401
+        token = client.get("/session").json()["csrf"]
+        assert client.get("/backups/schedule/latest/check").status_code == 409
+        assert client.get("/backups/schedule/latest", headers={"origin": "https://evil.example"}).status_code == 403
+        assert client.get("/backups/schedule/latest", headers={"host": "evil.example"}).status_code == 403
+        result = client.post("/backups/schedule/run", headers={"x-jarvis-csrf": token})
+        assert result.status_code == 200 and result.json()["last_status"] == "succeeded"
+        latest = result.json()
+        assert len(latest["last_archive_sha256"]) == 64
+        checked = client.get("/backups/schedule/latest/check")
+        assert checked.status_code == 200
+        assert checked.headers["cache-control"] == "no-store"
+        assert checked.json()["name"] == Path(latest["last_archive"]).name
+        downloaded = client.get("/backups/schedule/latest")
+        assert downloaded.status_code == 200
+        assert downloaded.headers["content-type"] == "application/octet-stream"
+        assert downloaded.headers["cache-control"] == "no-store"
+        assert "attachment" in downloaded.headers["content-disposition"]
+        assert len(downloaded.content) == checked.json()["size"]
+        assert hashlib.sha256(downloaded.content).hexdigest() == latest["last_archive_sha256"]
+        copy = tmp_path / "heruntergeladen.jbackup"
+        copy.write_bytes(downloaded.content)
+        from jarvis.encrypted_backup import restore_encrypted_backup
+
+        restored = tmp_path / "download-restore"
+        restore_encrypted_backup(copy, restored, "lange geplante Testpassphrase")
+        assert DocumentStore(Database(restored / "jarvis.db")).get_memory(memory["id"])["text"] == memory["text"]
+
+        archive = Path(latest["last_archive"])
+        with archive.open("r+b") as changed:
+            changed.seek(-1, 2)
+            final_byte = changed.read(1)[0]
+            changed.seek(-1, 2)
+            changed.write(bytes([final_byte ^ 1]))
+        assert client.get("/backups/schedule/latest/check").status_code == 409
+        assert client.get("/backups/schedule/latest").status_code == 409
+        foreign = tmp_path / archive.name
+        foreign.write_bytes(downloaded.content)
+        config = json.loads(schedule.path.read_text(encoding="utf-8"))
+        config["last_archive"] = str(foreign)
+        schedule.path.write_text(json.dumps(config), encoding="utf-8")
+        assert client.get("/backups/schedule/latest").status_code == 409
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-DPAPI")
