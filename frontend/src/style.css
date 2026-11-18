@@ -101,3 +101,4 @@ button,textarea{font:inherit}button{cursor:pointer}.sidebar nav button{border:0;
 .settings .hint{overflow-wrap:anywhere}
 .backup-schedule-form{margin:18px 0}.backup-schedule-form label{min-width:0}.backup-schedule-form input{min-width:0;width:100%;box-sizing:border-box}.backup-disable{margin:14px 0}.backup-disable p{margin:8px 0;overflow-wrap:anywhere}
 .source-opened{outline:2px solid #7aa9ee;outline-offset:-2px;border-radius:8px}.unified-search .item-row button{margin:8px 8px 0 0}
+.package-actions{flex-wrap:wrap;align-items:center;min-width:0}.package-actions p{flex:1 1 100%;margin:10px 0}.package-actions button{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}

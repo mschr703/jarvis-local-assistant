@@ -49,6 +49,7 @@ from jarvis.code_projects import CodeProjectStore
 from jarvis.config import Settings, load_settings, valid_personal_style_label
 from jarvis.db import Database
 from jarvis.desktop import register_desktop_tools
+from jarvis.document_packages import build_document_package
 from jarvis.documents import DocumentStore
 from jarvis.drafts import PROFILE_KINDS, DraftStore, StyleProfileConflict
 from jarvis.engine import RunEngine
@@ -301,6 +302,12 @@ class FolderInput(BaseModel):
 
 class FolderPolicyInput(BaseModel):
     policy: str = Field(pattern="^(local_only|cloud_allowed)$")
+
+
+class DocumentPackageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(min_length=1, max_length=10)
 
 
 class GraphVaultInput(BaseModel):
@@ -1867,6 +1874,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/documents")
     async def document_list(folder_id: str | None = None):
         return documents.documents(folder_id)
+
+    @app.post("/documents/package")
+    async def download_document_package(data: DocumentPackageInput):
+        try:
+            archive = await run_in_threadpool(build_document_package,
+                                              documents, data.document_ids)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return Response(archive, media_type="application/zip",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="jarvis-unterlagenpaket.zip"',
+                                 "Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
 
     @app.get("/documents/{document_id}")
     async def document_view(document_id: str):

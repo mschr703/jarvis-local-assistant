@@ -109,3 +109,27 @@ test('Suchdokument mit anderem Pfad wird auch bei gleichem Hash nicht übernomme
     .rejects.toThrow('nicht mehr aktuell');
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+test('Unterlagenpaket lädt Binärdaten mit lokaler Sitzung und expliziter Auswahl', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response('ZIP-BYTES', { status: 200,
+      headers: { 'Content-Type': 'application/zip' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { downloadDocumentPackage } = await import('./api');
+  expect(await (await downloadDocumentPackage(['a', 'b'])).text()).toBe('ZIP-BYTES');
+  expect(fetchMock.mock.calls[1][0]).toBe('/api/documents/package');
+  expect(fetchMock.mock.calls[1][1].method).toBe('POST');
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ document_ids: ['a', 'b'] });
+  expect((fetchMock.mock.calls[1][1].headers as Headers).get('X-Jarvis-CSRF')).toBe('token');
+});
+
+test('Unterlagenpaket zeigt einen veralteten Originalbeleg als Fehler', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Originaldatei weicht vom Index ab; zuerst neu indexieren',
+    }), { status: 409 })));
+  const { downloadDocumentPackage } = await import('./api');
+  await expect(downloadDocumentPackage(['a'])).rejects.toThrow('Originaldatei weicht');
+});

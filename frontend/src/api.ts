@@ -104,6 +104,14 @@ export async function verifiedDocumentForLocalChat(documentId: string,
   return new File([bytes], filename, { type: 'application/octet-stream' });
 }
 
+export async function downloadDocumentPackage(documentIds: string[]): Promise<Blob> {
+  const response = await requestWithSession('/documents/package', {
+    method: 'POST', body: JSON.stringify({ document_ids: documentIds }),
+  });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {
