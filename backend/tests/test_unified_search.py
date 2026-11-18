@@ -52,6 +52,25 @@ def test_search_combines_sources_with_exact_references(tmp_path):
     assert docs.get_document(document["id"])["status"] == "indexed"
 
 
+def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monkeypatch):
+    db, _, _, _, _, memory, project, _ = sample(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(DocumentStore, "source_is_current", staticmethod(
+            lambda _row: pytest.fail("Ungewählte Dokumente wurden geprüft")))
+        for kind, expected_id in (("memory", memory["id"]),
+                                  ("project", project["id"])):
+            result = search(db, "Orion", kind)
+            assert [(item["kind"], item["id"]) for item in result["results"]] == [
+                (kind, expected_id)]
+            assert result["preferences"] == [] and result["stale_sources"] == []
+            assert result["counts"] == {source: int(source == kind) for source in
+                                         ("document", "memory", "project")}
+    assert [item["kind"] for item in search(db, "Orion", "document")["results"]] == [
+        "document"]
+    with pytest.raises(ValueError, match="Quelltyp"):
+        search(db, "Orion", "unknown")
+
+
 def test_search_reflects_updates_exclusion_and_deletion(tmp_path):
     db, docs, states, folder, _, memory, project, file = sample(tmp_path)
     file.write_text("Neuer Wohnungsvertrag für Projekt Vega.", encoding="utf-8")
@@ -190,6 +209,11 @@ def test_search_api_requires_session_and_is_read_only(tmp_path):
         answer = client.get("/search/unified", params={"q": "Orion"})
         assert answer.status_code == 200
         assert answer.json()["counts"] == {"document": 1, "memory": 1, "project": 1}
+        assert client.get("/search/unified", params={
+            "q": "Orion", "kind": "memory"}).json()["counts"] == {
+                "document": 0, "memory": 1, "project": 0}
+        assert client.get("/search/unified", params={
+            "q": "Orion", "kind": "invalid"}).status_code == 422
         assert client.get("/search/unified", params={"q": "was ist das?"}).status_code == 422
         with db.connect() as connection:
             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0

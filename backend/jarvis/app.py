@@ -1056,9 +1056,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await run_in_threadpool(quality_overview, db)
 
     @app.get("/search/unified")
-    async def unified_search_view(q: str = Query(min_length=2, max_length=160)):
+    async def unified_search_view(q: str = Query(min_length=2, max_length=160),
+                                  kind: str = Query(default="all", pattern="^(all|document|memory|project)$")):
         try:
-            return await run_in_threadpool(unified_search, db, q)
+            return await run_in_threadpool(unified_search, db, q, kind)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -1084,10 +1085,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/search/semantic")
     async def semantic_search_view(q: str = Query(min_length=2, max_length=160),
                                    folder_id: str | None = Query(default=None, max_length=64),
-                                   document_id: str | None = Query(default=None, max_length=64)):
+                                   document_id: str | None = Query(default=None, max_length=64),
+                                   kind: str = Query(default="all", pattern="^(all|document|memory|project)$")):
         try:
             return await run_in_threadpool(semantic_search, db, q, config.ollama_url,
-                                           folder_id, document_id)
+                                           folder_id, document_id, kind)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except SemanticSearchError as exc:

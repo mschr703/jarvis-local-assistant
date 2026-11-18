@@ -13,6 +13,7 @@ from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
 from jarvis.semantic_cache import PersistentEmbeddingCache
+from jarvis.unified_search import SOURCE_KINDS
 
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
@@ -235,11 +236,16 @@ def _preferences(db: Database, query: str) -> list[dict]:
 
 
 def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None,
-           document_id: str | None = None) -> dict:
+           document_id: str | None = None, source_kind: str = "all") -> dict:
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
-    preferences = [] if document_id else _preferences(db, cleaned)
+    if source_kind not in SOURCE_KINDS:
+        raise ValueError("Unbekannter Such-Quelltyp")
+    if source_kind in {"memory", "project"} and (folder_id or document_id):
+        raise ValueError("Dokumentfilter und Quelltyp passen nicht zusammen")
+    preferences = ([] if document_id or source_kind in {"memory", "project"}
+                   else _preferences(db, cleaned))
     preferred_ids = [item["document_id"] for item in preferences
                      if item["status"] in {"current", "updated"}]
     preferred_slots = ",".join("?" for _ in preferred_ids) or "NULL"
@@ -272,12 +278,14 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                      path,part,passage_id LIMIT ?
         """, (folder_id, folder_id, document_id, document_id,
               MAX_PASSAGES + 1 if document_id else 3,
-              *preferred_ids, MAX_PASSAGES + 1))]
-        memories = [] if document_id else [dict(row) for row in connection.execute("""
+              *preferred_ids, MAX_PASSAGES + 1))] if source_kind in {"all", "document"} else []
+        memories = [] if document_id or source_kind not in {"all", "memory"} else [
+            dict(row) for row in connection.execute("""
             SELECT id,text,source_ref,policy,updated_at FROM memories
             ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_MEMORIES + 1,))]
-        projects = [] if document_id else [dict(row) for row in connection.execute("""
+        projects = [] if document_id or source_kind not in {"all", "project"} else [
+            dict(row) for row in connection.execute("""
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECTS + 1,))]
@@ -322,7 +330,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus],
                           db.path.parent / "semantic-embeddings.sqlite")
     question = vectors[0]
-    preferences = [] if document_id else _preferences(db, cleaned)
+    preferences = ([] if document_id or source_kind in {"memory", "project"}
+                   else _preferences(db, cleaned))
     preferred_status = {item["document_id"]: item["status"] for item in preferences
                         if item["status"] in {"current", "updated"}}
     ranked_results = []

@@ -66,6 +66,28 @@ def main() -> None:
                         assert "Kuchen.md" not in results.locator("article").first.inner_text()
                         assert not overflow_nodes(page), overflow_nodes(page)
 
+                        kind_select = page.get_by_label("Quelltyp der gemeinsamen Suche")
+                        for kind, label in (("memory", "0 Dokumente · 1 Erinnerungen · 0 Arbeitsstände"),
+                                            ("project", "0 Dokumente · 0 Erinnerungen · 1 Arbeitsstände")):
+                            kind_select.select_option(kind)
+                            assert page.get_by_label("Dokumentordner für sinngemäße Suche").is_disabled()
+                            page.get_by_label("Gemeinsame Suche").fill("Schlüssel am Freitag")
+                            page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                            lexical = page.get_by_role("region", name="Suchergebnisse")
+                            expect(lexical).to_contain_text("1 " + ("Erinnerungen" if kind == "memory" else "Arbeitsstände"))
+                            button.click()
+                            results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
+                            expect(results.get_by_text(label)).to_be_visible(timeout=120000)
+                            expect(results.get_by_text("Geprüft: 0 Dokumentfundstellen",
+                                                       exact=False)).to_be_visible()
+                        kind_select.select_option("document")
+                        page.get_by_label("Gemeinsame Suche").fill("Wie backe ich Apfelkuchen?")
+                        button.click()
+                        results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
+                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(
+                            timeout=120000)
+                        expect(results.locator("article")).to_contain_text("Kuchen.md")
+
                         docs.update_memory(memory["id"],
                                            "Die Schlüsselübergabe für die Wohnung ist am Samstag.",
                                            "Gespräch vom Dienstag", "local_only")
@@ -85,7 +107,8 @@ def main() -> None:
                         assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
-                        print(json.dumps({"source_kinds": 3, "updates": "current",
+                        print(json.dumps({"source_kinds": 3, "filters": "lexical_and_semantic",
+                                          "updates": "current",
                                           "mobile_width": "fits", "cloud_calls": 0}))
                     finally:
                         browser.close()

@@ -1,5 +1,6 @@
 """Semantic retrieval keeps memory and work-state references current and local."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from jarvis.app import create_app
@@ -51,6 +52,39 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
     assert by_kind["project"]["id"] == project["id"]
     assert by_kind["project"]["version"] == 1
     assert not found["limited"] and not found["changed_sources"]
+
+
+def test_semantic_source_kind_filters_corpus_before_local_embedding(tmp_path, monkeypatch):
+    db, _, folder, memory, project, _ = sample(tmp_path)
+    calls = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        calls.append(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    with monkeypatch.context() as patch:
+        patch.setattr(DocumentStore, "source_is_current", staticmethod(
+            lambda _row: pytest.fail("Ungewählte Dokumente wurden geprüft")))
+        for kind, expected_id in (("memory", memory["id"]),
+                                  ("project", project["id"])):
+            found = search(db, "Was steht an?", "http://127.0.0.1:11434",
+                           source_kind=kind)
+            assert [(item["kind"], item["id"]) for item in found["results"]] == [
+                (kind, expected_id)]
+            assert len(calls[-1]) == 2
+            assert found["checked_passages"] == 0
+            assert found["preferences"] == []
+    found = search(db, "Was steht an?", "http://127.0.0.1:11434",
+                   source_kind="document")
+    assert found["counts"] == {"document": 1, "memory": 0, "project": 0}
+    assert found["checked_memories"] == found["checked_projects"] == 0
+    assert len(calls[-1]) == 2
+    with pytest.raises(ValueError, match="Quelltyp"):
+        search(db, "Frage", "http://127.0.0.1:11434", source_kind="unknown")
+    with pytest.raises(ValueError, match="passen nicht zusammen"):
+        search(db, "Frage", "http://127.0.0.1:11434", folder["id"],
+               source_kind="memory")
 
 
 def test_changed_memory_and_project_are_not_displayed(tmp_path, monkeypatch):
@@ -110,3 +144,10 @@ def test_semantic_source_api_returns_evidence(tmp_path, monkeypatch):
         assert body["counts"] == {"document": 1, "memory": 1, "project": 1}
         assert {memory["id"], project["id"]}.issubset(
             {item["id"] for item in body["results"]})
+        filtered = client.get("/search/semantic", params={"q": "Wohnung", "kind": "project"})
+        assert filtered.status_code == 200
+        assert filtered.json()["counts"] == {"document": 0, "memory": 0, "project": 1}
+        assert client.get("/search/semantic", params={
+            "q": "Wohnung", "kind": "project", "document_id": "wrong"}).status_code == 422
+        assert client.get("/search/semantic", params={
+            "q": "Wohnung", "kind": "invalid"}).status_code == 422

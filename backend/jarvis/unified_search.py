@@ -10,6 +10,7 @@ MAX_CANDIDATES = 100
 MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
 MAX_PER_KIND = 10
+SOURCE_KINDS = frozenset({"all", "document", "memory", "project"})
 STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "welches",
                        "ist", "sind", "hat", "haben", "ich", "mir", "mein", "meine", "zu",
                        "zur", "zum", "von", "für", "mit", "über", "und", "oder", "der",
@@ -35,11 +36,14 @@ def _score(query: str, terms: list[str], title: str, body: str) -> int:
             + sum(4 * (term in title_fold) + 2 * (term in body_fold) for term in terms))
 
 
-def search(db: Database, query: str) -> dict:
+def search(db: Database, query: str, kind: str = "all") -> dict:
     from jarvis.source_preferences import SourcePreferences
 
+    if kind not in SOURCE_KINDS:
+        raise ValueError("Unbekannter Such-Quelltyp")
     cleaned, terms = query_terms(query)
-    preferred = SourcePreferences(db).list(cleaned)["preferences"]
+    preferred = (SourcePreferences(db).list(cleaned)["preferences"]
+                 if kind in {"all", "document"} else [])
     match = " OR ".join(f'"{term}"*' for term in terms)
     with db.connect() as connection:
         connection.create_function("unicode_casefold", 1, str.casefold, deterministic=True)
@@ -50,7 +54,7 @@ def search(db: Database, query: str) -> dict:
             JOIN documents d ON d.id=p.document_id JOIN folders f ON f.id=d.folder_id
             WHERE passages_fts MATCH ? AND d.excluded=0 AND d.status='indexed'
             ORDER BY bm25(passages_fts),p.id LIMIT ?
-        """, (match, MAX_CANDIDATES + 1))]
+        """, (match, MAX_CANDIDATES + 1))] if kind in {"all", "document"} else []
         path_conditions = " OR ".join("unicode_casefold(d.path) LIKE ? ESCAPE '\\'"
                                       for _ in terms)
         paths = [dict(row) for row in connection.execute(f"""
@@ -62,17 +66,18 @@ def search(db: Database, query: str) -> dict:
                 WHERE document_id=d.id ORDER BY ordinal,id LIMIT 1)
             WHERE d.excluded=0 AND d.status='indexed' AND ({path_conditions})
             ORDER BY d.path,d.id LIMIT ?
-        """, (*[f"%{term.replace('_', r'\_')}%" for term in terms], MAX_CANDIDATES + 1))]
+        """, (*[f"%{term.replace('_', r'\_')}%" for term in terms], MAX_CANDIDATES + 1))] if kind in {
+            "all", "document"} else []
         memories = [dict(row) for row in connection.execute("""
             SELECT m.id,m.text,m.source_ref,m.policy,m.updated_at
             FROM memories_fts JOIN memories m ON m.id=memories_fts.id
             WHERE memories_fts MATCH ?
             ORDER BY bm25(memories_fts),m.id LIMIT ?
-        """, (match, MAX_CANDIDATES + 1))]
+        """, (match, MAX_CANDIDATES + 1))] if kind in {"all", "memory"} else []
         projects = [dict(row) for row in connection.execute("""
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
-        """, (MAX_PROJECT_ROWS + 1,))]
+        """, (MAX_PROJECT_ROWS + 1,))] if kind in {"all", "project"} else []
 
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS)

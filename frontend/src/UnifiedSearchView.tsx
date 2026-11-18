@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 
 type Kind = 'document' | 'memory' | 'project';
+type SourceKind = 'all' | Kind;
 type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: string;
   score: number; policy?: string; document_id?: string; passage_id?: number | null;
   page?: number | null; sha256?: string; version?: number; preferred?: boolean;
@@ -30,6 +31,7 @@ const names: Record<Kind, string> = {
 
 export default function UnifiedSearchView() {
   const [query, setQuery] = useState('');
+  const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
@@ -69,9 +71,11 @@ export default function UnifiedSearchView() {
     finally { setCacheBusy(false); }
   };
   const load = async (value: string) => {
+    const params = new URLSearchParams({ q: value, kind: sourceKind });
     const [found, available] = await Promise.all([
-      api<SearchResult>(`/search/unified?q=${encodeURIComponent(value)}`),
-      api<Document[]>('/documents'),
+      api<SearchResult>(`/search/unified?${params}`),
+      sourceKind === 'all' || sourceKind === 'document' ?
+        api<Document[]>('/documents') : Promise.resolve([] as Document[]),
     ]);
     setResult(found); setDocuments(available);
   };
@@ -87,7 +91,7 @@ export default function UnifiedSearchView() {
     if (busy || cacheBusy || query.trim().length < 2) return;
     setBusy(true); setError(''); setResult(null); setSemantic(null);
     try {
-      const params = new URLSearchParams({ q: query.trim() });
+      const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
       if (folderId) params.set('folder_id', folderId);
       if (documentId) params.set('document_id', documentId);
       setSemantic(await api<SemanticResult>(`/search/semantic?${params}`));
@@ -115,6 +119,17 @@ export default function UnifiedSearchView() {
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
     <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für dieselben Quellarten. Nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
+      <label>Quelltyp
+        <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy}
+          onChange={(event) => { const next = event.target.value as SourceKind;
+            setSourceKind(next); setResult(null); setSemantic(null);
+            if (next === 'memory' || next === 'project') { setFolderId(''); setDocumentId(''); }
+          }}>
+          <option value="all">Alle Quellen</option>
+          <option value="document">Dokumente</option>
+          <option value="memory">Erinnerungen</option>
+          <option value="project">Arbeitsstände</option>
+        </select></label>
       <label style={{ display: 'grid', gap: 7, minWidth: 0, maxWidth: '100%' }}>Suchbegriff oder Stichwortfrage<input aria-label="Gemeinsame Suche" value={query}
         style={{ width: '100%', minWidth: 0, maxWidth: '100%', background: '#101823',
           border: '1px solid #3b4b60', borderRadius: 8, padding: 9, color: '#e8ebef' }}
@@ -123,13 +138,15 @@ export default function UnifiedSearchView() {
       <button className="primary" type="submit" disabled={busy || cacheBusy || query.trim().length < 2}>
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
-        <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId} disabled={busy}
+        <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId}
+          disabled={busy || sourceKind === 'memory' || sourceKind === 'project'}
           onChange={(event) => { setFolderId(event.target.value); setDocumentId(''); }}>
           <option value="">Alle freigegebenen Ordner</option>
           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select></label>
       <label>Einzelnes Dokument tief durchsuchen
-        <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId} disabled={busy}
+        <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId}
+          disabled={busy || sourceKind === 'memory' || sourceKind === 'project'}
           onChange={(event) => setDocumentId(event.target.value)}>
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
@@ -151,6 +168,9 @@ export default function UnifiedSearchView() {
       <small>Leert nur berechnete Suchvektoren. Dokumente, Erinnerungen und Suchindex bleiben erhalten; die nächste sinngemäße Suche berechnet die Vektoren erneut.</small>
       <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
         'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
+        sourceKind === 'memory' ? 'Es werden höchstens 30 gespeicherte Erinnerungen geprüft.' :
+        sourceKind === 'project' ? 'Es werden höchstens 20 gespeicherte Arbeitsstände geprüft.' :
+        sourceKind === 'document' ? 'Es werden höchstens 100 Fundstellen aus 30 Dateien geprüft.' :
         'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
@@ -168,6 +188,9 @@ export default function UnifiedSearchView() {
         </div>}
       {semantic.limited && <p className="notice">{semantic.document_scope ?
         'Die tiefe Suche prüft höchstens die ersten 100 Fundstellen dieser Datei und zeigt höchstens fünf Treffer.' :
+        sourceKind === 'memory' ? 'Es wurden höchstens die 30 neuesten Erinnerungen geprüft und höchstens zehn Treffer angezeigt.' :
+        sourceKind === 'project' ? 'Es wurden höchstens die 20 neuesten Arbeitsstände geprüft und höchstens zehn Treffer angezeigt.' :
+        sourceKind === 'document' ? 'Es wurden höchstens 30 Dateien und 100 Fundstellen geprüft, je Datei die ersten drei; höchstens zehn Treffer erscheinen.' :
         'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.'}</p>}
       {semantic.stale_sources.length > 0 && <div className="notice" role="status">
         <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Unter „Dokumente“ neu indexieren.</p>
@@ -202,7 +225,7 @@ export default function UnifiedSearchView() {
         <ul>{result.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>
           {item.path} · bisheriger Index SHA-256 {item.index_sha256}</li>)}</ul>
       </div>}
-      <div className="item-list"><h4>Zusätzliche Dokumentquellen für diese Frage</h4>
+      {(sourceKind === 'all' || sourceKind === 'document') && <div className="item-list"><h4>Zusätzliche Dokumentquellen für diese Frage</h4>
         <p>Du wählst die Quelle selbst. Eine Vormerkung beweist keine Aussage; Jarvis zeigt den aktuellen Indexstand und den gesicherten Hash.</p>
         {result.preferences.map((item) => <div className="item-row" key={item.document_id}>
           <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>{item.path}</strong>
@@ -222,7 +245,7 @@ export default function UnifiedSearchView() {
           </select></label>
         <button type="button" disabled={busy || !preferredId || result.preferences.length >= 5}
           onClick={() => void changePreference(preferredId, 'PUT')}>Dieses Dokument berücksichtigen</button>
-      </div>
+      </div>}
       {result.limited && <p className="notice">Die Trefferliste ist begrenzt. Präzisiere die Suche für weitere Ergebnisse.</p>}
       {!result.results.length && <p>Keine passenden gespeicherten Quellen gefunden.</p>}
       <div className="item-list">{result.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}`}>
