@@ -1,10 +1,13 @@
 """Small user-selected files, stored locally and linked to one chat message."""
 
 import hashlib
+import io
 import os
 import re
 from pathlib import Path
 from uuid import uuid4
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from jarvis.db import Database, utcnow
 from jarvis.desktop import extract_public_pdf
@@ -12,7 +15,36 @@ from jarvis.documents import extract_docx
 
 MAX_ATTACHMENT_BYTES = 512 * 1024
 MAX_ATTACHMENT_TEXT = 8000
-SUFFIXES = {".txt", ".md", ".markdown", ".docx", ".pdf"}
+IMAGE_FORMATS = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}
+SUFFIXES = {".txt", ".md", ".markdown", ".docx", ".pdf", *IMAGE_FORMATS}
+MAX_IMAGE_PIXELS = 4_000_000
+
+
+def checked_image(data: bytes, suffix: str) -> Image.Image:
+    try:
+        image = Image.open(io.BytesIO(data), formats=list(set(IMAGE_FORMATS.values())))
+        if image.format != IMAGE_FORMATS[suffix]:
+            raise ValueError("Bildformat passt nicht zur Dateiendung")
+        width, height = image.size
+        if (width < 64 or height < 64 or width * height > MAX_IMAGE_PIXELS
+                or getattr(image, "n_frames", 1) != 1):
+            raise ValueError("Bild braucht 64 Pixel je Seite und höchstens 4 Millionen Pixel")
+        image.load()
+        return image
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("Bild ist beschädigt oder nicht lesbar") from exc
+
+
+def normalized_image(data: bytes, suffix: str) -> bytes:
+    """Produce bounded local model input without EXIF or other source metadata."""
+    image = ImageOps.exif_transpose(checked_image(data, suffix))
+    image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    rgba = image.convert("RGBA")
+    white = Image.new("RGBA", rgba.size, "white")
+    white.alpha_composite(rgba)
+    output = io.BytesIO()
+    white.convert("RGB").save(output, format="JPEG", quality=85)
+    return output.getvalue()
 
 
 def attachment_text(filename: str, sha256: str, text: str) -> str:
@@ -41,6 +73,10 @@ class ChatAttachmentStore:
     @staticmethod
     def _text(filename: str, data: bytes) -> str:
         suffix = Path(filename).suffix.lower()
+        if suffix in IMAGE_FORMATS:
+            image = checked_image(data, suffix)
+            return (f"Bild mit {image.width} × {image.height} Pixeln. "
+                    "Bildinhalt wird nur für diese Nachricht an das lokale Vision-Modell gegeben.")
         if suffix == ".pdf":
             text = extract_public_pdf(data, chat_mode=True)["text"]
         elif suffix == ".docx":
@@ -68,7 +104,7 @@ class ChatAttachmentStore:
             raise ValueError("Dateiname ist ungültig")
         suffix = Path(filename).suffix.lower()
         if suffix not in SUFFIXES:
-            raise ValueError("Nur TXT, Markdown, DOCX und Text-PDF sind als Chatanhang erlaubt")
+            raise ValueError("Nur TXT, Markdown, DOCX, Text-PDF und PNG/JPEG/WebP sind als Chatanhang erlaubt")
         if not 0 < len(data) <= MAX_ATTACHMENT_BYTES:
             raise ValueError("Chatanhang muss 1–524.288 Bytes enthalten")
         text = self._text(filename, data)

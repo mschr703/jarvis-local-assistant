@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     provider: Literal["ollama", "openrouter"] = Field(default="ollama", alias="JARVIS_PROVIDER")
     ollama_url: str = Field(default="http://127.0.0.1:11434", alias="JARVIS_OLLAMA_URL")
     ollama_model: str = Field(default="qwen3:4b-instruct", alias="JARVIS_OLLAMA_MODEL")
+    ollama_vision_model: str = Field(default="moondream:1.8b", min_length=1, max_length=120,
+                                     alias="JARVIS_OLLAMA_VISION_MODEL")
     voicestudio_url: str = Field(default="http://127.0.0.1:3900",
                                  alias="JARVIS_VOICESTUDIO_URL")
     voicestudio_api_key: str | None = Field(default=None, repr=False,

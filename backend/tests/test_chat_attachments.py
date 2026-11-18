@@ -1,18 +1,20 @@
 """Direct chat file selection keeps the original and its message linkage local."""
 
+import base64
 from collections.abc import AsyncIterator
 from io import BytesIO
 from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from pypdf import PdfWriter
 
 from jarvis.app import create_app
 from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
-from jarvis.provider import Chunk, ProviderAdapter
+from jarvis.provider import Chunk, OllamaAdapter, ProviderAdapter
 
 
 class CaptureProvider(ProviderAdapter):
@@ -59,6 +61,18 @@ def text_pdf(text: str) -> bytes:
     output.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
                   f"startxref\n{xref}\n%%EOF\n".encode())
     return bytes(output)
+
+
+def image_bytes(size=(256, 256), *, format="PNG", exif=False) -> bytes:
+    image = Image.new("RGB", size, "red")
+    output = BytesIO()
+    options = {}
+    if exif:
+        metadata = image.getexif()
+        metadata[270] = "PRIVATE-IMAGE-METADATA"
+        options["exif"] = metadata
+    image.save(output, format=format, **options)
+    return output.getvalue()
 
 
 def test_chat_attachment_message_reload_context_backup_and_delete(tmp_path, monkeypatch):
@@ -219,6 +233,103 @@ def test_text_pdf_attachment_rejects_scan_encryption_and_corruption(tmp_path):
         assert upload(client, chat, "Gross.pdf", b"%PDF-" + b"x" * (512 * 1024),
                       headers).status_code == 413
         assert not list((data_dir / "chat-attachments").glob("*"))
+
+
+def test_image_attachment_uses_local_vision_model_and_keeps_original(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    provider = CaptureProvider()
+    models = []
+
+    def make(settings):
+        models.append(settings.ollama_model)
+        return provider
+
+    monkeypatch.setattr("jarvis.app.make_provider", make)
+    original = image_bytes(format="JPEG", exif=True)
+    assert b"PRIVATE-IMAGE-METADATA" in original
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="text-fixture",
+                                        JARVIS_OLLAMA_VISION_MODEL="vision-fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        attached = upload(client, chat, "Rot.jpg", original, headers)
+        assert attached.status_code == 200, attached.text
+        item = attached.json()
+        assert client.get(f"/chats/{chat}/attachments/{item['id']}/preview").status_code == 404
+        answer = client.post(f"/chats/{chat}/stream", headers=headers,
+                             json={"content": "Welche Farbe?", "attachment_id": item["id"]})
+        assert answer.status_code == 200, answer.text
+        assert models == ["vision-fixture"]
+        sent = provider.calls[0][-1]
+        assert sent["role"] == "user" and len(sent["images"]) == 1
+        model_bytes = base64.b64decode(sent["images"][0])
+        with Image.open(BytesIO(model_bytes)) as model_image:
+            assert model_image.format == "JPEG" and model_image.size == (256, 256)
+            assert not model_image.getexif()
+        assert b"PRIVATE-IMAGE-METADATA" not in model_bytes
+        loaded = client.get(f"/chats/{chat}").json()
+        assert loaded["messages"][0]["attachments"][0]["sha256"] == item["sha256"]
+        assert loaded["messages"][1]["model"] == "vision-fixture"
+        assert client.get(f"/chats/{chat}/attachments/{item['id']}").content == original
+        preview = client.get(f"/chats/{chat}/attachments/{item['id']}/preview")
+        assert preview.status_code == 200 and preview.headers["content-type"].startswith("image/jpeg")
+        assert preview.content == model_bytes
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Noch eine Frage"}).status_code == 200
+        assert models == ["vision-fixture", "text-fixture"]
+        assert all("images" not in message for message in provider.calls[1])
+    archive = tmp_path / "image-backup.zip"
+    assert create_backup(data_dir, archive)["schema"] == 54
+    restored = tmp_path / "restored"
+    restore_backup(archive, restored)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
+                                        JARVIS_OLLAMA_MODEL="text-fixture"))) as client:
+        headers = token(client)
+        assert client.get(f"/chats/{chat}/attachments/{item['id']}").content == original
+        assert client.delete(f"/chats/{chat}", headers=headers).status_code == 200
+        assert not list((restored / "chat-attachments").iterdir())
+
+
+def test_image_attachment_rejects_wrong_type_dimensions_and_tampering(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    provider = CaptureProvider()
+    monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: provider)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        for filename, raw in (("Klein.png", image_bytes((16, 16))),
+                              ("Falsch.jpg", image_bytes()),
+                              ("Kaputt.png", b"\x89PNG\r\n\x1a\nkaputt"),
+                              ("Riesig.png", image_bytes((2100, 2100)))):
+            assert upload(client, chat, filename, raw, headers).status_code == 422
+        attached = upload(client, chat, "Bild.webp", image_bytes(format="WEBP"), headers)
+        assert attached.status_code == 200
+        item = attached.json()
+        path = data_dir / "chat-attachments" / f"{item['id']}.webp"
+        path.write_bytes(image_bytes(format="PNG"))
+        assert client.post(f"/chats/{chat}/stream", headers=headers,
+                           json={"content": "Prüfen", "attachment_id": item["id"]}).status_code == 409
+        assert provider.calls == []
+
+
+def test_image_attachment_missing_local_model_is_reported_before_send(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(OllamaAdapter, "available", lambda _self: async_false())
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture",
+                                        JARVIS_OLLAMA_VISION_MODEL="missing-vision"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        item = upload(client, chat, "Rot.png", image_bytes(), headers).json()
+        answer = client.post(f"/chats/{chat}/stream", headers=headers,
+                             json={"content": "Welche Farbe?", "attachment_id": item["id"]})
+        assert answer.status_code == 503 and "ollama pull missing-vision" in answer.text
+        assert Database(data_dir / "jarvis.db").list_messages(chat) == []
+
+
+async def async_false():
+    return False
 
 
 def test_attachment_backup_rejects_changed_original_and_cloud_send(tmp_path):

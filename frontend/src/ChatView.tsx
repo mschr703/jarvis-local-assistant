@@ -23,6 +23,7 @@ type AnswerCase = { message_id: string; chat_id: string; question: string | null
   skill_version: number | null; skill_hash: string | null };
 const verdictLabels: Record<string, string> = { achieved: 'Ziel erreicht', partial: 'Teilweise erreicht', failed: 'Ziel verfehlt', unclear: 'Unklar' };
 const sourceLabels: Record<string, string> = { supported: 'Quellen gestützt', unsupported: 'Quellen unzureichend', not_applicable: 'Keine Quelle nötig', unclear: 'Quellen unklar' };
+const isImageFile = (filename: string) => /\.(png|jpe?g|webp)$/i.test(filename);
 const compactionLabels: Record<string, string> = { goal: 'Ziel', decision: 'Entscheidung', open_question: 'Offener Punkt', source: 'Quelle' };
 
 function Usage({ message }: { message: Message }) {
@@ -79,6 +80,13 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [streamed, setStreamed] = useState('');
   const [busy, setBusy] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState('');
+  useEffect(() => {
+    if (!selectedFile || !isImageFile(selectedFile.name)) { setImagePreview(''); return; }
+    const url = URL.createObjectURL(selectedFile);
+    setImagePreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedFile]);
   const [navigating, setNavigating] = useState(false);
   const [error, setError] = useState('');
   const [speechBusyId, setSpeechBusyId] = useState('');
@@ -500,9 +508,13 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           <div className="item-list">{active.messages.flatMap((message) =>
             (message.attachments || []).map((attachment) => <div className="item-row" key={attachment.id}>
               <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>{attachment.filename}</strong>
+                {isImageFile(attachment.filename) && message.id !== 'pending-user' && <img alt={`Bildanhang ${attachment.filename}`}
+                  src={`/api/chats/${encodeURIComponent(active.id)}/attachments/${encodeURIComponent(attachment.id)}/preview`}
+                  style={{ display: 'block', maxWidth: '100%', maxHeight: 300, marginBlock: 8 }} />}
                 <small>Nachricht: {message.content.slice(0, 90)} · {attachment.size} Bytes · SHA-256 {attachment.sha256}</small>
-                <a href={`/api/chats/${encodeURIComponent(active.id)}/attachments/${encodeURIComponent(attachment.id)}`}
-                  download={attachment.filename}>Unveränderte Kopie herunterladen</a></div>
+                {message.id === 'pending-user' ? <small>Wird mit der Nachricht gespeichert…</small> :
+                  <a href={`/api/chats/${encodeURIComponent(active.id)}/attachments/${encodeURIComponent(attachment.id)}`}
+                    download={attachment.filename}>Unveränderte Kopie herunterladen</a>}</div>
             </div>))}</div>
         </section>}
       {active && (canCompact || compactions.length > 0) && <section className="card chat-compactions">
@@ -547,8 +559,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         {voiceLatency && <small>{voiceLatency}</small>}
         {voiceError && <p className="notice error" role="alert">{voiceError}</p>}
       </section>
-      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown, DOCX oder Text-PDF; höchstens 512 KiB)
-        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx,.pdf"
+      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown, DOCX, Text-PDF oder PNG/JPEG/WebP; höchstens 512 KiB)
+        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx,.pdf,.png,.jpg,.jpeg,.webp"
           style={{ display: 'block', maxWidth: '100%', marginTop: 8 }}
           disabled={!configured || busy || provider !== 'ollama' || !!active?.archived_at}
           onChange={(event) => {
@@ -560,6 +572,9 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           }} /></label>
         {selectedFile && <p style={{ overflowWrap: 'anywhere' }}>Gewählt: {selectedFile.name} · {selectedFile.size} Bytes
           <button type="button" onClick={() => setSelectedFile(null)} disabled={busy}>Datei entfernen</button></p>}
+        {imagePreview && <img src={imagePreview} alt="Vorschau des gewählten Bildes"
+          style={{ display: 'block', maxWidth: '100%', maxHeight: 300 }} />}
+        {selectedFile && isImageFile(selectedFile.name) && <p>Dieses Bild wird nur für die nächste Antwort an das lokale Bildmodell gesendet. Für weitere Bildfragen erneut anhängen.</p>}
         {selectedFile && provider !== 'ollama' && <p>Chatanhänge können nur an lokales Ollama gesendet werden.</p>}
         {hasChatAttachments && provider === 'openrouter' && <p>Dieses Gespräch enthält lokale Dateianhänge. Für OpenRouter ein neues Gespräch ohne Anhang beginnen.</p>}
       </section>

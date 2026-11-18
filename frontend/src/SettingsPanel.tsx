@@ -3,6 +3,7 @@ import { api } from './api';
 
 export type Settings = {
   provider: 'ollama' | 'openrouter'; model: string | null; ollama_model: string;
+  ollama_vision_model: string;
   openrouter_model: string | null; daily_budget_usd: number; spent_today_usd: number;
   max_output_tokens: number; max_context_chars: number; timezone: string;
   personal_style_label: string;
@@ -125,6 +126,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
       const result = await api<Settings>('/settings', { method: 'PATCH', body: JSON.stringify({
         provider: submitted.provider,
         ollama_model: submitted.ollama_model,
+        ollama_vision_model: submitted.ollama_vision_model,
         openrouter_model: submitted.openrouter_model || undefined,
         model_routes: submitted.model_routes,
         daily_budget_usd: submitted.daily_budget_usd,
@@ -168,6 +170,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
     <div className="form-grid">
       <label>Provider<select value={settings.provider} onChange={(event) => change('provider', event.target.value as Settings['provider'])}><option value="ollama">Ollama (lokal)</option><option value="openrouter">OpenRouter</option></select></label>
       <label>Ollama-Modell<input value={settings.ollama_model} onChange={(event) => change('ollama_model', event.target.value)} /></label>
+      <label>Lokales Bildmodell<input value={settings.ollama_vision_model} onChange={(event) => change('ollama_vision_model', event.target.value)} /></label>
       <label>OpenRouter-Modell-ID<input value={settings.openrouter_model || ''} onChange={(event) => change('openrouter_model', event.target.value)} placeholder="Aus dem OpenRouter-Katalog" /></label>
       <label>Tagesbudget (USD)<input type="number" min="0" max="100" step="0.01" value={settings.daily_budget_usd} onChange={(event) => change('daily_budget_usd', Number(event.target.value))} /></label>
       <label>Max. Ausgabetoken<input type="number" min="1" max="8192" value={settings.max_output_tokens} onChange={(event) => change('max_output_tokens', Number(event.target.value))} /></label>
@@ -176,7 +179,7 @@ export default function SettingsPanel({ onSaved, healthStatus, visible, settings
       <label>Name für persönliches Schreibprofil<input maxLength={60} value={settings.personal_style_label} onChange={(event) => change('personal_style_label', event.target.value)} /></label>
     </div>
     <h4>Modell je Aufgabe</h4>
-    <p>Leere Felder verwenden das Standardmodell des gewählten Providers. Die angezeigte Wahl wird erst nach „Einstellungen speichern“ aktiv. Es gibt keinen automatischen Provider- oder Modellwechsel. OpenRouter-Preise und Tagesbudget werden vor jedem bezahlten Aufruf geprüft; Cloudfreigaben bleiben erforderlich.</p>
+    <p>Leere Felder verwenden das Standardmodell des gewählten Providers. Die angezeigte Wahl wird erst nach „Einstellungen speichern“ aktiv. Ein bewusst angehängtes Bild verwendet das separate lokale Bildmodell. OpenRouter-Preise und Tagesbudget werden vor jedem bezahlten Aufruf geprüft; Cloudfreigaben bleiben erforderlich.</p>
     <div className="form-grid">{modelTasks.map(([task, label]) => {
       const selected = settings.model_routes[settings.provider]?.[task] || '';
       const fallback = settings.provider === 'ollama' ? settings.ollama_model : settings.openrouter_model;

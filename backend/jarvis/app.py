@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -20,9 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from jarvis.cad import HolderProposalArgs, register_cad_tools, validate_dimension_proposal
 from jarvis.chat_attachments import (
+    IMAGE_FORMATS,
     MAX_ATTACHMENT_BYTES,
     ChatAttachmentStore,
     attachment_text,
+    normalized_image,
 )
 from jarvis.chat_compaction import (
     build_chat_context,
@@ -229,6 +232,7 @@ class SettingsUpdate(BaseModel):
 
     provider: str | None = Field(default=None, pattern="^(ollama|openrouter)$")
     ollama_model: str | None = Field(default=None, min_length=1, max_length=120)
+    ollama_vision_model: str | None = Field(default=None, min_length=1, max_length=120)
     openrouter_model: str | None = Field(default=None, min_length=1, max_length=120)
     model_routes: dict[str, dict[str, str]] | None = None
     daily_budget_usd: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
@@ -999,6 +1003,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "provider": config.provider,
             "model": model_choice(config, "chat")[0],
             "ollama_model": config.ollama_model,
+            "ollama_vision_model": config.ollama_vision_model,
             "openrouter_model": config.openrouter_model,
             "model_routes": config.model_routes,
             "effective_models": {task: {"model": model_choice(config, task)[0],
@@ -1163,6 +1168,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         headers={"Content-Disposition":
                                  f"attachment; filename*=UTF-8''{quote(item['filename'])}",
                                  "X-Content-Type-Options": "nosniff"})
+
+    @app.get("/chats/{chat_id}/attachments/{attachment_id}/preview")
+    async def preview_chat_image(chat_id: str, attachment_id: str):
+        try:
+            item, original = await run_in_threadpool(chat_attachments.read_original,
+                                                     chat_id, attachment_id)
+        except (LookupError, FileNotFoundError) as exc:
+            raise HTTPException(404, "Bildanhang nicht gefunden") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if item["suffix"] not in IMAGE_FORMATS or item["message_id"] is None:
+            raise HTTPException(404, "Gesendeter Bildanhang nicht gefunden")
+        try:
+            model_image = await run_in_threadpool(normalized_image, original, item["suffix"])
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return Response(model_image, media_type="image/jpeg",
+                        headers={"X-Content-Type-Options": "nosniff"})
 
     @app.delete("/chats/{chat_id}/attachments/{attachment_id}")
     async def delete_pending_chat_attachment(chat_id: str, attachment_id: str):
@@ -1411,6 +1434,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not content or len(content) > 20_000:
             raise HTTPException(422, "Nachricht muss 1–20.000 Zeichen enthalten")
         attachment = None
+        model_image = None
         if data.attachment_id:
             if provider_name != "ollama":
                 raise HTTPException(422, "Chatanhänge sind derzeit nur mit lokalem Ollama möglich")
@@ -1418,9 +1442,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if attachment is None or attachment["message_id"] is not None:
                 raise HTTPException(422, "Chatanhang nicht gefunden oder bereits verwendet")
             try:
-                chat_attachments.read_original(chat_id, data.attachment_id)
+                _item, original = await run_in_threadpool(chat_attachments.read_original,
+                                                          chat_id, data.attachment_id)
             except (OSError, ValueError) as exc:
                 raise HTTPException(409, "Chatanhang ist nicht mehr unverändert verfügbar") from exc
+            if attachment["suffix"] in IMAGE_FORMATS:
+                try:
+                    model_image = await run_in_threadpool(normalized_image, original,
+                                                          attachment["suffix"])
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                chat_settings = chat_settings.model_copy(update={
+                    "ollama_model": config.ollama_vision_model,
+                    "ollama_context_tokens": 4096,
+                    "max_output_tokens": min(config.max_output_tokens, 256),
+                })
+                model_name = chat_settings.ollama_model
         content_for_model = (content + attachment_text(attachment["filename"],
                                                       attachment["sha256"], attachment["text"])
                              if attachment else content)
@@ -1435,6 +1472,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ProviderError as exc:
             raise HTTPException(503, str(exc)) from exc
         if isinstance(provider, OllamaAdapter) and not await provider.available():
+            if model_image is not None:
+                raise HTTPException(503, f"Lokales Bildmodell installieren: ollama pull {model_name}")
             raise HTTPException(503, "Ollama starten und Modell installieren")
         rule = chat_rules.active()
         try:
@@ -1469,12 +1508,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     item["content"] += attachment_text(prior_attachment["filename"],
                                                        prior_attachment["sha256"],
                                                        prior_attachment["text"])
+            if any(Path(prior_attachment["filename"]).suffix.lower() in IMAGE_FORMATS
+                   for item in history for prior_attachment in item["attachments"]):
+                prompt += ("\n\nFrühere Bilder sind in diesem Modellaufruf nicht sichtbar. "
+                           "Nutze nur frühere Textantworten; bitte bei Bilddetails um erneutes Anhängen.")
         context_overhead = max(500, len(prompt) + 100)
         if len(content_for_model) + context_overhead > context_limit:
             raise HTTPException(422, "Nachricht, Chat-Regel und Skill überschreiten das Kontextlimit")
         snapshot = db.latest_chat_compaction(chat_id) if provider_name == "ollama" else None
         active_snapshot = snapshot if snapshot and snapshot["entries"] else None
-        token_budget = (config.ollama_context_tokens - config.max_output_tokens - 1024
+        token_budget = (chat_settings.ollama_context_tokens - chat_settings.max_output_tokens
+                        - 1024 - (1000 if model_image is not None else 0)
                         if provider_name == "ollama" else None)
         if token_budget is not None and token_budget < 512:
             raise HTTPException(422, "Ollama-Kontextfenster für das Ausgabelimit zu klein")
@@ -1483,6 +1527,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                          context_limit, provider_name == "ollama",
                                          token_budget)
             messages = context.messages
+            if model_image is not None:
+                messages[-1]["images"] = [base64.b64encode(model_image).decode("ascii")]
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         reserved_usd = 0.0
