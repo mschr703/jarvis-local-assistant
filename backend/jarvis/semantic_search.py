@@ -1,6 +1,9 @@
 """Optional, bounded local semantic retrieval from current personal sources."""
 
+import hashlib
 import math
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -16,29 +19,42 @@ MAX_MEMORIES = 30
 MAX_PROJECTS = 20
 MAX_RESULTS = 10
 MAX_DEEP_RESULTS = 5
+CACHE_LIMIT = 200
+_cache_lock = threading.Lock()
+_embedding_cache: OrderedDict[tuple[str, str, str], list[float]] = OrderedDict()
+_active_digest: dict[str, str] = {}
 
 
 class SemanticSearchError(RuntimeError):
     """The local embedding service is unavailable or returned invalid vectors."""
 
 
-def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
+def _model_digest(client: httpx.Client, url: str) -> str | None:
+    """Only a verified installed model digest permits reuse of RAM embeddings."""
     try:
-        parsed = urlsplit(url)
-        local = (parsed.scheme == "http" and parsed.hostname in
-                 {"localhost", "127.0.0.1", "::1"} and parsed.port is not None
-                 and not parsed.username and not parsed.password
-                 and parsed.path in {"", "/"} and not parsed.query and not parsed.fragment)
-    except ValueError:
-        local = False
-    if not local:
-        raise SemanticSearchError("Semantische Suche benötigt eine lokale Ollama-Adresse")
+        response = client.get(f"{url.rstrip('/')}/api/tags", timeout=3)
+        response.raise_for_status()
+        models = response.json()["models"]
+        if not isinstance(models, list):
+            return None
+        for model in models:
+            if not isinstance(model, dict) or model.get("name") != MODEL:
+                continue
+            digest = model.get("digest")
+            if (isinstance(digest, str) and len(digest) == 64
+                    and all(character in "0123456789abcdef" for character in digest.lower())):
+                return digest.lower()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _embed_request(client: httpx.Client, url: str, texts: list[str]) -> list[list[float]]:
     try:
-        with httpx.Client(timeout=120, trust_env=False) as client:
-            response = client.post(f"{url.rstrip('/')}/api/embed",
-                                   json={"model": MODEL, "input": texts})
-            response.raise_for_status()
-            vectors = response.json()["embeddings"]
+        response = client.post(f"{url.rstrip('/')}/api/embed",
+                               json={"model": MODEL, "input": texts})
+        response.raise_for_status()
+        vectors = response.json()["embeddings"]
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         raise SemanticSearchError(
             f"Lokale Embeddings nicht verfügbar. Ollama starten und 'ollama pull {MODEL}' "
@@ -55,6 +71,63 @@ def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
            for vector in vectors):
         raise SemanticSearchError("Ollama lieferte ungültige Embeddings")
     return vectors
+
+
+def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
+    try:
+        parsed = urlsplit(url)
+        local = (parsed.scheme == "http" and parsed.hostname in
+                 {"localhost", "127.0.0.1", "::1"} and parsed.port is not None
+                 and not parsed.username and not parsed.password
+                 and parsed.path in {"", "/"} and not parsed.query and not parsed.fragment)
+    except ValueError:
+        local = False
+    if not local:
+        raise SemanticSearchError("Semantische Suche benötigt eine lokale Ollama-Adresse")
+    with httpx.Client(timeout=120, trust_env=False) as client:
+        digest = _model_digest(client, url) if len(texts) > 1 else None
+        hits: dict[int, list[float]] = {}
+        missing = list(range(1, len(texts)))
+        if digest:
+            with _cache_lock:
+                if _active_digest.get(url) != digest:
+                    _embedding_cache.clear()
+                    _active_digest[url] = digest
+                for index in range(1, len(texts)):
+                    key = (url, digest, hashlib.sha256(texts[index].encode("utf-8")).hexdigest())
+                    cached = _embedding_cache.get(key)
+                    if cached is not None:
+                        hits[index] = cached
+                        _embedding_cache.move_to_end(key)
+                missing = [index for index in missing if index not in hits]
+        request = [texts[0]] + [texts[index] for index in missing]
+        vectors = _embed_request(client, url, request)
+        if any(len(vector) != len(vectors[0]) for vector in hits.values()):
+            with _cache_lock:
+                _embedding_cache.clear()
+            hits.clear()
+            missing = list(range(1, len(texts)))
+            vectors = _embed_request(client, url, texts)
+        if digest and _model_digest(client, url) != digest:
+            with _cache_lock:
+                _embedding_cache.clear()
+                _active_digest.pop(url, None)
+            raise SemanticSearchError("Ollama-Modell hat sich während der Suche geändert; erneut suchen")
+        result = [vectors[0]] + [[] for _ in texts[1:]]
+        for index, vector in hits.items():
+            result[index] = vector
+        for index, vector in zip(missing, vectors[1:], strict=True):
+            result[index] = vector
+        if digest:
+            with _cache_lock:
+                if _active_digest.get(url) == digest:
+                    for index in missing:
+                        key = (url, digest, hashlib.sha256(texts[index].encode("utf-8")).hexdigest())
+                        _embedding_cache[key] = result[index]
+                        _embedding_cache.move_to_end(key)
+                    while len(_embedding_cache) > CACHE_LIMIT:
+                        _embedding_cache.popitem(last=False)
+        return result
 
 
 def _project_body(row: dict) -> str:
