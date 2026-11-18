@@ -1,10 +1,10 @@
 # Projektstatus
 
-Stand: 18.11.2026, 02:07 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 18.11.2026, 02:23 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); der noch unveröffentlichte lokale Fortschritt steht im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
-- A12a: Für eine konkrete lokale Suchfrage kann ein indexiertes Dokument als zusätzliche Quelle vorgemerkt werden. Gespeicherter SHA-256, aktueller Indexstand, geänderte/fehlende Originaldatei und Rücknahme werden angezeigt. Die vollständige Backend-Suite bestand unbelastet mit 552 Tests und zwei erwarteten Windows-Skips; neun gezielte Suchtests, 23 Frontendtests, Build, Ruff und der isolierte Edge-Pfad mit Reload, Quelländerung, Rücknahme, 390 Pixel und null Modellaufrufen bestanden. Zwei vorangegangene Gesamtläufe hatten unter gleichzeitiger Modell-/Installationslast jeweils einen zeitabhängigen Fehler in fremden PDF- beziehungsweise Plan-Tests; beide bestanden isoliert. Public-Audit, Push und CI folgen. A07b Text-PDF im Chat ist unabhängig in Vorbereitung. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
+- A07b: Kleine Text-PDFs können über den lokalen Chatanhangpfad mit Seitenmarkierungen gelesen werden. Der begrenzte PDF-Kindprozess lehnt Scan, Verschlüsselung und Beschädigung ab. Die vollständige Backend-Regression bestand mit 554 Tests und zwei erwarteten Windows-Skips. 19 gezielte Chat-/PDF-Tests einschließlich Backup/Restore, 23 Frontendtests, Build und Ruff bestanden. Der echte Edge/Ollama-Pfad prüfte TXT und PDF in einem Gespräch, Reload, beide Originaldownloads und 390 Pixel. Der Public-Audit fand in 313 veröffentlichbaren Dateien und der bisherigen Historie null Funde. Push, CI und Trello-Abschluss folgen. Lernkarten und Prüfungsmodus werden vorerst nicht weiter ausgebaut.
 
 ## Nutzbar
 
@@ -19,6 +19,8 @@ Stand: 18.11.2026, 02:07 Uhr Europe/Berlin. Der veröffentlichte Stand liegt auf
 - Weitere belegte Fragen zu derselben Quelle können erneut lokal erzeugt werden. Der Speicher blockiert doppelte normalisierte Frage/Quellenhash-Paare; bei einem Duplikat versucht Ollama genau einmal eine andere Frage.
 
 ## Zuletzt geprüft
+
+- A12a: Für eine konkrete Suchfrage kann ein indexiertes Dokument als zusätzliche Quelle vorgemerkt werden. Gespeicherter SHA-256, aktueller Indexstand, geänderte/fehlende Originaldatei und Rücknahme werden angezeigt. Die vollständige Backend-Suite bestand unbelastet mit 552 Tests und zwei erwarteten Windows-Skips; neun gezielte Suchtests, 23 Frontendtests, Build, Ruff und der isolierte Edge-Pfad mit Reload, Quelländerung, Rücknahme, 390 Pixel und null Modellaufrufen bestanden. Zwei vorangegangene Gesamtläufe hatten unter gleichzeitiger Modell-/Installationslast jeweils einen zeitabhängigen Fehler in fremden PDF- beziehungsweise Plan-Tests; beide bestanden isoliert. Public-Audit in 313 Dateien ohne Befund; Commit `88f298d` öffentlich, GitHub-Lauf [44213323141](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44213323141) grün und die Trello-Teilkarte erledigt.
 
 - A07a: Kleine TXT-, Markdown- und DOCX-Dateien können bewusst an lokale Chatnachrichten angehängt werden; Originalkopie, Hash, Nachrichtenbezug, Folgekontext, Backup/Restore und Löschung sind geprüft. Chats mit Anhängen sind für OpenRouter gesperrt. Die vollständige Backend-Suite bestand mit 545 Tests und zwei erwarteten Windows-Skips; nach der Download-Absicherung bestanden 44 gezielte Tests mit einem erwarteten Skip sowie der eigene Downloadtest. 23 Frontendtests, Build, Ruff, Edge/Ollama mit Reload/Download/390 Pixel und Public-Audit (311 Dateien, null Funde) bestanden. Commit `06f34b1` ist öffentlich, GitHub-Lauf [44207966279](https://github.com/mschr703/jarvis-local-assistant/actions/runs/44207966279) grün und die Trello-Teilkarte erledigt.
 

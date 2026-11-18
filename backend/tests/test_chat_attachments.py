@@ -6,6 +6,7 @@ from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
 
 from jarvis.app import create_app
 from jarvis.backup import create_backup, restore_backup
@@ -34,6 +35,30 @@ def upload(client: TestClient, chat_id: str, filename: str, data: bytes,
     return client.post(f"/chats/{chat_id}/attachments", params={"filename": filename},
                        content=data,
                        headers={**headers, "Content-Type": "application/octet-stream"})
+
+
+def text_pdf(text: str) -> bytes:
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+        f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+                  f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
 
 
 def test_chat_attachment_message_reload_context_backup_and_delete(tmp_path, monkeypatch):
@@ -140,6 +165,60 @@ def test_docx_attachment_extracts_text_without_sending_archive(tmp_path, monkeyp
                                  "attachment_id": attached.json()["id"]}).status_code == 200
         assert "Wohnung in Zürich" in provider.calls[0][-1]["content"]
         assert client.get(f"/chats/{chat}/attachments/{attached.json()['id']}").content == raw.getvalue()
+
+
+def test_text_pdf_attachment_keeps_original_and_page_context(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    provider = CaptureProvider()
+    monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: provider)
+    original = text_pdf("Die Monatsmiete betraegt 900 Euro.")
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        attached = upload(client, chat, "Mietbeleg.pdf", original, headers)
+        assert attached.status_code == 200, attached.text
+        attachment_id = attached.json()["id"]
+        answer = client.post(f"/chats/{chat}/stream", headers=headers,
+                             json={"content": "Was ist die Monatsmiete?",
+                                   "attachment_id": attachment_id})
+        assert answer.status_code == 200
+        assert "Seite 1" in provider.calls[0][-1]["content"]
+        assert "900 Euro" in provider.calls[0][-1]["content"]
+        assert client.get(f"/chats/{chat}").json()["messages"][0]["attachments"][0]["filename"] == "Mietbeleg.pdf"
+        assert client.get(f"/chats/{chat}/attachments/{attachment_id}").content == original
+    archive = tmp_path / "pdf-backup.zip"
+    assert create_backup(data_dir, archive)["schema"] == 54
+    restored = tmp_path / "restored"
+    restore_backup(archive, restored)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        assert client.get(f"/chats/{chat}/attachments/{attachment_id}").content == original
+        assert client.delete(f"/chats/{chat}", headers=headers).status_code == 200
+        assert not list((restored / "chat-attachments").iterdir())
+
+
+def test_text_pdf_attachment_rejects_scan_encryption_and_corruption(tmp_path):
+    data_dir = tmp_path / "data"
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=data_dir,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        chat = client.post("/chats", headers=headers).json()["id"]
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        scanned = BytesIO()
+        writer.write(scanned)
+        result = upload(client, chat, "Scan.pdf", scanned.getvalue(), headers)
+        assert result.status_code == 422 and "OCR" in result.text
+        writer.encrypt("secret")
+        encrypted = BytesIO()
+        writer.write(encrypted)
+        assert upload(client, chat, "Secret.pdf", encrypted.getvalue(), headers).status_code == 422
+        assert upload(client, chat, "Kaputt.pdf", b"%PDF-falsch", headers).status_code == 422
+        assert upload(client, chat, "Gross.pdf", b"%PDF-" + b"x" * (512 * 1024),
+                      headers).status_code == 413
+        assert not list((data_dir / "chat-attachments").glob("*"))
 
 
 def test_attachment_backup_rejects_changed_original_and_cloud_send(tmp_path):

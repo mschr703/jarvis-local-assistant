@@ -7,11 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from jarvis.db import Database, utcnow
+from jarvis.desktop import extract_public_pdf
 from jarvis.documents import extract_docx
 
 MAX_ATTACHMENT_BYTES = 512 * 1024
 MAX_ATTACHMENT_TEXT = 8000
-SUFFIXES = {".txt", ".md", ".markdown", ".docx"}
+SUFFIXES = {".txt", ".md", ".markdown", ".docx", ".pdf"}
 
 
 def attachment_text(filename: str, sha256: str, text: str) -> str:
@@ -40,7 +41,9 @@ class ChatAttachmentStore:
     @staticmethod
     def _text(filename: str, data: bytes) -> str:
         suffix = Path(filename).suffix.lower()
-        if suffix == ".docx":
+        if suffix == ".pdf":
+            text = extract_public_pdf(data, chat_mode=True)["text"]
+        elif suffix == ".docx":
             text = extract_docx(data)
         else:
             if b"\x00" in data:
@@ -65,7 +68,7 @@ class ChatAttachmentStore:
             raise ValueError("Dateiname ist ungültig")
         suffix = Path(filename).suffix.lower()
         if suffix not in SUFFIXES:
-            raise ValueError("Nur TXT, Markdown und DOCX sind als Chatanhang erlaubt")
+            raise ValueError("Nur TXT, Markdown, DOCX und Text-PDF sind als Chatanhang erlaubt")
         if not 0 < len(data) <= MAX_ATTACHMENT_BYTES:
             raise ValueError("Chatanhang muss 1–524.288 Bytes enthalten")
         text = self._text(filename, data)

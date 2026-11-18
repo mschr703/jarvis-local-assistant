@@ -91,7 +91,7 @@ def verified_chat_attachments(database_path: Path, stage: Path, schema: int) -> 
     for attachment_id, suffix, expected_hash, expected_size in rows:
         try:
             if (str(UUID(attachment_id)) != attachment_id
-                    or suffix not in {".txt", ".md", ".markdown", ".docx"}
+                    or suffix not in {".txt", ".md", ".markdown", ".docx", ".pdf"}
                     or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
                     or type(expected_size) is not int or not 0 < expected_size <= 512 * 1024):
                 raise ValueError("Ungültiger Chatanhangbeleg")

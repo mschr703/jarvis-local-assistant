@@ -14,7 +14,7 @@ MAX_TEXT_CHARS = 10_000
 MAX_DECODED_STREAM_BYTES = 8_000_000
 
 
-def extract(payload: bytes) -> dict:
+def extract(payload: bytes, *, chat_mode: bool = False) -> dict:
     if len(payload) > MAX_PDF_BYTES or not payload.startswith(b"%PDF-"):
         raise ValueError("PDF-Signatur fehlt oder Datei ist zu groß")
     try:
@@ -46,8 +46,8 @@ def extract(payload: bytes) -> dict:
                 text = reader.pages[index].extract_text() or ""
                 if text.strip():
                     parts.append(f"Seite {index + 1}\n{text}")
-            content = "\n".join(parts)[:MAX_TEXT_CHARS]
-            if len(content.strip()) < 150:
+            content = "\n".join(parts)[:8000 if chat_mode else MAX_TEXT_CHARS]
+            if len(content.strip()) < (1 if chat_mode else 150):
                 raise ValueError("PDF hat keine ausreichende Textschicht; OCR ausstehend")
             return {"text": content, "pages_total": total, "pages_read": read}
     except LimitReachedError as exc:
@@ -60,8 +60,10 @@ def extract(payload: bytes) -> dict:
 
 def main() -> int:
     try:
+        if sys.argv[1:] not in ([], ["--chat"]):
+            raise ValueError("Ungültiger PDF-Modus")
         payload = sys.stdin.buffer.read(MAX_PDF_BYTES + 1)
-        result = extract(payload)
+        result = extract(payload, chat_mode=sys.argv[1:] == ["--chat"])
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))
         return 1

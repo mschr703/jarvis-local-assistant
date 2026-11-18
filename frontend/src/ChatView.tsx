@@ -547,8 +547,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         {voiceLatency && <small>{voiceLatency}</small>}
         {voiceError && <p className="notice error" role="alert">{voiceError}</p>}
       </section>
-      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown oder DOCX; höchstens 512 KiB)
-        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx"
+      <section className="card"><label>Datei für diese Nachricht (TXT, Markdown, DOCX oder Text-PDF; höchstens 512 KiB)
+        <input aria-label="Datei für Chat" type="file" accept=".txt,.md,.markdown,.docx,.pdf"
           style={{ display: 'block', maxWidth: '100%', marginTop: 8 }}
           disabled={!configured || busy || provider !== 'ollama' || !!active?.archived_at}
           onChange={(event) => {

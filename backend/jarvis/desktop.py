@@ -152,13 +152,14 @@ def read_bounded_body(response: http.client.HTTPResponse, sock: socket.socket | 
             raise ValueError("Webseite ist zu groß")
 
 
-def extract_public_pdf(body: bytes) -> dict:
+def extract_public_pdf(body: bytes, *, chat_mode: bool = False) -> dict:
     if not body.startswith(b"%PDF-"):
         raise ValueError("PDF-Signatur fehlt")
     script = Path(__file__).with_name("pdf_source_worker.py")
     try:
         completed = subprocess.run(
-            [sys.executable, str(script)], input=body, stdout=subprocess.PIPE,
+            [sys.executable, str(script), *(["--chat"] if chat_mode else [])],
+            input=body, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, timeout=8, check=False, env=child_environment(),
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )

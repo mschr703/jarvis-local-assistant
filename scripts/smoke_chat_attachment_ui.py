@@ -16,6 +16,28 @@ sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.db import Database
 
 
+def text_pdf(text: str) -> bytes:
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+               f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+                  f"startxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
+
+
 def main() -> None:
     if not port_free(8765) or not port_free(5173):
         raise RuntimeError("Jarvis vor dem isolierten UI-Test mit scripts/stop.ps1 stoppen")
@@ -25,6 +47,9 @@ def main() -> None:
         file = root / "Wohnungsnotiz.txt"
         content = "Die Kaution für Projekt Elbe beträgt genau 800 Euro."
         file.write_text(content, encoding="utf-8")
+        pdf_file = root / "Mietbeleg.pdf"
+        pdf_content = text_pdf("Die Monatsmiete betraegt 900 Euro.")
+        pdf_file.write_bytes(pdf_content)
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="qwen3:4b-instruct",
@@ -63,12 +88,24 @@ def main() -> None:
                         downloaded = download_event.value
                         assert downloaded.suggested_filename == file.name
                         assert Path(downloaded.path()).read_text(encoding="utf-8") == content
+                        page.get_by_label("Datei für Chat").set_input_files(str(pdf_file))
+                        page.get_by_label("Nachricht").fill("Wie hoch ist die Monatsmiete laut PDF?")
+                        page.get_by_role("button", name="Senden", exact=True).click()
+                        expect(page.locator(".message.assistant .usage")).to_have_count(
+                            2, timeout=180000)
+                        expect(attachments.get_by_text("Mietbeleg.pdf", exact=False)).to_be_visible()
+                        assert not overflow_nodes(page), overflow_nodes(page)
+                        pdf_row = attachments.locator(".item-row").filter(has_text="Mietbeleg.pdf")
+                        with page.expect_download() as pdf_download:
+                            pdf_row.get_by_role("link", name="Unveränderte Kopie herunterladen").click()
+                        assert Path(pdf_download.value.path()).read_bytes() == pdf_content
                         db = Database(data / "jarvis.db")
                         with db.connect() as connection:
-                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 1
-                            assert connection.execute("SELECT COUNT(*) FROM model_usage WHERE provider='ollama'").fetchone()[0] == 1
+                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 2
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage WHERE provider='ollama'").fetchone()[0] == 2
                         print(json.dumps({"attachment": "linked", "download": "matches",
-                                          "reload": "persists", "mobile_width": "fits",
+                                          "pdf": "linked_and_downloaded", "reload": "persists",
+                                          "mobile_width": "fits",
                                           "provider": "ollama"}))
                     finally:
                         browser.close()
