@@ -13,11 +13,12 @@ type Folder = { id: string; path: string };
 type SearchResult = { query: string; results: Hit[]; limited: boolean;
   counts: Record<Kind, number>; preferences: Preference[];
   stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
-type SemanticHit = Omit<Hit, 'score'> & { similarity: number };
+type SemanticHit = Omit<Hit, 'score'> & { similarity: number; preference_status?: 'current' | 'updated' | null };
 type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   checked_passages: number; checked_memories: number; checked_projects: number;
   counts: Record<Kind, number>; model: string;
   document_scope: { id: string; title: string } | null;
+  preferences: { document_id: string; path: string; status: Preference['status'] }[];
   changed_sources: { kind: 'memory' | 'project'; id: string }[];
   stale_sources: SearchResult['stale_sources'] };
 const names: Record<Kind, string> = {
@@ -106,7 +107,7 @@ export default function UnifiedSearchView() {
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
       <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
         'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
-        'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
+        'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
@@ -115,6 +116,12 @@ export default function UnifiedSearchView() {
         `${semantic.counts.document} Fundstellen aus ${semantic.document_scope.title}` :
         `${semantic.counts.document} Dokumente · ${semantic.counts.memory} Erinnerungen · ${semantic.counts.project} Arbeitsstände`}</p>
       <small>Geprüft: {semantic.checked_passages} Dokumentfundstellen, {semantic.checked_memories} Erinnerungen, {semantic.checked_projects} Arbeitsstände · Modell {semantic.model}</small>
+      {semantic.preferences.some((item) => item.status === 'needs_reindex' || item.status === 'unavailable') &&
+        <div className="notice" role="status"><strong>Vorgemerkte Quellen nicht aktuell</strong>
+          <p>Diese Dokumente wurden nicht an das Modell gesendet. Original und Freigabe prüfen; bei Änderungen neu indexieren.</p>
+          <ul>{semantic.preferences.filter((item) => item.status === 'needs_reindex' || item.status === 'unavailable')
+            .map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path} · {item.status === 'needs_reindex' ? 'Index veraltet' : 'nicht verfügbar'}</li>)}</ul>
+        </div>}
       {semantic.limited && <p className="notice">{semantic.document_scope ?
         'Die tiefe Suche prüft höchstens die ersten 100 Fundstellen dieser Datei und zeigt höchstens fünf Treffer.' :
         'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.'}</p>}
@@ -127,13 +134,14 @@ export default function UnifiedSearchView() {
       </p>}
       {!semantic.results.length && <p>Keine aktuellen Quellen gefunden.</p>}
       <div className="item-list">{semantic.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}:${hit.passage_id ?? ''}`}>
-        <div><strong>{names[hit.kind]} · {hit.title}</strong>
+        <div><strong>{names[hit.kind]} · {hit.title}{hit.preferred ? ' · bewusst vorgemerkt' : ''}</strong>
           <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt}</p>
           <small style={{ overflowWrap: 'anywhere' }}>Quelle: {hit.source}
             {hit.page != null ? ` · Seite ${hit.page}` : ''}
             {hit.passage_id != null ? ` · Fundstelle ${hit.passage_id}` : ''}
             {hit.sha256 ? ` · SHA-256 ${hit.sha256}` : ''}
             {hit.policy ? ` · ${hit.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}` : ''}
+            {hit.preference_status === 'updated' ? ' · seit Vormerkung neu indexiert' : ''}
             {hit.kind === 'project' ? ` · ID ${hit.id}` : ''}
             {` · Ähnlichkeit ${hit.similarity.toFixed(2)}`}</small>
           {hit.kind === 'document' && hit.document_id && hit.source_status === 'current' &&

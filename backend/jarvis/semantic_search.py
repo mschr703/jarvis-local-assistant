@@ -151,11 +151,25 @@ def _record_is_current(db: Database, kind: str, row: dict) -> bool:
     return current is not None and all(current[field] == row[field] for field in fields)
 
 
+def _preferences(db: Database, query: str) -> list[dict]:
+    """Semantic questions without lexical terms simply have no saved preference key."""
+    from jarvis.source_preferences import SourcePreferences
+
+    try:
+        return SourcePreferences(db).list(query)["preferences"]
+    except ValueError:
+        return []
+
+
 def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None,
            document_id: str | None = None) -> dict:
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
+    preferences = [] if document_id else _preferences(db, cleaned)
+    preferred_ids = [item["document_id"] for item in preferences
+                     if item["status"] in {"current", "updated"}]
+    preferred_slots = ",".join("?" for _ in preferred_ids) or "NULL"
     with db.connect() as connection:
         if folder_id and not connection.execute(
                 "SELECT 1 FROM folders WHERE id=?", (folder_id,)).fetchone():
@@ -169,7 +183,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             if folder_id and document["folder_id"] != folder_id:
                 raise ValueError("Dokument gehört nicht zum gewählten Ordner")
             scope = {"id": document["id"], "title": Path(document["path"]).name}
-        rows = [dict(row) for row in connection.execute("""
+        rows = [dict(row) for row in connection.execute(f"""
             WITH ranked AS (
                 SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,
                        d.sha256,d.size,d.status,d.excluded,f.path AS folder_path,
@@ -180,9 +194,12 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                   AND (? IS NULL OR d.folder_id=?)
                   AND (? IS NULL OR d.id=?)
             )
-            SELECT * FROM ranked WHERE part<=? ORDER BY path,part,passage_id LIMIT ?
+            SELECT * FROM ranked WHERE part<=?
+            ORDER BY CASE WHEN document_id IN ({preferred_slots}) THEN 0 ELSE 1 END,
+                     path,part,passage_id LIMIT ?
         """, (folder_id, folder_id, document_id, document_id,
-              MAX_PASSAGES + 1 if document_id else 3, MAX_PASSAGES + 1))]
+              MAX_PASSAGES + 1 if document_id else 3,
+              *preferred_ids, MAX_PASSAGES + 1))]
         memories = [] if document_id else [dict(row) for row in connection.execute("""
             SELECT id,text,source_ref,policy,updated_at FROM memories
             ORDER BY updated_at DESC,id DESC LIMIT ?
@@ -223,15 +240,23 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                 "changed_sources": [], "limited": limited, "model": MODEL,
                 "checked_passages": checked_passages, "checked_memories": 0,
                 "checked_projects": 0, "document_scope": scope,
+                "preferences": [{"document_id": item["document_id"],
+                                 "path": item["path"], "status": item["status"]}
+                                for item in preferences],
                 "counts": {kind: 0 for kind in ("document", "memory", "project")}}
     vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus])
     question = vectors[0]
+    preferences = [] if document_id else _preferences(db, cleaned)
+    preferred_status = {item["document_id"]: item["status"] for item in preferences
+                        if item["status"] in {"current", "updated"}}
     ranked_results = []
     for (kind, row, body), vector in zip(corpus, vectors[1:], strict=True):
         dot = sum(a * b for a, b in zip(question, vector, strict=True))
         norm = math.sqrt(sum(x * x for x in question) * sum(x * x for x in vector))
         ranked_results.append((dot / norm, kind, row, body))
-    ranked_results.sort(key=lambda item: (-item[0], item[1], item[2]["id"]
+    ranked_results.sort(key=lambda item: (0 if item[1] == "document" and
+                       item[2]["document_id"] in preferred_status else 1,
+                       -item[0], item[1], item[2]["id"]
                        if item[1] != "document" else item[2]["path"]))
     selected = []
     changed_sources = []
@@ -260,6 +285,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                              "passage_id": row["passage_id"],
                              "page": row["page"], "sha256": row["sha256"],
                              "policy": row["policy"], "source_status": "current",
+                             "preferred": row["document_id"] in preferred_status,
+                             "preference_status": preferred_status.get(row["document_id"]),
                              "similarity": round(score, 3)})
         else:
             if not _record_is_current(db, kind, row):
@@ -286,4 +313,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             "changed_sources": changed_sources, "limited": limited,
             "model": MODEL, "checked_passages": checked_passages,
             "checked_memories": len(memories), "checked_projects": len(projects),
-            "counts": counts, "document_scope": scope}
+            "counts": counts, "document_scope": scope,
+            "preferences": [{"document_id": item["document_id"],
+                             "path": item["path"], "status": item["status"]}
+                            for item in preferences]}
