@@ -1,24 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Health } from './api';
-import ChatView from './ChatView';
-import DocumentView, { type Source } from './DocumentView';
-import DraftView, { type Draft, type DraftComposer, type StyleForm } from './DraftView';
+import type { Source } from './DocumentView';
+import type { Draft, DraftComposer, StyleForm } from './DraftView';
 import SettingsPanel, { type Settings } from './SettingsPanel';
-import TaskView from './TaskView';
-import ActivityView from './ActivityView';
-import WorkStateView from './WorkStateView';
-import TimeModelView from './TimeModelView';
-import EveningPlanView from './EveningPlanView';
-import ResearchView from './ResearchView';
-import VaultView from './VaultView';
-import ChatRulesView from './ChatRulesView';
-import SkillView from './SkillView';
-import LearningView from './LearningView';
-import MemoryReviewView from './MemoryReviewView';
-import FileGraphView from './FileGraphView';
-import CodeProjectView from './CodeProjectView';
-import ModelChoiceBanner from './ModelChoiceBanner';
-import UnifiedSearchView from './UnifiedSearchView';
+
+const ChatView = lazy(() => import('./ChatView'));
+const DocumentView = lazy(() => import('./DocumentView'));
+const DraftView = lazy(() => import('./DraftView'));
+const TaskView = lazy(() => import('./TaskView'));
+const ActivityView = lazy(() => import('./ActivityView'));
+const WorkStateView = lazy(() => import('./WorkStateView'));
+const TimeModelView = lazy(() => import('./TimeModelView'));
+const EveningPlanView = lazy(() => import('./EveningPlanView'));
+const ResearchView = lazy(() => import('./ResearchView'));
+const VaultView = lazy(() => import('./VaultView'));
+const ChatRulesView = lazy(() => import('./ChatRulesView'));
+const SkillView = lazy(() => import('./SkillView'));
+const LearningView = lazy(() => import('./LearningView'));
+const MemoryReviewView = lazy(() => import('./MemoryReviewView'));
+const FileGraphView = lazy(() => import('./FileGraphView'));
+const CodeProjectView = lazy(() => import('./CodeProjectView'));
+const ModelChoiceBanner = lazy(() => import('./ModelChoiceBanner'));
+const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
 
 type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
 type QuickCapture = { text: string; files: string[]; notice: string };
@@ -198,6 +201,7 @@ export default function App() {
         <section className="card muted"><h3>Einrichtung</h3><p>Der Chat antwortet erst, wenn ein lokales Ollama-Modell läuft oder OpenRouter mit Schlüssel und Modell eingerichtet ist. Es werden keine Beispielantworten als echte Ergebnisse gezeigt.</p></section>
         <SettingsPanel healthStatus={health?.status || 'starting'} visible={page === 'status'} onSaved={refreshHealth} settings={settingsDraft} setSettings={setSettingsDraft} />
       </div>
+      <Suspense fallback={<section className="card" role="status">Bereich wird geladen…</section>}>
       {['chat', 'drafts', 'research', 'activity'].includes(page) &&
         <ModelChoiceBanner key={page} task={page === 'drafts' ? 'draft' : page === 'research' ? 'research' : page === 'activity' ? 'plan' : 'chat'} />}
       {page === 'status' ? null : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} /> :
@@ -236,6 +240,7 @@ export default function App() {
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}
       {draftRulesOpened && <div hidden={page !== 'draft_rules'}><ChatRulesView visible={page === 'draft_rules'} scope="draft" /></div>}
       {planRulesOpened && <div hidden={page !== 'plan_rules'}><ChatRulesView visible={page === 'plan_rules'} scope="plan" /></div>}
+      </Suspense>
     </main>
   </div>;
 }

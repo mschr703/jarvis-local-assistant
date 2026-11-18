@@ -44,7 +44,7 @@ Falls `ollama` im aktuellen Terminal noch nicht im `PATH` liegt, ein neues Termi
 python scripts/dev.py
 ```
 
-Danach [http://127.0.0.1:5173](http://127.0.0.1:5173) öffnen. Die API bindet ausschließlich an `127.0.0.1:8765`; [der Healthcheck](http://127.0.0.1:8765/health) zeigt Provider und Modellbereitschaft. Beim ersten Start kann die Oberfläche kurz „Prüfe…“ anzeigen, während Backend und Ollama starten. In der Übersicht kann der Modellstatus jederzeit mit „Status prüfen“ neu abgefragt werden.
+Danach [http://127.0.0.1:5173](http://127.0.0.1:5173) öffnen. Die API bindet ausschließlich an `127.0.0.1:8765`; [der Healthcheck](http://127.0.0.1:8765/health) zeigt Provider und Modellbereitschaft. Beim ersten Start kann die Oberfläche kurz „Prüfe…“ anzeigen, während Backend und Ollama starten. In der Übersicht kann der Modellstatus jederzeit mit „Status prüfen“ neu abgefragt werden. Im Produktionsbuild werden die Bereichskomponenten erst beim ersten Öffnen geladen; dabei erscheint kurz „Bereich wird geladen…“. Bereits geöffnete Ansichten behalten ihre Eingaben beim Wechsel innerhalb der laufenden Oberfläche.
 
 Zum Stoppen im Startterminal `Ctrl+C` drücken. Falls ein Terminal unerwartet endet oder Prozesse weiterlaufen, im Repository-Ordner ausführen:
 
