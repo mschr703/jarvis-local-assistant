@@ -57,6 +57,9 @@ def test_excluded_and_redirected_document_are_not_reindexed(tmp_path):
     with pytest.raises(ValueError, match="Ausgeschlossenes"):
         docs.index_document(document_id)
     docs.set_excluded(document_id, False)
+    before_redirect = docs.get_document(document_id)
+    assert before_redirect["status"] == "pending_index"
+    assert before_redirect["sha256"] is None
     outside = tmp_path / "outside.md"
     outside.write_text("Privat außerhalb der Freigabe.", encoding="utf-8")
     first.unlink()
@@ -66,7 +69,7 @@ def test_excluded_and_redirected_document_are_not_reindexed(tmp_path):
         pytest.skip("Windows erlaubt hier keine Symlinks")
     with pytest.raises(ValueError, match="umgeleitet"):
         docs.index_document(document_id)
-    assert docs.get_document(document_id)["sha256"] == indexed[str(first)]["sha256"]
+    assert docs.get_document(document_id) == before_redirect
     assert docs.search("Privat") == []
 
 

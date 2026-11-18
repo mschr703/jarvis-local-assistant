@@ -60,7 +60,9 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   const [preferredId, setPreferredId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [preparingChat, setPreparingChat] = useState('');
+  const [reindexingDocument, setReindexingDocument] = useState('');
   useEffect(() => { void api<Folder[]>('/folders').then(setFolders).catch(() => setFolders([])); }, []);
   useEffect(() => { void api<Document[]>('/documents').then(setDocuments).catch(() => setDocuments([])); }, []);
   const refreshModelStatus = async () => {
@@ -98,7 +100,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   const run = async (event: FormEvent) => {
     event.preventDefault();
     if (busy || cacheBusy) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
     setSelectedDraftSources([]); setSelectedChatDocuments([]);
     try { await load(query.trim()); }
     catch (cause) { setError((cause as Error).message); }
@@ -106,7 +108,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   };
   const runSemantic = async () => {
     if (busy || cacheBusy || query.trim().length < 2) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
     setSelectedDraftSources([]); setSelectedChatDocuments([]);
     try {
       const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
@@ -180,19 +182,39 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     } catch (cause) { setError((cause as Error).message); }
     finally { setPreparingChat(''); }
   };
+  const reindexFromSearch = async (id: string) => {
+    if (busy || preparingChat) return;
+    setBusy(true); setReindexingDocument(id); setError(''); setNotice('');
+    try {
+      const updated = await api<{ outcome: 'indexed' | 'unchanged' | 'removed' | 'ocr_pending' | 'error';
+        document: { error?: string } | null }>(`/documents/${encodeURIComponent(id)}/index`,
+        { method: 'POST' });
+      setSelectedDraftSources([]); setSelectedChatDocuments([]);
+      setDocuments(await api<Document[]>('/documents'));
+      if (updated.outcome === 'removed' && documentId === id) setDocumentId('');
+      if (result) await load(result.query);
+      if (semantic) setSemantic(null);
+      setNotice(updated.outcome === 'indexed' ? `Datei neu indexiert. ${semantic ? 'Sinngemäße Suche bei Bedarf erneut starten.' : 'Aktuelle Treffer erneut prüfen.'}`
+        : updated.outcome === 'removed' ? 'Original fehlt; der alte Suchindexeintrag wurde entfernt.'
+          : updated.outcome === 'ocr_pending' ? 'Datei hat keine lesbare Textschicht; OCR steht aus.'
+            : updated.outcome === 'error' ? `Datei konnte nicht indexiert werden: ${updated.document?.error || 'unbekannter Fehler'}.`
+              : 'Datei war unverändert. Suchergebnis aktualisiert.');
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); setReindexingDocument(''); }
+  };
   const candidates = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
     && !result?.stale_sources.some((item) => item.document_id === document.id));
   const deepDocuments = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && (!folderId || document.folder_id === folderId));
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
-    <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für dieselben Quellarten. Nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren.</p>
+    <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für dieselben Quellarten. Nach Dateiänderungen kannst du veraltete Dateien direkt im Suchergebnis einzeln neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
       <label>Quelltyp
         <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy}
           onChange={(event) => { const next = event.target.value as SourceKind;
             setSourceKind(next); setResult(null); setSemantic(null);
-            setSelectedDraftSources([]); setSelectedChatDocuments([]);
+            setSelectedDraftSources([]); setSelectedChatDocuments([]); setNotice('');
             if (next === 'memory' || next === 'project') { setFolderId(''); setDocumentId(''); }
           }}>
           <option value="all">Alle Quellen</option>
@@ -244,6 +266,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
+    {notice && <p className="notice" role="status">{notice}</p>}
     {selectedDraftSources.length > 0 && <section className="card" aria-label="Fundstellen für Entwurf">
       <p>{selectedDraftSources.length} von höchstens fünf Fundstellen für den Entwurf ausgewählt.</p>
       <div className="item-actions"><button type="button" className="primary"
@@ -280,8 +303,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         sourceKind === 'document' ? 'Es wurden höchstens 30 Dateien und 100 Fundstellen geprüft, je Datei die ersten drei; höchstens zehn Treffer erscheinen.' :
         'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.'}</p>}
       {semantic.stale_sources.length > 0 && <div className="notice" role="status">
-        <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Unter „Dokumente“ neu indexieren.</p>
-        <ul>{semantic.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path}</li>)}</ul>
+        <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Die betroffene Datei einzeln neu indexieren und die sinngemäße Suche danach ausdrücklich erneut starten.</p>
+        <ul>{semantic.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path} <button type="button" disabled={busy || !!preparingChat} onClick={() => void reindexFromSearch(item.document_id)}>{reindexingDocument === item.document_id ? 'Indexiere…' : 'Diese Datei neu indexieren'}</button></li>)}</ul>
       </div>}
       {semantic.changed_sources.length > 0 && <p className="notice" role="status">
         {semantic.changed_sources.length} gespeicherte Erinnerungen oder Arbeitsstände wurden während der Suche geändert oder entfernt und daher nicht als Treffer angezeigt. Erneut suchen.
@@ -312,9 +335,9 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       <h3>Treffer für „{result.query}“</h3>
       <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände</p>
       {result.stale_sources.length > 0 && <div className="notice" role="status">
-        <strong>Originaldateien und Index weichen ab</strong><p>Unter „Dokumente“ den Ordner neu indexieren. Die alten Auszüge erscheinen nicht als aktuelle Treffer.</p>
+        <strong>Originaldateien und Index weichen ab</strong><p>Die betroffene Datei einzeln neu indexieren. Danach aktualisiert Jarvis die Stichworttreffer. Alte Auszüge erscheinen nicht als aktuelle Treffer.</p>
         <ul>{result.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>
-          {item.path} · bisheriger Index SHA-256 {item.index_sha256}</li>)}</ul>
+          {item.path} · bisheriger Index SHA-256 {item.index_sha256} <button type="button" disabled={busy || !!preparingChat} onClick={() => void reindexFromSearch(item.document_id)}>{reindexingDocument === item.document_id ? 'Indexiere…' : 'Diese Datei neu indexieren'}</button></li>)}</ul>
       </div>}
       {(sourceKind === 'all' || sourceKind === 'document') && <div className="item-list"><h4>Zusätzliche Dokumentquellen für diese Frage</h4>
         <p>Du wählst die Quelle selbst. Eine Vormerkung beweist keine Aussage; Jarvis zeigt den aktuellen Indexstand und den gesicherten Hash.</p>
