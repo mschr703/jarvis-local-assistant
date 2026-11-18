@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 
 type Kind = 'document' | 'memory' | 'project';
@@ -9,9 +9,13 @@ type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: str
 type Preference = { document_id: string; path: string; saved_sha256: string;
   current_sha256: string | null; status: 'current' | 'updated' | 'needs_reindex' | 'unavailable' };
 type Document = { id: string; path: string; status: string; excluded: number };
+type Folder = { id: string; path: string };
 type SearchResult = { query: string; results: Hit[]; limited: boolean;
   counts: Record<Kind, number>; preferences: Preference[];
   stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
+type SemanticHit = Hit & { similarity: number };
+type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
+  checked_passages: number; model: string; stale_sources: SearchResult['stale_sources'] };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
@@ -19,10 +23,14 @@ const names: Record<Kind, string> = {
 export default function UnifiedSearchView() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
+  const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folderId, setFolderId] = useState('');
   const [preferredId, setPreferredId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => { void api<Folder[]>('/folders').then(setFolders).catch(() => setFolders([])); }, []);
   const load = async (value: string) => {
     const [found, available] = await Promise.all([
       api<SearchResult>(`/search/unified?q=${encodeURIComponent(value)}`),
@@ -33,8 +41,15 @@ export default function UnifiedSearchView() {
   const run = async (event: FormEvent) => {
     event.preventDefault();
     if (busy) return;
-    setBusy(true); setError(''); setResult(null);
+    setBusy(true); setError(''); setResult(null); setSemantic(null);
     try { await load(query.trim()); }
+    catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); }
+  };
+  const runSemantic = async () => {
+    if (busy || query.trim().length < 2) return;
+    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    try { setSemantic(await api<SemanticResult>(`/search/semantic?q=${encodeURIComponent(query.trim())}${folderId ? `&folder_id=${encodeURIComponent(folderId)}` : ''}`)); }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
@@ -53,7 +68,7 @@ export default function UnifiedSearchView() {
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
     && !result?.stale_sources.some((item) => item.document_id === document.id));
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
-    <p className="intro">Suche lokal in indexierten Dateien, bewusst gespeicherten Erinnerungen und Arbeitsständen. Treffer zeigen den gespeicherten Quellenstand; nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren. Die Suche ruft kein Modell und keine Cloud auf.</p>
+    <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für Dokumente. Nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
       <label style={{ display: 'grid', gap: 7, minWidth: 0, maxWidth: '100%' }}>Suchbegriff oder Stichwortfrage<input aria-label="Gemeinsame Suche" value={query}
         style={{ width: '100%', minWidth: 0, maxWidth: '100%', background: '#101823',
@@ -62,8 +77,37 @@ export default function UnifiedSearchView() {
         placeholder="Projektname, Thema oder Dokumenttitel" /></label>
       <button className="primary" type="submit" disabled={busy || query.trim().length < 2}>
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
+      <label>Ordner für sinngemäße Suche
+        <select aria-label="Ordner für sinngemäße Suche" value={folderId} disabled={busy}
+          onChange={(event) => setFolderId(event.target.value)}>
+          <option value="">Alle freigegebenen Ordner</option>
+          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
+        </select></label>
+      <button type="button" disabled={busy || query.trim().length < 2}
+        onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß in Dokumenten suchen'}</button>
+      <small>Benötigt lokal <code>embeddinggemma:300m</code>. Prüft höchstens 100 Fundstellen aus 30 Dateien; die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
+    {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
+      <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
+      <p>{semantic.results.length} Dokumente · {semantic.checked_passages} Fundstellen geprüft · Modell {semantic.model}</p>
+      {semantic.limited && <p className="notice">Die Fundstellen oder Treffer sind begrenzt. Berücksichtigt werden höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei.</p>}
+      {semantic.stale_sources.length > 0 && <div className="notice" role="status">
+        <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Unter „Dokumente“ neu indexieren.</p>
+        <ul>{semantic.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path}</li>)}</ul>
+      </div>}
+      {!semantic.results.length && <p>Keine aktuellen Dokumentfundstellen gefunden.</p>}
+      <div className="item-list">{semantic.results.map((hit) => <article className="item-row" key={hit.document_id}>
+        <div><strong>Dokument · {hit.title}</strong>
+          <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt}</p>
+          <small style={{ overflowWrap: 'anywhere' }}>Quelle: {hit.source}
+            {hit.page != null ? ` · Seite ${hit.page}` : ''}
+            {hit.passage_id != null ? ` · Fundstelle ${hit.passage_id}` : ''}
+            {hit.sha256 ? ` · SHA-256 ${hit.sha256}` : ''}
+            {` · Ähnlichkeit ${hit.similarity.toFixed(2)}`}</small>
+        </div>
+      </article>)}</div>
+    </section>}
     {result && <section className="card" aria-label="Suchergebnisse">
       <h3>Treffer für „{result.query}“</h3>
       <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände</p>

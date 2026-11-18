@@ -112,6 +112,8 @@ from jarvis.research import (
 )
 from jarvis.scheduled_backup import ScheduledBackup
 from jarvis.security import LocalApiBoundary
+from jarvis.semantic_search import SemanticSearchError
+from jarvis.semantic_search import search as semantic_search
 from jarvis.skills import SkillConflict, SkillStore, skill_prompt
 from jarvis.source_preferences import SourcePreferences
 from jarvis.speech import SpeechError, SpeechStore, SpeechValidationError
@@ -1050,6 +1052,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await run_in_threadpool(unified_search, db, q)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/search/semantic")
+    async def semantic_search_view(q: str = Query(min_length=2, max_length=160),
+                                   folder_id: str | None = Query(default=None, max_length=64)):
+        try:
+            return await run_in_threadpool(semantic_search, db, q, config.ollama_url, folder_id)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except SemanticSearchError as exc:
+            raise HTTPException(503, str(exc)) from exc
 
     @app.put("/search/unified/preferences")
     async def add_source_preference(data: SourcePreferenceInput):
