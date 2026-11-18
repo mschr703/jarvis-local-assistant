@@ -1005,15 +1005,24 @@ class Database:
             if not term or not chats:
                 return chats
             chat_ids = {row["id"] for row in chats}
-            matches: dict[str, str] = {}
-            for row in db.execute("SELECT chat_id,content FROM messages ORDER BY created_at DESC"):
+            matches: dict[str, tuple[str, str]] = {}
+            for row in db.execute("SELECT id,chat_id,content FROM messages ORDER BY created_at DESC,id DESC"):
                 if (row["chat_id"] in chat_ids and row["chat_id"] not in matches
                         and term in row["content"].casefold()):
-                    position = row["content"].casefold().find(term)
+                    folded_position = row["content"].casefold().find(term)
+                    position = folded_length = 0
+                    for char in row["content"]:
+                        width = len(char.casefold())
+                        if folded_length + width > folded_position:
+                            break
+                        folded_length += width
+                        position += 1
                     start = max(0, position - 50)
                     excerpt = row["content"][start:start + 200]
-                    matches[row["chat_id"]] = ("…" if start else "") + excerpt
-            return [{**row, "match_preview": matches.get(row["id"])} for row in chats
+                    matches[row["chat_id"]] = (row["id"], ("…" if start else "") + excerpt)
+            return [{**row, "match_message_id": matches[row["id"]][0] if row["id"] in matches else None,
+                     "match_preview": matches[row["id"]][1] if row["id"] in matches else None}
+                    for row in chats
                     if term in row["title"].casefold() or row["id"] in matches]
 
     def set_chat_archived(self, chat_id: str, archived: bool) -> dict | None:

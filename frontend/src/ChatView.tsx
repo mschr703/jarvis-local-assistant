@@ -79,6 +79,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [compactionNotice, setCompactionNotice] = useState('');
   const [resetCandidate, setResetCandidate] = useState(false);
   const [active, setActive] = useState<Chat | null>(null);
+  const [focusMessageId, setFocusMessageId] = useState('');
   const [streamed, setStreamed] = useState('');
   const [busy, setBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -250,17 +251,26 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const refreshList = async (query = appliedSearch, archived = showArchived) =>
     setChats(await api<ChatSummary[]>(`/chats?q=${encodeURIComponent(query)}&archived=${archived}`));
   const refreshCases = async () => setCases(await api<AnswerCase[]>('/chat-evaluation-cases'));
-  const load = async (id: string) => {
+  const load = async (id: string, matchMessageId = '') => {
     if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id !== id) stopVoiceSession();
     navigationRef.current = true; setNavigating(true); setError('');
     try { const [chat, states] = await Promise.all([api<Chat>(`/chats/${id}`),
       api<ChatCompaction[]>(`/chats/${id}/compactions`)]);
-      setActive(chat); setSelectedFiles([]); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
+      setActive(chat); setFocusMessageId(matchMessageId); setSelectedFiles([]); setCompactions(states); setCompactionNotice(''); setResetCandidate(false); setSelectedAnswerId('');
       setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice(''); }
     catch (cause) { setError((cause as Error).message); }
     finally { navigationRef.current = false; setNavigating(false); }
   };
+
+  useEffect(() => {
+    if (!focusMessageId || !active?.messages.some((message) => message.id === focusMessageId)) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`chat-message-${focusMessageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFocusMessageId('');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, focusMessageId]);
 
   useEffect(() => {
     if (!requestedChatSource) return;
@@ -507,6 +517,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           <button className={active?.id === item.id ? 'selected' : ''} disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
             onClick={() => void load(item.id)}>{item.title}</button>}
         {item.match_preview && <small>Treffer: {item.match_preview}</small>}
+        {item.match_message_id && <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
+          onClick={() => void load(item.id, item.match_message_id || '')}>Treffer anzeigen</button>}
         <div className="item-actions"><button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
           onClick={() => { setDeleteCandidate(null); setRenamingChat(item.id); setRenameText(item.title); }}>Umbenennen</button>
           <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}

@@ -243,6 +243,22 @@ def main() -> None:
                         expect(page.locator(".message.assistant .usage")).to_contain_text("Skill v1")
                         expect(page.locator(".message.assistant .usage")).to_contain_text("Anfrage")
                         expect(page.locator(".message.user")).to_have_count(1)
+                        page.get_by_label("Gespräche suchen").fill("kurzen deutschen")
+                        page.get_by_role("button", name="Suchen", exact=True).click()
+                        page.get_by_role("button", name="Treffer anzeigen").wait_for()
+                        page.evaluate("""() => {
+                          window.__chatScrollOriginal = Element.prototype.scrollIntoView;
+                          window.__chatScrolledTo = null;
+                          Element.prototype.scrollIntoView = function(...args) {
+                            window.__chatScrolledTo = this.id;
+                            return window.__chatScrollOriginal.apply(this, args);
+                          };
+                        }""")
+                        page.get_by_role("button", name="Treffer anzeigen").click()
+                        page.wait_for_function("window.__chatScrolledTo?.startsWith('chat-message-')")
+                        expect(page.locator(".message.user")).to_contain_text("kurzen deutschen")
+                        page.evaluate("() => { Element.prototype.scrollIntoView = window.__chatScrollOriginal; }")
+                        page.get_by_role("button", name="Alle", exact=True).click()
                         page.get_by_role("button", name="Antwort bewerten").click()
                         page.get_by_label("Erfolg der Antwort").select_option("partial")
                         page.get_by_label("Quellenlage der Antwort").select_option("not_applicable")
@@ -874,6 +890,7 @@ def main() -> None:
                                           "memory_search": "matches_and_empty",
                                           "new_chat_double_click": "once", "chat": "persisted",
                                           "chat_rename": "persisted_after_reload",
+                                          "chat_search_jump": "matched_message",
                                           "dst_second_occurrence": "visible_once",
                                           "task_mobile_width": "fits",
                                           "all_mobile_sections": "fit",

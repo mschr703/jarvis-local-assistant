@@ -1,6 +1,6 @@
 export type Health = { status: string; provider: string; model: string | null; configured: boolean; message: string };
 export type ChatSummary = { id: string; title: string; created_at: string; updated_at: string;
-  archived_at: string | null; match_preview?: string | null };
+  archived_at: string | null; match_preview?: string | null; match_message_id?: string | null };
 export type Message = {
   id: string; role: 'user' | 'assistant'; content: string; status: string; created_at: string;
   provider?: string | null; model?: string | null; input_tokens?: number | null;

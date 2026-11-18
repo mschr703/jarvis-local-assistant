@@ -27,7 +27,7 @@ def test_search_archive_restore_delete_and_backup(tmp_path):
         second = client.post("/chats", headers=headers).json()["id"]
         db = Database(root / "jarvis.db")
         db.add_message(first, "user", "Projekt Alpha besprechen")
-        db.add_message(first, "user", "Die Überraschung steht bei 80%.")
+        matched_message = db.add_message(first, "user", "Die Überraschung steht bei 80%.")
         usage_one = db.reserve_usage("chat", "ollama", "fixture", 0, 10, "2026-10-28")
         db.finish_usage(usage_one, 2, 3, 0, "local_no_api_charge", "complete")
         answer_one = db.add_message(first, "assistant", "Alpha ist geplant.", usage_id=usage_one)
@@ -50,6 +50,7 @@ def test_search_archive_restore_delete_and_backup(tmp_path):
         content = client.get("/chats?q=%C3%BCBERRASCHUNG").json()
         assert len(content) == 1 and content[0]["id"] == first
         assert "Überraschung" in content[0]["match_preview"]
+        assert content[0]["match_message_id"] == matched_message["id"]
         assert [item["id"] for item in client.get("/chats?q=80%25").json()] == [first]
         assert client.get("/chats?q=" + "a" * 201).status_code == 422
         assert client.patch(f"/chats/{first}/archive", json={"archived": True}).status_code == 403
@@ -110,6 +111,7 @@ def test_manual_chat_title_is_separate_persistent_and_searchable(tmp_path):
         db.add_message(first, "user", "Erste Nachricht")
         assert db.get_chat(first)["title"] == "Studium WiSe"
         assert [item["id"] for item in client.get("/chats?q=wise").json()] == [first]
+        assert client.get("/chats?q=wise").json()[0]["match_message_id"] is None
         assert db.get_chat(second)["title"] == "Neues Gespräch"
         assert client.patch(f"/chats/{first}/archive", headers=headers,
                             json={"archived": True}).status_code == 200
@@ -127,6 +129,15 @@ def test_manual_chat_title_is_separate_persistent_and_searchable(tmp_path):
     restored = tmp_path / "restored"
     restore_backup(backup, restored)
     assert Database(restored / "jarvis.db").get_chat(first)["title"] == "Archiv Studium"
+
+
+def test_search_preview_handles_casefold_expansion(tmp_path):
+    db = Database(tmp_path / "jarvis.db")
+    chat = db.create_chat()
+    message = db.add_message(chat["id"], "user", "ß" * 60 + " Treffer am Ende")
+    found = db.list_chats("Treffer")
+    assert found[0]["match_message_id"] == message["id"]
+    assert "Treffer am Ende" in found[0]["match_preview"]
 
 
 def test_schema37_migration_keeps_chat_messages(tmp_path):
