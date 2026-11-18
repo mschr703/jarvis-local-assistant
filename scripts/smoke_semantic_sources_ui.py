@@ -87,6 +87,13 @@ def main() -> None:
                         expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(
                             timeout=120000)
                         expect(results.locator("article")).to_contain_text("Kuchen.md")
+                        results.locator("article").get_by_role(
+                            "button", name="Mit dieser Fundstelle Entwurf starten").click()
+                        expect(page.get_by_role("heading", name="Entwürfe", exact=True)).to_be_visible()
+                        expect(page.get_by_text("1 Fundstelle(n) ausgewählt.", exact=False)).to_be_visible()
+                        expect(page.get_by_role("list", name="Ausgewählte Fundstellen")).to_contain_text(
+                            "Kuchen.md")
+                        page.get_by_role("button", name="Suche", exact=True).click()
 
                         docs.update_memory(memory["id"],
                                            "Die Schlüsselübergabe für die Wohnung ist am Samstag.",
@@ -108,6 +115,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"source_kinds": 3, "filters": "lexical_and_semantic",
+                                          "draft_source": "selected_without_model",
                                           "updates": "current",
                                           "mobile_width": "fits", "cloud_calls": 0}))
                     finally:

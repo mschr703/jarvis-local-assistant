@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
+import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project';
 type SourceKind = 'all' | Kind;
@@ -29,7 +30,16 @@ const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
 
-export default function UnifiedSearchView() {
+function draftSource(hit: Hit | SemanticHit): Source | null {
+  if (hit.kind !== 'document' || !hit.document_id || typeof hit.passage_id !== 'number'
+      || hit.passage_id <= 0 || !hit.sha256 || !hit.policy
+      || !['current', 'updated'].includes(hit.source_status || '')) return null;
+  return { passage_id: hit.passage_id, document_id: hit.document_id,
+    path: hit.source, page: hit.page ?? null, text: hit.excerpt,
+    policy: hit.policy, sha256: hit.sha256, source_status: 'current' };
+}
+
+export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Source[]) => void }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [result, setResult] = useState<SearchResult | null>(null);
@@ -214,6 +224,10 @@ export default function UnifiedSearchView() {
           {hit.kind === 'document' && hit.document_id && hit.source_status === 'current' &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
+          {draftSource(hit) && <button type="button" onClick={() => {
+            const source = draftSource(hit);
+            if (source) onDraft([source]);
+          }}>Mit dieser Fundstelle Entwurf starten</button>}
         </div>
       </article>)}</div>
     </section>}
@@ -261,6 +275,10 @@ export default function UnifiedSearchView() {
           {hit.kind === 'document' && hit.document_id && hit.source_status &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
+          {draftSource(hit) && <button type="button" onClick={() => {
+            const source = draftSource(hit);
+            if (source) onDraft([source]);
+          }}>Mit dieser Fundstelle Entwurf starten</button>}
         </div>
       </article>)}</div>
     </section>}

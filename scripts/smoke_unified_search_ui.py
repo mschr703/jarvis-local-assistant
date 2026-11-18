@@ -60,6 +60,13 @@ def main() -> None:
                         expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
                         expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
                         expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()
+                        document_hit = results.locator("article").filter(has_text="Vertrag_Orion.md")
+                        document_hit.get_by_role("button", name="Mit dieser Fundstelle Entwurf starten").click()
+                        expect(page.get_by_role("heading", name="Entwürfe", exact=True)).to_be_visible()
+                        expect(page.get_by_text("1 Fundstelle(n) ausgewählt.", exact=False)).to_be_visible()
+                        expect(page.get_by_role("list", name="Ausgewählte Fundstellen")).to_contain_text(
+                            "Vertrag_Orion.md")
+                        page.get_by_role("button", name="Suche", exact=True).click()
                         assert not overflow_nodes(page), overflow_nodes(page)
                         page.get_by_label("Gemeinsame Suche").fill("Vertrag_Orion")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
@@ -69,7 +76,8 @@ def main() -> None:
                         expect(results.get_by_text("Keine passenden gespeicherten Quellen gefunden.")).to_be_visible(timeout=30000)
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
-                        print(json.dumps({"sources": 3, "filename": "found",
+                        print(json.dumps({"sources": 3, "draft_source": "selected_without_model",
+                                          "filename": "found",
                                           "empty": "shown", "mobile_width": "fits", "model_calls": 0}))
                     finally:
                         browser.close()

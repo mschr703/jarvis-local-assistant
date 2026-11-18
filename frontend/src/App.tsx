@@ -224,7 +224,7 @@ export default function App() {
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
-      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView /></div>}
+      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
       {learningOpened && <div hidden={page !== 'learning'}><LearningView visible={page === 'learning'} sources={selectedSources} configured={modelReady} provider={health?.provider || 'ollama'} onDocuments={() => navigate('documents')} /></div>}

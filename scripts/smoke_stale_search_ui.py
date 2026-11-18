@@ -65,6 +65,7 @@ def main() -> None:
                         expect(results.get_by_text("0 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(
                             timeout=30000)
                         expect(results.get_by_text("Originaldateien und Index weichen ab")).to_be_visible()
+                        expect(results.get_by_role("button", name="Mit dieser Fundstelle Entwurf starten")).to_have_count(0)
                         assert not overflow_nodes(page), overflow_nodes(page)
                         page.get_by_role("button", name="Dokumente", exact=True).click()
                         page.get_by_role("button", name="Index aktualisieren").click()
@@ -78,9 +79,11 @@ def main() -> None:
                         expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(
                             timeout=30000)
                         expect(results.get_by_text("Originaldateien und Index weichen ab")).to_have_count(0)
+                        expect(results.get_by_role("button", name="Mit dieser Fundstelle Entwurf starten")).to_be_visible()
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"changed": "marked", "selection": "blocked",
+                                          "draft_action": "stale_hidden_then_current",
                                           "unified": "stale_separate", "reindex": "current",
                                           "mobile_width": "fits", "model_calls": 0}))
                     finally:
