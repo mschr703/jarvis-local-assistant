@@ -164,6 +164,25 @@ def test_draft_api_rejects_source_changed_after_selection(tmp_path):
             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
 
 
+def test_multi_source_draft_rejects_one_stale_original(tmp_path):
+    db, docs, _, folder, _, _, _, first = sample(tmp_path)
+    second = first.with_name("Orion_Notiz.md")
+    second.write_text("Projekt Orion: Zweiter Beleg für den Entwurf.", encoding="utf-8")
+    assert docs.index_folder(folder["id"])["indexed"] == 1
+    ids = [item["passage_id"] for item in docs.search("Orion")]
+    assert len(ids) == 2
+    assert len(docs.selected_passages(ids)) == 2
+    second.write_text("Projekt Orion: Inzwischen geänderter Beleg.", encoding="utf-8")
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = {"x-jarvis-csrf": client.get("/session").json()["csrf"]}
+        response = client.post("/drafts/generate", headers=headers, json={
+            "kind": "text", "brief": "Beide Belege zusammenfassen", "passage_ids": ids})
+        assert response.status_code == 422 and "Index aktualisieren" in response.text
+        with db.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
+
+
 def test_unified_search_bounds_original_hash_checks(tmp_path, monkeypatch):
     db, docs, _, folder, _, _, _, file = sample(tmp_path)
     for index in range(4):

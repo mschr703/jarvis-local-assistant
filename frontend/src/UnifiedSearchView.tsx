@@ -42,6 +42,7 @@ function draftSource(hit: Hit | SemanticHit): Source | null {
 export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Source[]) => void }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
+  const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
@@ -92,14 +93,14 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
   const run = async (event: FormEvent) => {
     event.preventDefault();
     if (busy || cacheBusy) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setBusy(true); setError(''); setResult(null); setSemantic(null); setSelectedDraftSources([]);
     try { await load(query.trim()); }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
     if (busy || cacheBusy || query.trim().length < 2) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setBusy(true); setError(''); setResult(null); setSemantic(null); setSelectedDraftSources([]);
     try {
       const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
       if (folderId) params.set('folder_id', folderId);
@@ -118,8 +119,23 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
         body: JSON.stringify({ query: result.query, document_id: documentId }) });
       await load(result.query);
       setPreferredId('');
+      setSelectedDraftSources([]);
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
+  };
+  const draftActions = (hit: Hit | SemanticHit) => {
+    const source = draftSource(hit);
+    if (!source) return null;
+    const selected = selectedDraftSources.some((item) => item.passage_id === source.passage_id);
+    return <div className="item-actions"><label><input type="checkbox"
+      aria-label={`Fundstelle ${source.passage_id} für Entwurf auswählen`}
+      checked={selected} disabled={!selected && selectedDraftSources.length >= 5}
+      onChange={() => setSelectedDraftSources((current) => current.some(
+        (item) => item.passage_id === source.passage_id) ? current.filter(
+          (item) => item.passage_id !== source.passage_id) : current.length < 5 ?
+          [...current, source] : current)} />Für Entwurf auswählen</label>
+      <button type="button" onClick={() => onDraft([source])}>
+        Mit dieser Fundstelle Entwurf starten</button></div>;
   };
   const candidates = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
@@ -132,7 +148,7 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
       <label>Quelltyp
         <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy}
           onChange={(event) => { const next = event.target.value as SourceKind;
-            setSourceKind(next); setResult(null); setSemantic(null);
+            setSourceKind(next); setResult(null); setSemantic(null); setSelectedDraftSources([]);
             if (next === 'memory' || next === 'project') { setFolderId(''); setDocumentId(''); }
           }}>
           <option value="all">Alle Quellen</option>
@@ -184,6 +200,13 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
         'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
+    {selectedDraftSources.length > 0 && <section className="card" aria-label="Fundstellen für Entwurf">
+      <p>{selectedDraftSources.length} von höchstens fünf Fundstellen für den Entwurf ausgewählt.</p>
+      <div className="item-actions"><button type="button" className="primary"
+        onClick={() => onDraft(selectedDraftSources)}>
+        Mit {selectedDraftSources.length} Fundstellen Entwurf starten</button>
+        <button type="button" onClick={() => setSelectedDraftSources([])}>Auswahl entfernen</button></div>
+    </section>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
       <p>{semantic.document_scope ?
@@ -224,10 +247,7 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
           {hit.kind === 'document' && hit.document_id && hit.source_status === 'current' &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
-          {draftSource(hit) && <button type="button" onClick={() => {
-            const source = draftSource(hit);
-            if (source) onDraft([source]);
-          }}>Mit dieser Fundstelle Entwurf starten</button>}
+          {draftActions(hit)}
         </div>
       </article>)}</div>
     </section>}
@@ -275,10 +295,7 @@ export default function UnifiedSearchView({ onDraft }: { onDraft: (sources: Sour
           {hit.kind === 'document' && hit.document_id && hit.source_status &&
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
-          {draftSource(hit) && <button type="button" onClick={() => {
-            const source = draftSource(hit);
-            if (source) onDraft([source]);
-          }}>Mit dieser Fundstelle Entwurf starten</button>}
+          {draftActions(hit)}
         </div>
       </article>)}</div>
     </section>}
