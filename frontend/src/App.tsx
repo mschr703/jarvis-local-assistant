@@ -41,7 +41,7 @@ export default function App() {
   const [learningOpened, setLearningOpened] = useState(false);
   const [memoryReviewOpened, setMemoryReviewOpened] = useState(false);
   const [requestedChatSource, setRequestedChatSource] = useState<{ chatId: string; messageId: string } | null>(null);
-  const [requestedChatAttachment, setRequestedChatAttachment] = useState<File | null>(null);
+  const [requestedChatAttachments, setRequestedChatAttachments] = useState<File[] | null>(null);
   const [tasksOpened, setTasksOpened] = useState(false);
   const [activityOpened, setActivityOpened] = useState(false);
   const [researchOpened, setResearchOpened] = useState(false);
@@ -212,7 +212,7 @@ export default function App() {
       <Suspense fallback={<section className="card" role="status">Bereich wird geladen…</section>}>
       {['chat', 'drafts', 'research', 'activity'].includes(page) &&
         <ModelChoiceBanner key={page} task={page === 'drafts' ? 'draft' : page === 'research' ? 'research' : page === 'activity' ? 'plan' : 'chat'} />}
-      {page === 'status' ? null : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachment={requestedChatAttachment} onAttachmentPrepared={() => setRequestedChatAttachment(null)} /> :
+      {page === 'status' ? null : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
         page === 'documents' ? null :
         page === 'unified_search' ? null :
         page === 'file_graph' ? null :
@@ -232,7 +232,7 @@ export default function App() {
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} requestedSource={requestedSource?.kind === 'document' || requestedSource?.kind === 'memory' ? requestedSource : null} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
-      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id) => { setRequestedSource({ kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(file) => { setRequestedChatSource(null); setRequestedChatAttachment(file); navigate('chat'); }} /></div>}
+      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id) => { setRequestedSource({ kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(files) => { setRequestedChatSource(null); setRequestedChatAttachments(files); navigate('chat'); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
       {learningOpened && <div hidden={page !== 'learning'}><LearningView visible={page === 'learning'} sources={selectedSources} configured={modelReady} provider={health?.provider || 'ollama'} onDocuments={() => navigate('documents')} /></div>}

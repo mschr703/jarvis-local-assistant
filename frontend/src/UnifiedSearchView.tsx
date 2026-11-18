@@ -26,6 +26,7 @@ type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
 type SemanticStatus = { model: string; status: 'ready' | 'model_missing' | 'service_unavailable' | 'invalid_response' | 'invalid_url';
   service_available: boolean; ready: boolean; message: string };
 type CacheStatus = { entries: number; bytes: number; ram_entries: number; available: boolean };
+type ChatDocument = { id: string; path: string; sha256: string };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
@@ -41,10 +42,11 @@ function draftSource(hit: Hit | SemanticHit): Source | null {
 
 export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, localChatReady }: {
   onDraft: (sources: Source[]) => void; onOpenSource: (kind: Kind, id: string) => void;
-  onLocalChat: (file: File) => void; localChatReady: boolean }) {
+  onLocalChat: (files: File[]) => void; localChatReady: boolean }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
+  const [selectedChatDocuments, setSelectedChatDocuments] = useState<ChatDocument[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
@@ -96,14 +98,16 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   const run = async (event: FormEvent) => {
     event.preventDefault();
     if (busy || cacheBusy) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null); setSelectedDraftSources([]);
+    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setSelectedDraftSources([]); setSelectedChatDocuments([]);
     try { await load(query.trim()); }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
     if (busy || cacheBusy || query.trim().length < 2) return;
-    setBusy(true); setError(''); setResult(null); setSemantic(null); setSelectedDraftSources([]);
+    setBusy(true); setError(''); setResult(null); setSemantic(null);
+    setSelectedDraftSources([]); setSelectedChatDocuments([]);
     try {
       const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
       if (folderId) params.set('folder_id', folderId);
@@ -122,7 +126,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         body: JSON.stringify({ query: result.query, document_id: documentId }) });
       await load(result.query);
       setPreferredId('');
-      setSelectedDraftSources([]);
+      setSelectedDraftSources([]); setSelectedChatDocuments([]);
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
@@ -140,18 +144,41 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       <button type="button" onClick={() => onDraft([source])}>
         Mit dieser Fundstelle Entwurf starten</button></div>;
   };
-  const localChatAction = (hit: Hit | SemanticHit) => {
+  const localChatAction = (hit: Hit | SemanticHit, firstForDocument: boolean) => {
     if (hit.kind !== 'document' || !hit.document_id || !hit.sha256
         || !['current', 'updated'].includes(hit.source_status || '')) return null;
     const key = `${hit.document_id}:${hit.sha256}`;
-    return <button type="button" disabled={!localChatReady || !!preparingChat}
+    const document = { id: hit.document_id, path: hit.source, sha256: hit.sha256 };
+    const selected = selectedChatDocuments.some((item) => item.id === document.id);
+    return <div className="item-actions">{firstForDocument && <label><input type="checkbox"
+      aria-label={`Dokument ${hit.title} für lokalen Chat auswählen`}
+      checked={selected} disabled={!localChatReady || !!preparingChat
+        || (!selected && selectedChatDocuments.length >= 3)}
+      onChange={() => setSelectedChatDocuments((current) => current.some(
+        (item) => item.id === document.id) ? current.filter((item) => item.id !== document.id)
+        : current.length < 3 ? [...current, document] : current)} />Für lokalen Chat auswählen</label>}
+    <button type="button" disabled={!localChatReady || !!preparingChat}
       title={!localChatReady ? 'Nur mit lokalem Ollama verfügbar' : undefined}
       onClick={async () => {
         setPreparingChat(key); setError('');
-        try { onLocalChat(await verifiedDocumentForLocalChat(hit.document_id!, hit.source, hit.sha256!)); }
+        try {
+          const file = await verifiedDocumentForLocalChat(document.id, document.path, document.sha256);
+          setSelectedChatDocuments([]); onLocalChat([file]);
+        }
         catch (cause) { setError((cause as Error).message); }
         finally { setPreparingChat(''); }
-      }}>{preparingChat === key ? 'Original wird geprüft…' : 'Im lokalen Chat verwenden'}</button>;
+      }}>{preparingChat === key ? 'Original wird geprüft…' : 'Im lokalen Chat verwenden'}</button></div>;
+  };
+  const prepareSelectedChat = async () => {
+    if (!localChatReady || preparingChat || !selectedChatDocuments.length) return;
+    setPreparingChat('selection'); setError('');
+    try {
+      const files: File[] = [];
+      for (const item of selectedChatDocuments)
+        files.push(await verifiedDocumentForLocalChat(item.id, item.path, item.sha256));
+      setSelectedChatDocuments([]); onLocalChat(files);
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setPreparingChat(''); }
   };
   const candidates = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
@@ -164,7 +191,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       <label>Quelltyp
         <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy}
           onChange={(event) => { const next = event.target.value as SourceKind;
-            setSourceKind(next); setResult(null); setSemantic(null); setSelectedDraftSources([]);
+            setSourceKind(next); setResult(null); setSemantic(null);
+            setSelectedDraftSources([]); setSelectedChatDocuments([]);
             if (next === 'memory' || next === 'project') { setFolderId(''); setDocumentId(''); }
           }}>
           <option value="all">Alle Quellen</option>
@@ -223,6 +251,16 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         Mit {selectedDraftSources.length} Fundstellen Entwurf starten</button>
         <button type="button" onClick={() => setSelectedDraftSources([])}>Auswahl entfernen</button></div>
     </section>}
+    {selectedChatDocuments.length > 0 && <section className="card" aria-label="Dokumente für lokalen Chat">
+      <p>{selectedChatDocuments.length} von höchstens drei verschiedenen Dokumenten für den lokalen Chat ausgewählt.</p>
+      <div className="item-actions"><button type="button" className="primary"
+        disabled={!localChatReady || !!preparingChat}
+        onClick={() => void prepareSelectedChat()}>
+        {preparingChat === 'selection' ? 'Originale werden geprüft…'
+          : `Mit ${selectedChatDocuments.length} Dokumenten lokalen Chat vorbereiten`}</button>
+        <button type="button" disabled={!!preparingChat}
+          onClick={() => setSelectedChatDocuments([])}>Auswahl entfernen</button></div>
+    </section>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
       <p>{semantic.document_scope ?
@@ -249,7 +287,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         {semantic.changed_sources.length} gespeicherte Erinnerungen oder Arbeitsstände wurden während der Suche geändert oder entfernt und daher nicht als Treffer angezeigt. Erneut suchen.
       </p>}
       {!semantic.results.length && <p>Keine aktuellen Quellen gefunden.</p>}
-      <div className="item-list">{semantic.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}:${hit.passage_id ?? ''}`}>
+      <div className="item-list">{semantic.results.map((hit, index) => <article className="item-row" key={`${hit.kind}:${hit.id}:${hit.passage_id ?? ''}`}>
         <div><strong>{names[hit.kind]} · {hit.title}{hit.preferred ? ' · bewusst vorgemerkt' : ''}</strong>
           <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt}</p>
           <small style={{ overflowWrap: 'anywhere' }}>Quelle: {hit.source}
@@ -264,7 +302,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
           <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
-          {localChatAction(hit)}
+          {localChatAction(hit, semantic.results.findIndex((item) => item.kind === 'document'
+            && item.document_id === hit.document_id) === index)}
           {draftActions(hit)}
         </div>
       </article>)}</div>
@@ -300,7 +339,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       </div>}
       {result.limited && <p className="notice">Die Trefferliste ist begrenzt. Präzisiere die Suche für weitere Ergebnisse.</p>}
       {!result.results.length && <p>Keine passenden gespeicherten Quellen gefunden.</p>}
-      <div className="item-list">{result.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}`}>
+      <div className="item-list">{result.results.map((hit, index) => <article className="item-row" key={`${hit.kind}:${hit.id}`}>
         <div><strong>{names[hit.kind]} · {hit.title}{hit.preferred ? ' · bewusst vorgemerkt' : ''}</strong>
           <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt || '(kein Auszug)'}</p>
           <small style={{ overflowWrap: 'anywhere' }}>Quelle: {hit.source}
@@ -314,7 +353,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
           <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
-          {localChatAction(hit)}
+          {localChatAction(hit, result.results.findIndex((item) => item.kind === 'document'
+            && item.document_id === hit.document_id) === index)}
           {draftActions(hit)}
         </div>
       </article>)}</div>

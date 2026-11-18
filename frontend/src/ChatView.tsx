@@ -12,8 +12,8 @@ type Props = {
   onPrepareTask: (title: string) => void; onPrepareResearch: (question: string) => void;
   requestedChatSource?: { chatId: string; messageId: string } | null;
   onSourceOpened?: () => void;
-  requestedAttachment?: File | null;
-  onAttachmentPrepared?: () => void;
+  requestedAttachments?: File[] | null;
+  onAttachmentsPrepared?: () => void;
 };
 type FollowUpSuggestion = { kind: 'task' | 'research'; text: string };
 type MemoryChoice = { id: string; status: string; decided_text: string | null;
@@ -63,7 +63,7 @@ function CompactionState({ snapshot, onRemove }: { snapshot: ChatCompaction;
 export default function ChatView({ configured, setupMessage, provider, draft, setDraft,
   focusOnCapture = 0, selectedSkillId, setSelectedSkillId, onSkills,
   onPrepareTask, onPrepareResearch, requestedChatSource, onSourceOpened,
-  requestedAttachment, onAttachmentPrepared }: Props) {
+  requestedAttachments, onAttachmentsPrepared }: Props) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [searchText, setSearchText] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
@@ -306,12 +306,12 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     speechAbort.current?.abort(); audioRef.current?.pause(); }, []);
   useEffect(() => { if (focusOnCapture && configured) composerRef.current?.focus(); }, [focusOnCapture, configured]);
   useEffect(() => {
-    if (!requestedAttachment) return;
-    setActive(null); setSelectedFiles([requestedAttachment]); setError('');
+    if (!requestedAttachments?.length) return;
+    setActive(null); setSelectedFiles(requestedAttachments); setError('');
     setCompactions([]); setSelectedAnswerId('');
-    onAttachmentPrepared?.();
+    onAttachmentsPrepared?.();
     window.requestAnimationFrame(() => composerRef.current?.focus());
-  }, [requestedAttachment]);
+  }, [requestedAttachments]);
 
   const create = async () => {
     if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || compactionBusy) return;
