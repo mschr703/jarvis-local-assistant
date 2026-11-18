@@ -1055,9 +1055,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/search/semantic")
     async def semantic_search_view(q: str = Query(min_length=2, max_length=160),
-                                   folder_id: str | None = Query(default=None, max_length=64)):
+                                   folder_id: str | None = Query(default=None, max_length=64),
+                                   document_id: str | None = Query(default=None, max_length=64)):
         try:
-            return await run_in_threadpool(semantic_search, db, q, config.ollama_url, folder_id)
+            return await run_in_threadpool(semantic_search, db, q, config.ollama_url,
+                                           folder_id, document_id)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except SemanticSearchError as exc:

@@ -8,15 +8,16 @@ type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: str
   source_status?: 'current' | 'updated' };
 type Preference = { document_id: string; path: string; saved_sha256: string;
   current_sha256: string | null; status: 'current' | 'updated' | 'needs_reindex' | 'unavailable' };
-type Document = { id: string; path: string; status: string; excluded: number };
+type Document = { id: string; path: string; folder_id: string; status: string; excluded: number };
 type Folder = { id: string; path: string };
 type SearchResult = { query: string; results: Hit[]; limited: boolean;
   counts: Record<Kind, number>; preferences: Preference[];
   stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
-type SemanticHit = Hit & { similarity: number };
+type SemanticHit = Omit<Hit, 'score'> & { similarity: number };
 type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   checked_passages: number; checked_memories: number; checked_projects: number;
   counts: Record<Kind, number>; model: string;
+  document_scope: { id: string; title: string } | null;
   changed_sources: { kind: 'memory' | 'project'; id: string }[];
   stale_sources: SearchResult['stale_sources'] };
 const names: Record<Kind, string> = {
@@ -30,10 +31,12 @@ export default function UnifiedSearchView() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderId, setFolderId] = useState('');
+  const [documentId, setDocumentId] = useState('');
   const [preferredId, setPreferredId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { void api<Folder[]>('/folders').then(setFolders).catch(() => setFolders([])); }, []);
+  useEffect(() => { void api<Document[]>('/documents').then(setDocuments).catch(() => setDocuments([])); }, []);
   const load = async (value: string) => {
     const [found, available] = await Promise.all([
       api<SearchResult>(`/search/unified?q=${encodeURIComponent(value)}`),
@@ -52,7 +55,12 @@ export default function UnifiedSearchView() {
   const runSemantic = async () => {
     if (busy || query.trim().length < 2) return;
     setBusy(true); setError(''); setResult(null); setSemantic(null);
-    try { setSemantic(await api<SemanticResult>(`/search/semantic?q=${encodeURIComponent(query.trim())}${folderId ? `&folder_id=${encodeURIComponent(folderId)}` : ''}`)); }
+    try {
+      const params = new URLSearchParams({ q: query.trim() });
+      if (folderId) params.set('folder_id', folderId);
+      if (documentId) params.set('document_id', documentId);
+      setSemantic(await api<SemanticResult>(`/search/semantic?${params}`));
+    }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
@@ -70,6 +78,8 @@ export default function UnifiedSearchView() {
   const candidates = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && !result?.preferences.some((item) => item.document_id === document.id)
     && !result?.stale_sources.some((item) => item.document_id === document.id));
+  const deepDocuments = documents.filter((document) => document.status === 'indexed'
+    && !document.excluded && (!folderId || document.folder_id === folderId));
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
     <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für dieselben Quellarten. Nach Dateiänderungen den Ordner unter „Dokumente“ neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
@@ -82,20 +92,32 @@ export default function UnifiedSearchView() {
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
         <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId} disabled={busy}
-          onChange={(event) => setFolderId(event.target.value)}>
+          onChange={(event) => { setFolderId(event.target.value); setDocumentId(''); }}>
           <option value="">Alle freigegebenen Ordner</option>
           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select></label>
+      <label>Einzelnes Dokument tief durchsuchen
+        <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId} disabled={busy}
+          onChange={(event) => setDocumentId(event.target.value)}>
+          <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
+          {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
+        </select></label>
       <button type="button" disabled={busy || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
-      <small>Benötigt lokal <code>embeddinggemma:300m</code>. Prüft höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände; die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
+      <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
+        'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
+        'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
-      <p>{semantic.counts.document} Dokumente · {semantic.counts.memory} Erinnerungen · {semantic.counts.project} Arbeitsstände</p>
+      <p>{semantic.document_scope ?
+        `${semantic.counts.document} Fundstellen aus ${semantic.document_scope.title}` :
+        `${semantic.counts.document} Dokumente · ${semantic.counts.memory} Erinnerungen · ${semantic.counts.project} Arbeitsstände`}</p>
       <small>Geprüft: {semantic.checked_passages} Dokumentfundstellen, {semantic.checked_memories} Erinnerungen, {semantic.checked_projects} Arbeitsstände · Modell {semantic.model}</small>
-      {semantic.limited && <p className="notice">Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.</p>}
+      {semantic.limited && <p className="notice">{semantic.document_scope ?
+        'Die tiefe Suche prüft höchstens die ersten 100 Fundstellen dieser Datei und zeigt höchstens fünf Treffer.' :
+        'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.'}</p>}
       {semantic.stale_sources.length > 0 && <div className="notice" role="status">
         <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Unter „Dokumente“ neu indexieren.</p>
         <ul>{semantic.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path}</li>)}</ul>
@@ -104,7 +126,7 @@ export default function UnifiedSearchView() {
         {semantic.changed_sources.length} gespeicherte Erinnerungen oder Arbeitsstände wurden während der Suche geändert oder entfernt und daher nicht als Treffer angezeigt. Erneut suchen.
       </p>}
       {!semantic.results.length && <p>Keine aktuellen Quellen gefunden.</p>}
-      <div className="item-list">{semantic.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}`}>
+      <div className="item-list">{semantic.results.map((hit) => <article className="item-row" key={`${hit.kind}:${hit.id}:${hit.passage_id ?? ''}`}>
         <div><strong>{names[hit.kind]} · {hit.title}</strong>
           <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt}</p>
           <small style={{ overflowWrap: 'anywhere' }}>Quelle: {hit.source}

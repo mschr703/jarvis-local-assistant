@@ -15,6 +15,7 @@ MAX_DOCUMENTS = 30
 MAX_MEMORIES = 30
 MAX_PROJECTS = 20
 MAX_RESULTS = 10
+MAX_DEEP_RESULTS = 5
 
 
 class SemanticSearchError(RuntimeError):
@@ -77,7 +78,8 @@ def _record_is_current(db: Database, kind: str, row: dict) -> bool:
     return current is not None and all(current[field] == row[field] for field in fields)
 
 
-def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None) -> dict:
+def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None,
+           document_id: str | None = None) -> dict:
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
@@ -85,6 +87,15 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
         if folder_id and not connection.execute(
                 "SELECT 1 FROM folders WHERE id=?", (folder_id,)).fetchone():
             raise ValueError("Freigabeordner nicht gefunden")
+        scope = None
+        if document_id:
+            document = connection.execute("""SELECT id,path,folder_id,status,excluded
+                FROM documents WHERE id=?""", (document_id,)).fetchone()
+            if document is None or document["excluded"] or document["status"] != "indexed":
+                raise ValueError("Indexiertes Dokument nicht gefunden")
+            if folder_id and document["folder_id"] != folder_id:
+                raise ValueError("Dokument gehört nicht zum gewählten Ordner")
+            scope = {"id": document["id"], "title": Path(document["path"]).name}
         rows = [dict(row) for row in connection.execute("""
             WITH ranked AS (
                 SELECT p.id AS passage_id,p.document_id,p.page,p.text,d.path,d.policy,
@@ -94,14 +105,16 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                 JOIN folders f ON f.id=d.folder_id
                 WHERE d.excluded=0 AND d.status='indexed'
                   AND (? IS NULL OR d.folder_id=?)
+                  AND (? IS NULL OR d.id=?)
             )
-            SELECT * FROM ranked WHERE part<=3 ORDER BY path,part,passage_id LIMIT ?
-        """, (folder_id, folder_id, MAX_PASSAGES + 1))]
-        memories = [dict(row) for row in connection.execute("""
+            SELECT * FROM ranked WHERE part<=? ORDER BY path,part,passage_id LIMIT ?
+        """, (folder_id, folder_id, document_id, document_id,
+              MAX_PASSAGES + 1 if document_id else 3, MAX_PASSAGES + 1))]
+        memories = [] if document_id else [dict(row) for row in connection.execute("""
             SELECT id,text,source_ref,policy,updated_at FROM memories
             ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_MEMORIES + 1,))]
-        projects = [dict(row) for row in connection.execute("""
+        projects = [] if document_id else [dict(row) for row in connection.execute("""
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECTS + 1,))]
@@ -112,20 +125,20 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     stale = []
     checked_passages = 0
     for row in rows[:MAX_PASSAGES]:
-        document_id = row["document_id"]
-        if document_id not in freshness:
+        candidate_id = row["document_id"]
+        if candidate_id not in freshness:
             if len(freshness) == MAX_DOCUMENTS:
                 limited = True
                 break
-            freshness[document_id] = DocumentStore.source_is_current(row)
-            if not freshness[document_id]:
+            freshness[candidate_id] = DocumentStore.source_is_current(row)
+            if not freshness[candidate_id]:
                 if len(stale) < MAX_RESULTS:
-                    stale.append({"document_id": document_id, "path": row["path"],
+                    stale.append({"document_id": candidate_id, "path": row["path"],
                                   "index_sha256": row["sha256"], "status": "needs_reindex"})
                 else:
                     limited = True
         checked_passages += 1
-        if freshness[document_id]:
+        if freshness[candidate_id]:
             fresh.append(row)
     memories = memories[:MAX_MEMORIES]
     projects = projects[:MAX_PROJECTS]
@@ -136,7 +149,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
         return {"query": cleaned, "results": [], "stale_sources": stale,
                 "changed_sources": [], "limited": limited, "model": MODEL,
                 "checked_passages": checked_passages, "checked_memories": 0,
-                "checked_projects": 0,
+                "checked_projects": 0, "document_scope": scope,
                 "counts": {kind: 0 for kind in ("document", "memory", "project")}}
     vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus])
     question = vectors[0]
@@ -152,10 +165,11 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     seen_documents: set[str] = set()
     counts = {kind: 0 for kind in ("document", "memory", "project")}
     for score, kind, row, body in ranked_results:
-        if counts[kind] == MAX_RESULTS:
+        result_limit = MAX_DEEP_RESULTS if document_id and kind == "document" else MAX_RESULTS
+        if counts[kind] == result_limit:
             continue
         if kind == "document":
-            if row["document_id"] in seen_documents:
+            if not document_id and row["document_id"] in seen_documents:
                 continue
             seen_documents.add(row["document_id"])
             if not DocumentStore.source_is_current(row):
@@ -169,7 +183,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             selected.append({"kind": kind, "id": row["document_id"],
                              "document_id": row["document_id"],
                              "title": Path(row["path"]).name, "source": row["path"],
-                             "excerpt": body[:500], "passage_id": row["passage_id"],
+                             "excerpt": body[:1200 if document_id else 500],
+                             "passage_id": row["passage_id"],
                              "page": row["page"], "sha256": row["sha256"],
                              "policy": row["policy"], "source_status": "current",
                              "similarity": round(score, 3)})
@@ -190,11 +205,12 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                                  "excerpt": _project_body(row)[:500],
                                  "version": row["version"], "similarity": round(score, 3)})
         counts[kind] += 1
-    limited = (limited or len({row["document_id"] for _, kind, row, _ in ranked_results
-                              if kind == "document"}) > MAX_RESULTS
+    limited = (limited or (len(fresh) > MAX_DEEP_RESULTS if document_id else
+                          len({row["document_id"] for _, kind, row, _ in ranked_results
+                               if kind == "document"}) > MAX_RESULTS)
                or len(memories) > MAX_RESULTS or len(projects) > MAX_RESULTS)
     return {"query": cleaned, "results": selected, "stale_sources": stale,
             "changed_sources": changed_sources, "limited": limited,
             "model": MODEL, "checked_passages": checked_passages,
             "checked_memories": len(memories), "checked_projects": len(projects),
-            "counts": counts}
+            "counts": counts, "document_scope": scope}
