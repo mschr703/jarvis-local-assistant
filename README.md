@@ -32,6 +32,8 @@ pnpm --dir frontend install --frozen-lockfile
 ollama pull qwen3:4b-instruct
 ```
 
+Nach der Einrichtung prüft `python scripts/doctor.py` lesend die benötigten Programme, lokalen Abhängigkeiten, `.env`, Ollama-Dienst und Modelle. Fehlende Pflichtvoraussetzungen ergeben Exitcode 1 und einen konkreten Hinweis; das optionale Suchmodell wird getrennt markiert. Der Check zeigt keine Schlüssel oder privaten Konfigurationswerte und lädt nichts herunter. Für automatisierte lokale Prüfungen gibt `python scripts/doctor.py --json` dieselben Ergebnisse als JSON aus. Bei bewusst gewähltem OpenRouter prüft der Helfer keine Cloud-Zugangsdaten oder Kosten.
+
 Falls `uv` als eigenständiges Programm statt als Python-Modul installiert wurde, in den Befehlen dieser Anleitung `python -m uv` durch `uv` ersetzen.
 
 Falls `ollama` im aktuellen Terminal noch nicht im `PATH` liegt, ein neues Terminal öffnen oder `& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" pull qwen3:4b-instruct` ausführen. Ollama muss laufen; die Windows-App startet üblicherweise einen lokalen Dienst auf `127.0.0.1:11434`. In `.env` bleibt `JARVIS_PROVIDER=ollama` und es wird kein API-Key benötigt.
