@@ -162,6 +162,15 @@ def main() -> None:
                         page.get_by_role("button", name="Neues Gespräch").evaluate(
                             "button => { button.click(); button.click(); }")
                         expect(page.locator(".chat-list-item")).to_have_count(1)
+                        page.get_by_role("button", name="Umbenennen").click()
+                        page.get_by_label("Gesprächstitel").fill("Projekt Orion Gespräch")
+                        page.get_by_role("button", name="Speichern", exact=True).click()
+                        expect(page.locator(".chat-list-item")).to_contain_text("Projekt Orion Gespräch")
+                        page.reload(wait_until="domcontentloaded")
+                        page.get_by_role("heading", name="Jarvis ist bereit.").wait_for(timeout=90_000)
+                        page.get_by_role("button", name="Chat", exact=True).click()
+                        expect(page.locator(".chat-list-item")).to_contain_text("Projekt Orion Gespräch")
+                        page.get_by_role("button", name="Projekt Orion Gespräch").click()
                         rejected_message = "A" * 3700
                         page.get_by_label("Nachricht").fill(rejected_message)
                         page.get_by_role("button", name="Senden", exact=True).click()
@@ -864,6 +873,7 @@ def main() -> None:
                                           "memory_double_click": "single_entry",
                                           "memory_search": "matches_and_empty",
                                           "new_chat_double_click": "once", "chat": "persisted",
+                                          "chat_rename": "persisted_after_reload",
                                           "dst_second_occurrence": "visible_once",
                                           "task_mobile_width": "fits",
                                           "all_mobile_sections": "fit",

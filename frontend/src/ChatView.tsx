@@ -65,6 +65,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [appliedSearch, setAppliedSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [managingChat, setManagingChat] = useState('');
+  const [renamingChat, setRenamingChat] = useState('');
+  const [renameText, setRenameText] = useState('');
   const [deleteCandidate, setDeleteCandidate] = useState<ChatSummary | null>(null);
   const [suggestions, setSuggestions] = useState<FollowUpSuggestion[]>([]);
   const [suggestionMessageId, setSuggestionMessageId] = useState('');
@@ -318,6 +320,19 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     } catch (cause) { setError((cause as Error).message); }
     finally { setManagingChat(''); }
   };
+  const renameChat = async (id: string) => {
+    if (busy || navigating || managingChat || !renameText.trim() || renameText.trim().length > 80) return;
+    setManagingChat(id); setError('');
+    try {
+      const updated = await api<ChatSummary>(`/chats/${id}/title`, {
+        method: 'PATCH', body: JSON.stringify({ title: renameText.trim() }),
+      });
+      setActive((current) => current?.id === id ? { ...current, title: updated.title } : current);
+      setRenamingChat(''); setRenameText('');
+      await refreshList();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setManagingChat(''); }
+  };
   const deleteChat = async () => {
     if (!deleteCandidate || busy || navigating || managingChat || controller.current || suggestionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id === deleteCandidate.id) stopVoiceSession();
@@ -483,12 +498,20 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         <label><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)}
           disabled={busy || !!managingChat} /> Archiv anzeigen</label></div>
       {chats.map((item) => <div className="chat-list-item" key={item.id}>
-        <button className={active?.id === item.id ? 'selected' : ''} disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
-          onClick={() => void load(item.id)}>{item.title}</button>
+        {renamingChat === item.id ? <div className="chat-rename"><input aria-label="Gesprächstitel" value={renameText} maxLength={80}
+          onChange={(event) => setRenameText(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void renameChat(item.id); } }}
+          disabled={!!managingChat} /><div className="item-actions"><button onClick={() => void renameChat(item.id)}
+            disabled={!!managingChat || !renameText.trim()}>Speichern</button><button onClick={() => { setRenamingChat(''); setRenameText(''); }}
+            disabled={!!managingChat}>Abbrechen</button></div></div> :
+          <button className={active?.id === item.id ? 'selected' : ''} disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
+            onClick={() => void load(item.id)}>{item.title}</button>}
         {item.match_preview && <small>Treffer: {item.match_preview}</small>}
-        <div className="item-actions"><button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
+        <div className="item-actions"><button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
+          onClick={() => { setDeleteCandidate(null); setRenamingChat(item.id); setRenameText(item.title); }}>Umbenennen</button>
+          <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
           onClick={() => void changeArchive(item)}>{item.archived_at ? 'Wiederherstellen' : 'Archivieren'}</button>
-          <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
+          <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
             onClick={() => setDeleteCandidate(item)}>Löschen</button></div>
       </div>)}
       {chats.length === 0 && <small>Keine {showArchived ? 'archivierten ' : ''}Gespräche gefunden.</small>}

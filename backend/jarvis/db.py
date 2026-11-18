@@ -1026,6 +1026,17 @@ class Database:
         self.log("chat_archived" if archived else "chat_restored", f"Chat {chat_id}")
         return self.get_chat(chat_id)
 
+    def rename_chat(self, chat_id: str, title: str) -> dict | None:
+        title = title.strip()
+        if not title or len(title) > 80 or any(ord(char) < 32 or ord(char) == 127 for char in title):
+            raise ValueError("Gesprächstext muss 1–80 Zeichen ohne Steuerzeichen enthalten")
+        with self.connect() as db:
+            changed = db.execute("UPDATE chats SET title=? WHERE id=?", (title, chat_id)).rowcount
+        if not changed:
+            return None
+        self.log("chat_renamed", f"Chat {chat_id}")
+        return self.get_chat(chat_id)
+
     def delete_chat(self, chat_id: str) -> bool:
         with self.connect() as db:
             removed = db.execute("DELETE FROM chats WHERE id=?", (chat_id,)).rowcount == 1

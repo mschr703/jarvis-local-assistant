@@ -94,6 +94,41 @@ def test_search_archive_restore_delete_and_backup(tmp_path):
             assert db.execute("SELECT COUNT(*) FROM chat_answer_evaluations").fetchone()[0] == 1
 
 
+def test_manual_chat_title_is_separate_persistent_and_searchable(tmp_path):
+    root = tmp_path / "data"
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=root,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = token(client)
+        first = client.post("/chats", headers=headers).json()["id"]
+        second = client.post("/chats", headers=headers).json()["id"]
+        assert client.patch(f"/chats/{first}/title", json={"title": "Studium"}).status_code == 403
+        renamed = client.patch(f"/chats/{first}/title", headers=headers,
+                               json={"title": "  Studium WiSe  "})
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "Studium WiSe"
+        db = Database(root / "jarvis.db")
+        db.add_message(first, "user", "Erste Nachricht")
+        assert db.get_chat(first)["title"] == "Studium WiSe"
+        assert [item["id"] for item in client.get("/chats?q=wise").json()] == [first]
+        assert db.get_chat(second)["title"] == "Neues Gespräch"
+        assert client.patch(f"/chats/{first}/archive", headers=headers,
+                            json={"archived": True}).status_code == 200
+        assert client.patch(f"/chats/{first}/title", headers=headers,
+                            json={"title": "Archiv Studium"}).status_code == 200
+        assert client.get("/chats?archived=true&q=archiv").json()[0]["id"] == first
+        for invalid in (" ", "Zeile\nZwei", "a" * 81):
+            assert client.patch(f"/chats/{first}/title", headers=headers,
+                                json={"title": invalid}).status_code == 422
+        assert client.patch("/chats/missing/title", headers=headers,
+                            json={"title": "Fehlt"}).status_code == 404
+
+    backup = tmp_path / "renamed.jarvis"
+    create_backup(root, backup)
+    restored = tmp_path / "restored"
+    restore_backup(backup, restored)
+    assert Database(restored / "jarvis.db").get_chat(first)["title"] == "Archiv Studium"
+
+
 def test_schema37_migration_keeps_chat_messages(tmp_path):
     path = tmp_path / "jarvis.db"
     db = Database(path)

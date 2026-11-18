@@ -159,6 +159,12 @@ class ChatArchiveInput(BaseModel):
     archived: bool
 
 
+class ChatTitleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+
+
 class ChatSuggestionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1399,6 +1405,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if chat_id in active_chat_streams:
             raise HTTPException(409, "Laufendes Gespräch zuerst beenden")
         item = db.set_chat_archived(chat_id, data.archived)
+        if item is None:
+            raise HTTPException(404, "Gespräch nicht gefunden")
+        return item
+
+    @app.patch("/chats/{chat_id}/title")
+    async def chat_rename(chat_id: str, data: ChatTitleInput):
+        try:
+            item = db.rename_chat(chat_id, data.title)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         if item is None:
             raise HTTPException(404, "Gespräch nicht gefunden")
         return item
