@@ -50,11 +50,11 @@ def main() -> None:
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded",
                                   timeout=120000)
                         page.get_by_role("button", name="Suche", exact=True).click()
-                        folder_select = page.get_by_label("Ordner für sinngemäße Suche")
+                        folder_select = page.get_by_label("Dokumentordner für sinngemäße Suche")
                         expect(folder_select.locator("option")).to_have_count(2, timeout=30000)
                         folder_select.select_option(folder["id"])
                         page.get_by_label("Gemeinsame Suche").fill("Wo liegt mein Mietvertrag?")
-                        page.get_by_role("button", name="Sinngemäß in Dokumenten suchen").click()
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
                         results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
                         expect(results.locator("article").first).to_contain_text("Wohnung.md", timeout=120000)
                         expect(results.locator("article").first).to_contain_text("SHA-256")
@@ -63,11 +63,11 @@ def main() -> None:
 
                         agreement.write_text("Die neue Vereinbarung liegt im blauen Ordner.",
                                              encoding="utf-8")
-                        page.get_by_role("button", name="Sinngemäß in Dokumenten suchen").click()
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
                         expect(results.get_by_text("Originaldateien und Index weichen ab")).to_be_visible(timeout=120000)
                         assert "roten Ordner" not in results.inner_text()
                         assert docs.index_folder(folder["id"])["indexed"] == 1
-                        page.get_by_role("button", name="Sinngemäß in Dokumenten suchen").click()
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
                         expect(results.get_by_text("blauen Ordner", exact=False)).to_be_visible(timeout=120000)
                         assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:

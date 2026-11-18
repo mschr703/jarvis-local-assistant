@@ -1,4 +1,4 @@
-"""Optional, bounded local semantic retrieval from freshly verified document passages."""
+"""Optional, bounded local semantic retrieval from current personal sources."""
 
 import math
 from pathlib import Path
@@ -12,6 +12,8 @@ from jarvis.documents import DocumentStore
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
 MAX_DOCUMENTS = 30
+MAX_MEMORIES = 30
+MAX_PROJECTS = 20
 MAX_RESULTS = 10
 
 
@@ -54,6 +56,27 @@ def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
     return vectors
 
 
+def _project_body(row: dict) -> str:
+    return " · ".join(part for part in
+                      (row["confirmed"], row["open_questions"], row["next_step"]) if part)
+
+
+def _record_is_current(db: Database, kind: str, row: dict) -> bool:
+    """Do not show a saved memory or work state changed during the Ollama call."""
+    if kind == "memory":
+        fields = ("id", "text", "source_ref", "policy", "updated_at")
+        table = "memories"
+    else:
+        fields = ("id", "project", "confirmed", "open_questions", "next_step",
+                  "version", "updated_at")
+        table = "work_states"
+    with db.connect() as connection:
+        current = connection.execute(
+            f"SELECT {','.join(fields)} FROM {table} WHERE id=?", (row["id"],)
+        ).fetchone()
+    return current is not None and all(current[field] == row[field] for field in fields)
+
+
 def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None) -> dict:
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
@@ -74,7 +97,16 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             )
             SELECT * FROM ranked WHERE part<=3 ORDER BY path,part,passage_id LIMIT ?
         """, (folder_id, folder_id, MAX_PASSAGES + 1))]
-    limited = len(rows) > MAX_PASSAGES
+        memories = [dict(row) for row in connection.execute("""
+            SELECT id,text,source_ref,policy,updated_at FROM memories
+            ORDER BY updated_at DESC,id DESC LIMIT ?
+        """, (MAX_MEMORIES + 1,))]
+        projects = [dict(row) for row in connection.execute("""
+            SELECT id,project,confirmed,open_questions,next_step,version,updated_at
+            FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
+        """, (MAX_PROJECTS + 1,))]
+    limited = (len(rows) > MAX_PASSAGES or len(memories) > MAX_MEMORIES
+               or len(projects) > MAX_PROJECTS)
     freshness: dict[str, bool] = {}
     fresh = []
     stale = []
@@ -95,39 +127,74 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
         checked_passages += 1
         if freshness[document_id]:
             fresh.append(row)
-    if not fresh:
+    memories = memories[:MAX_MEMORIES]
+    projects = projects[:MAX_PROJECTS]
+    corpus = ([('document', row, row["text"]) for row in fresh]
+              + [('memory', row, f'{row["source_ref"]}\n{row["text"]}') for row in memories]
+              + [('project', row, f'{row["project"]}\n{_project_body(row)}') for row in projects])
+    if not corpus:
         return {"query": cleaned, "results": [], "stale_sources": stale,
-                "limited": limited, "model": MODEL, "checked_passages": checked_passages}
-    vectors = embed_texts(ollama_url, [cleaned] + [row["text"][:1200] for row in fresh])
+                "changed_sources": [], "limited": limited, "model": MODEL,
+                "checked_passages": checked_passages, "checked_memories": 0,
+                "checked_projects": 0,
+                "counts": {kind: 0 for kind in ("document", "memory", "project")}}
+    vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus])
     question = vectors[0]
     ranked_results = []
-    for row, vector in zip(fresh, vectors[1:], strict=True):
+    for (kind, row, body), vector in zip(corpus, vectors[1:], strict=True):
         dot = sum(a * b for a, b in zip(question, vector, strict=True))
         norm = math.sqrt(sum(x * x for x in question) * sum(x * x for x in vector))
-        ranked_results.append((dot / norm, row))
-    ranked_results.sort(key=lambda item: (-item[0], item[1]["path"], item[1]["passage_id"]))
+        ranked_results.append((dot / norm, kind, row, body))
+    ranked_results.sort(key=lambda item: (-item[0], item[1], item[2]["id"]
+                       if item[1] != "document" else item[2]["path"]))
     selected = []
-    seen: set[str] = set()
-    for score, row in ranked_results:
-        if row["document_id"] in seen:
+    changed_sources = []
+    seen_documents: set[str] = set()
+    counts = {kind: 0 for kind in ("document", "memory", "project")}
+    for score, kind, row, body in ranked_results:
+        if counts[kind] == MAX_RESULTS:
             continue
-        seen.add(row["document_id"])
-        if not DocumentStore.source_is_current(row):
-            if not any(item["document_id"] == row["document_id"] for item in stale):
-                if len(stale) < MAX_RESULTS:
-                    stale.append({"document_id": row["document_id"], "path": row["path"],
-                                  "index_sha256": row["sha256"], "status": "needs_reindex"})
+        if kind == "document":
+            if row["document_id"] in seen_documents:
+                continue
+            seen_documents.add(row["document_id"])
+            if not DocumentStore.source_is_current(row):
+                if not any(item["document_id"] == row["document_id"] for item in stale):
+                    if len(stale) < MAX_RESULTS:
+                        stale.append({"document_id": row["document_id"], "path": row["path"],
+                                      "index_sha256": row["sha256"], "status": "needs_reindex"})
+                    else:
+                        limited = True
+                continue
+            selected.append({"kind": kind, "id": row["document_id"],
+                             "document_id": row["document_id"],
+                             "title": Path(row["path"]).name, "source": row["path"],
+                             "excerpt": body[:500], "passage_id": row["passage_id"],
+                             "page": row["page"], "sha256": row["sha256"],
+                             "policy": row["policy"], "source_status": "current",
+                             "similarity": round(score, 3)})
+        else:
+            if not _record_is_current(db, kind, row):
+                if len(changed_sources) < MAX_RESULTS:
+                    changed_sources.append({"kind": kind, "id": row["id"]})
                 else:
                     limited = True
-            continue
-        selected.append({"kind": "document", "id": row["document_id"],
-                         "document_id": row["document_id"], "title": Path(row["path"]).name,
-                         "source": row["path"], "excerpt": row["text"][:500],
-                         "passage_id": row["passage_id"], "page": row["page"],
-                         "sha256": row["sha256"], "policy": row["policy"],
-                         "source_status": "current", "similarity": round(score, 3)})
-        if len(selected) == MAX_RESULTS:
-            break
+                continue
+            if kind == "memory":
+                selected.append({"kind": kind, "id": row["id"], "title": "Erinnerung",
+                                 "source": row["source_ref"], "excerpt": row["text"][:500],
+                                 "policy": row["policy"], "similarity": round(score, 3)})
+            else:
+                selected.append({"kind": kind, "id": row["id"], "title": row["project"],
+                                 "source": f'Arbeitsstand v{row["version"]}',
+                                 "excerpt": _project_body(row)[:500],
+                                 "version": row["version"], "similarity": round(score, 3)})
+        counts[kind] += 1
+    limited = (limited or len({row["document_id"] for _, kind, row, _ in ranked_results
+                              if kind == "document"}) > MAX_RESULTS
+               or len(memories) > MAX_RESULTS or len(projects) > MAX_RESULTS)
     return {"query": cleaned, "results": selected, "stale_sources": stale,
-            "limited": limited or len({row["document_id"] for _, row in ranked_results}) > MAX_RESULTS,
-            "model": MODEL, "checked_passages": checked_passages}
+            "changed_sources": changed_sources, "limited": limited,
+            "model": MODEL, "checked_passages": checked_passages,
+            "checked_memories": len(memories), "checked_projects": len(projects),
+            "counts": counts}
