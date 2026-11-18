@@ -819,7 +819,8 @@ def main() -> None:
                             "button => { button.click(); button.click(); }")
                         page.get_by_text("save_note · succeeded", exact=True).wait_for(timeout=30_000)
                         assert len(list((data_dir / "notes").glob("*.txt"))) == 1
-                        expect(page.locator(".notice:visible")).not_to_contain_text("Freigabe passt nicht")
+                        expect(page.locator(".notice:visible").filter(
+                            has_text="Freigabe passt nicht")).to_have_count(0)
                         index_events = page.get_by_role("heading", name="Protokoll").locator("..").get_by_text(
                             "folder_indexed", exact=True)
                         expect(index_events).to_have_count(3)  # Doppelklick plus zwei bewusste Neuindexierungen.
