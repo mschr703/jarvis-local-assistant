@@ -113,6 +113,7 @@ from jarvis.research import (
 from jarvis.scheduled_backup import ScheduledBackup
 from jarvis.security import LocalApiBoundary
 from jarvis.semantic_search import SemanticSearchError
+from jarvis.semantic_search import model_status as semantic_model_status
 from jarvis.semantic_search import search as semantic_search
 from jarvis.skills import SkillConflict, SkillStore, skill_prompt
 from jarvis.source_preferences import SourcePreferences
@@ -1052,6 +1053,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await run_in_threadpool(unified_search, db, q)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/search/semantic/status")
+    async def semantic_search_status():
+        return await run_in_threadpool(semantic_model_status, config.ollama_url)
 
     @app.get("/search/semantic")
     async def semantic_search_view(q: str = Query(min_length=2, max_length=160),

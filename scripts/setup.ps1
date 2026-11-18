@@ -1,5 +1,6 @@
 ﻿param(
-    [switch]$SkipModelDownload
+    [switch]$SkipModelDownload,
+    [switch]$IncludeSearchModel
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,6 +71,9 @@ try {
 
     if (-not $SkipModelDownload) {
         Run-Checked 'Lokales Modell laden' { & ollama pull qwen3:4b-instruct }
+        if ($IncludeSearchModel) {
+            Run-Checked 'Lokales Suchmodell laden' { & ollama pull embeddinggemma:300m }
+        }
     }
 
     Write-Host "`nEinrichtung abgeschlossen. Start: python scripts/dev.py"

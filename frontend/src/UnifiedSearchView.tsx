@@ -21,6 +21,8 @@ type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   preferences: { document_id: string; path: string; status: Preference['status'] }[];
   changed_sources: { kind: 'memory' | 'project'; id: string }[];
   stale_sources: SearchResult['stale_sources'] };
+type SemanticStatus = { model: string; status: 'ready' | 'model_missing' | 'service_unavailable' | 'invalid_response' | 'invalid_url';
+  service_available: boolean; ready: boolean; message: string };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
 };
@@ -29,6 +31,8 @@ export default function UnifiedSearchView() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
+  const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
+  const [statusChecking, setStatusChecking] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderId, setFolderId] = useState('');
@@ -38,6 +42,14 @@ export default function UnifiedSearchView() {
   const [error, setError] = useState('');
   useEffect(() => { void api<Folder[]>('/folders').then(setFolders).catch(() => setFolders([])); }, []);
   useEffect(() => { void api<Document[]>('/documents').then(setDocuments).catch(() => setDocuments([])); }, []);
+  const refreshModelStatus = async () => {
+    setStatusChecking(true);
+    try { setModelStatus(await api<SemanticStatus>('/search/semantic/status')); }
+    catch { setModelStatus({ model: 'embeddinggemma:300m', status: 'service_unavailable',
+      service_available: false, ready: false, message: 'Modellstatus nicht erreichbar. Backend und Ollama prüfen.' }); }
+    finally { setStatusChecking(false); }
+  };
+  useEffect(() => { void refreshModelStatus(); }, []);
   const load = async (value: string) => {
     const [found, available] = await Promise.all([
       api<SearchResult>(`/search/unified?q=${encodeURIComponent(value)}`),
@@ -105,6 +117,10 @@ export default function UnifiedSearchView() {
         </select></label>
       <button type="button" disabled={busy || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
+      <div role="status"><small>{statusChecking ? 'Prüfe lokales Suchmodell…' :
+        modelStatus?.message || 'Modellstatus noch nicht geprüft.'}</small>
+        <button type="button" disabled={statusChecking} onClick={() => void refreshModelStatus()}>
+          {statusChecking ? 'Prüfe…' : 'Modellstatus prüfen'}</button></div>
       <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
         'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
         'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>

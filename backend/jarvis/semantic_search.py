@@ -29,6 +29,44 @@ class SemanticSearchError(RuntimeError):
     """The local embedding service is unavailable or returned invalid vectors."""
 
 
+def _local_ollama_url(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        return (parsed.scheme == "http" and parsed.hostname in
+                {"localhost", "127.0.0.1", "::1"} and parsed.port is not None
+                and not parsed.username and not parsed.password
+                and parsed.path in {"", "/"} and not parsed.query and not parsed.fragment)
+    except ValueError:
+        return False
+
+
+def model_status(url: str) -> dict:
+    """Check only local Ollama's model list; do not invoke a model."""
+    base = {"model": MODEL, "service_available": False, "ready": False}
+    if not _local_ollama_url(url):
+        return {**base, "status": "invalid_url",
+                "message": "Für die Suche ist eine lokale Ollama-Adresse nötig."}
+    try:
+        with httpx.Client(timeout=3, trust_env=False) as client:
+            response = client.get(f"{url.rstrip('/')}/api/tags")
+            response.raise_for_status()
+    except httpx.HTTPError:
+        return {**base, "status": "service_unavailable",
+                "message": "Ollama starten und Modellstatus erneut prüfen."}
+    try:
+        models = response.json()["models"]
+    except (ValueError, KeyError, TypeError):
+        models = None
+    if not isinstance(models, list) or any(not isinstance(item, dict) for item in models):
+        return {**base, "service_available": True, "status": "invalid_response",
+                "message": "Ollama lieferte keine gültige Modellliste."}
+    if any(item.get("name") == MODEL for item in models):
+        return {**base, "service_available": True, "ready": True,
+                "status": "ready", "message": "Lokales Suchmodell bereit."}
+    return {**base, "service_available": True, "status": "model_missing",
+            "message": f"Suchmodell fehlt. 'ollama pull {MODEL}' ausführen."}
+
+
 def _model_digest(client: httpx.Client, url: str) -> str | None:
     """Only a verified installed model digest permits reuse of RAM embeddings."""
     try:
@@ -74,15 +112,7 @@ def _embed_request(client: httpx.Client, url: str, texts: list[str]) -> list[lis
 
 
 def embed_texts(url: str, texts: list[str]) -> list[list[float]]:
-    try:
-        parsed = urlsplit(url)
-        local = (parsed.scheme == "http" and parsed.hostname in
-                 {"localhost", "127.0.0.1", "::1"} and parsed.port is not None
-                 and not parsed.username and not parsed.password
-                 and parsed.path in {"", "/"} and not parsed.query and not parsed.fragment)
-    except ValueError:
-        local = False
-    if not local:
+    if not _local_ollama_url(url):
         raise SemanticSearchError("Semantische Suche benötigt eine lokale Ollama-Adresse")
     with httpx.Client(timeout=120, trust_env=False) as client:
         digest = _model_digest(client, url) if len(texts) > 1 else None
