@@ -4,6 +4,8 @@ Stand: 18.11.2026. Der veröffentlichte Stand liegt auf [GitHub](https://github.
 
 ## In Arbeit (lokal, noch nicht veröffentlicht)
 
+- A06d: Ein einzelnes geöffnetes Gespräch lässt sich bewusst als lokale Markdown-Datei exportieren; der Export enthält den Wortlaut und Anhang-Metadaten, aber keine Anhangdateien. Der Titel wird als Markdown-Text neutralisiert und Nachrichten werden mit einer ausreichend langen Codebegrenzung wortgetreu gehalten. Zwei gezielte Exporttests, insgesamt 25 Frontendtests und der Produktionsbuild bestanden. Der vollständige Edge/Ollama-MVP-Klicktest bestand einschließlich echtem Markdown-Download und Inhaltsprüfung. Push und CI folgen.
+
 - A06c: Die lokale Gesprächssuche liefert zur Fundstellenvorschau auch die ID der passenden Nachricht; „Treffer anzeigen“ öffnet das richtige Gespräch und springt direkt zu dieser Nachricht. Ein Unicode-Versatz im Vorschautext bei Casefold-Erweiterungen wurde mit einem eigenen Regressionstest korrigiert. Die vollständige Backend-Regression bestand mit 606 Tests und drei erwarteten Windows-Skips; nach einer kleinen Verfeinerung der Unicode-Positionszuordnung bestanden fünf gezielte Archivetests und Ruff erneut. Frontend-Build und 23 Frontendtests bestanden. Der vollständige Edge/Ollama-MVP-Klicktest bestand einschließlich gezieltem Scroll-Aufruf. Sein erster Lauf stoppte an einer Test-Aufräumzeile nach dem erfolgreichen Sprung; nach Korrektur bestand der gesamte Lauf. Push und CI folgen.
 
 

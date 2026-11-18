@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { api, streamChat, transcribeAudio, uploadChatAttachment, type Chat, type ChatAttachment,
   type ChatCompaction, type ChatSummary, type Message } from './api';
+import { downloadChatMarkdown } from './chatExport';
 import type { Skill } from './SkillView';
 
 type Props = {
@@ -537,6 +538,9 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     </div>
     <section className="chat-main">
       <h2>Chat</h2>
+      {active && <div className="item-actions"><button type="button" disabled={busy || navigating}
+        onClick={() => downloadChatMarkdown(active)}>Gespräch als Markdown herunterladen</button>
+        <small>Mit Nachrichten und Anhangnamen, ohne Anhangdateien.</small></div>}
       {active?.archived_at && <p className="notice">Dieses Gespräch ist archiviert. Zum Fortsetzen zuerst in der Archivliste wiederherstellen.</p>}
       {!configured && <div className="notice">{setupMessage}. Der Chat ist bis dahin deaktiviert.</div>}
       <div className="messages" aria-live="polite">

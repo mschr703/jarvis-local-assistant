@@ -193,6 +193,8 @@ Soll das Modell in einem Mehrschrittplan eine Webseite lesen, die **vollständig
 
 Mit „Umbenennen“ erhält ein Gespräch einen eigenen Titel von bis zu 80 Zeichen. Auch archivierte Gespräche lassen sich umbenennen und unter dem neuen Titel finden. Bei einem Treffer im Nachrichteninhalt führt „Treffer anzeigen“ direkt zur gefundenen Nachricht.
 
+Im geöffneten Gespräch lädt „Gespräch als Markdown herunterladen“ den aktuellen Nachrichtenverlauf als lokale Datei herunter. Der Export enthält die Nachrichtentexte und bei Anhängen Dateiname und SHA-256, aber keine Anhangdateien. Vor einer Weitergabe persönliche Inhalte prüfen.
+
 Unter „Chat“ lassen sich bestehende Gespräche mit „Gespräche suchen“ nach Titel oder Nachrichteninhalt durchsuchen. Die Suche bleibt lokal und startet keinen Modellaufruf. „Archivieren“ blendet ein Gespräch aus der normalen Liste aus; „Archiv anzeigen“ zeigt archivierte Gespräche, die sich dort wiederherstellen und danach fortsetzen lassen. Ein archiviertes Gespräch kann gelesen, aber erst nach Wiederherstellung weitergeführt werden. „Löschen“ öffnet eine zweite, ausdrückliche Bestätigung; „Dauerhaft löschen“ entfernt nur das ausgewählte Gespräch samt Nachrichten und Antwortbewertungen. Andere Gespräche bleiben erhalten. Die Nutzungsübersicht bewahrt Kosten-/Tokenbelege als lokale Abrechnung ohne Nachrichtentext. Archivstatus und Gespräche sind im normalen Jarvis-Backup enthalten; ältere Backup-Archive bewahren ihren damaligen Stand.
 
 ### Nächste Schritte aus einer Chatantwort vorbereiten

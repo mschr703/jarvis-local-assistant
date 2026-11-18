@@ -259,6 +259,13 @@ def main() -> None:
                         expect(page.locator(".message.user")).to_contain_text("kurzen deutschen")
                         page.evaluate("() => { Element.prototype.scrollIntoView = window.__chatScrollOriginal; }")
                         page.get_by_role("button", name="Alle", exact=True).click()
+                        with page.expect_download() as chat_export_info:
+                            page.get_by_role("button", name="Gespräch als Markdown herunterladen").click()
+                        chat_export = chat_export_info.value
+                        assert chat_export.suggested_filename.startswith("gespraech-")
+                        chat_markdown = Path(chat_export.path()).read_text(encoding="utf-8")
+                        assert "Antworte mit einem kurzen deutschen Satz." in chat_markdown
+                        assert "keine Anhangdateien" in chat_markdown
                         page.get_by_role("button", name="Antwort bewerten").click()
                         page.get_by_label("Erfolg der Antwort").select_option("partial")
                         page.get_by_label("Quellenlage der Antwort").select_option("not_applicable")
@@ -891,6 +898,7 @@ def main() -> None:
                                           "new_chat_double_click": "once", "chat": "persisted",
                                           "chat_rename": "persisted_after_reload",
                                           "chat_search_jump": "matched_message",
+                                          "chat_export": "markdown_downloaded",
                                           "dst_second_occurrence": "visible_once",
                                           "task_mobile_width": "fits",
                                           "all_mobile_sections": "fit",
