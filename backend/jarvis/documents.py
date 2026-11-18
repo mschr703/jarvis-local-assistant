@@ -269,6 +269,51 @@ class DocumentStore:
         with self._scan_lock:
             return self._index_folder(folder_id)
 
+    def index_document(self, document_id: str) -> dict:
+        """Refresh only an existing document inside its unchanged grant."""
+        with self._scan_lock, self.mutation_lock:
+            item = self.get_document(document_id)
+            if item is None:
+                raise LookupError("Dokument nicht gefunden")
+            if item["excluded"]:
+                raise ValueError("Ausgeschlossenes Dokument zuerst wieder einbeziehen")
+            folder = self.get_folder(item["folder_id"])
+            if folder is None:
+                raise LookupError("Freigabeordner nicht mehr vorhanden")
+            root = self.granted_root(folder)
+            path = Path(item["path"])
+            if path.suffix.lower() not in SUPPORTED or not path.is_relative_to(root):
+                raise ValueError("Dokument liegt nicht im freigegebenen Ordner")
+            if path.is_symlink() or path.is_junction():
+                raise ValueError("Dokumentpfad wurde umgeleitet")
+            parent = path.parent.resolve(strict=True)
+            if parent != path.parent or not parent.is_relative_to(root):
+                raise ValueError("Dokumentordner wurde umgeleitet")
+            if not path.exists():
+                with self.db.connect() as db:
+                    db.execute("DELETE FROM documents WHERE id=? AND path=?",
+                               (document_id, str(path)))
+                self.db.log("document_removed", f"Dokument {document_id} fehlt im Original")
+                return {"document_id": document_id, "outcome": "removed", "document": None}
+            if path.resolve(strict=True) != path or not path.is_file():
+                raise ValueError("Dokumentpfad wurde umgeleitet")
+            try:
+                changed = self._index_file(folder, path)
+                outcome = "indexed" if changed else "unchanged"
+            except OcrPending:
+                outcome = "ocr_pending"
+            except (OSError, ValueError, PdfReadError) as exc:
+                reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
+                          or (path.suffix.lower() == ".docx" and isinstance(exc, ValueError))
+                          else type(exc).__name__)
+                self._record_error(folder, path, reason)
+                outcome = "error"
+            current = self.get_document(document_id)
+            if outcome == "unchanged" and current and current["status"] == "ocr_pending":
+                outcome = "ocr_pending"
+            self.db.log("document_indexed", f"Dokument {document_id}: {outcome}")
+            return {"document_id": document_id, "outcome": outcome, "document": current}
+
     def _index_folder(self, folder_id: str) -> dict:
         folder = self.get_folder(folder_id)
         if folder is None:
@@ -352,6 +397,8 @@ class DocumentStore:
         return counts
 
     def _index_file(self, folder: dict, path: Path) -> bool:
+        if path.is_symlink() or path.is_junction() or path.resolve(strict=True) != path:
+            raise ValueError("Datei wurde während der Indexierung umgeleitet")
         stat = path.stat()
         if stat.st_size > MAX_FILE_BYTES:
             raise ValueError("Datei zu groß")
@@ -364,6 +411,8 @@ class DocumentStore:
         if len(data) > MAX_FILE_BYTES:
             raise ValueError("Datei zu groß")
         after = path.stat()
+        if path.is_symlink() or path.is_junction() or path.resolve(strict=True) != path:
+            raise ValueError("Datei wurde während der Indexierung umgeleitet")
         if ((stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_dev)
                 != (after.st_size, after.st_mtime_ns, after.st_ino, after.st_dev)):
             raise ValueError("Datei wurde während der Indexierung geändert")
