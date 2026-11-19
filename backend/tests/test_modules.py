@@ -485,6 +485,39 @@ def test_module_upgrade_failure_restores_previous_package(tmp_path, monkeypatch)
         assert client.get("/modules/sample_notes/entries").status_code == 200
 
 
+def test_pending_module_write_blocks_code_replacement(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    entry = source / "module.py"
+    entry.write_text(SAMPLE_MODULE.replace('effect="read")]', 'effect="write")]'),
+                     encoding="utf-8")
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        run = client.post("/runs", headers=headers, json={
+            "tool_name": "sample_notes__list_entries", "args": {}}).json()
+        assert run["status"] == "waiting_approval"
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        manifest = source / "jarvis-module.json"
+        changed = json.loads(manifest.read_text(encoding="utf-8"))
+        changed["version"] = "0.2.0"
+        manifest.write_text(json.dumps(changed), encoding="utf-8")
+        refused = client.post("/modules/sample_notes/upgrade", headers=headers,
+                              json={"path": str(source)})
+        assert refused.status_code == 422
+        assert "Offene Modulwerkzeugläufe" in refused.text
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 422
+        denied = client.post(f"/runs/{run['id']}/decision", headers=headers,
+                             json={"args_hash": run["args_hash"], "approved": False})
+        assert denied.status_code == 200
+        assert client.post("/modules/sample_notes/upgrade", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+
+
 def test_module_upgrade_migrates_existing_data_once(tmp_path):
     source_root = tmp_path / "source"
     install_fixture(source_root)

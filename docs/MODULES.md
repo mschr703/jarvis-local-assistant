@@ -54,6 +54,10 @@ Aktivierung; scheitert sie, wird ihre Datenbanktransaktion zurückgenommen und d
 Modul bleibt inaktiv. Nach einem UI-Code-Update den Browser neu laden.
 Liegen im installierten Paketordner unerwartete Dateien, stoppt das Update und
 belässt diese Dateien dort. Erst nach eigener Prüfung entfernen oder verschieben.
+Wartet ein Modulwerkzeug noch auf Freigabe oder läuft es, sind Update und Entfernen
+gesperrt. Den Auftrag unter **Aktivität** erst abschließen, ablehnen oder abbrechen;
+danach erneut aktualisieren. So gilt eine frühere Freigabe nicht für ausgetauschten
+Modulcode.
 
 Liegt das private Repository schon neben dem Hauptordner, den `git clone`-Schritt
 überspringen. `module_package.py` liest wie Jarvis den Datenordner aus `.env`

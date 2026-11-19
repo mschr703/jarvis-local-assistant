@@ -118,6 +118,15 @@ def checked_installed_directory(target: Path, root: Path) -> None:
         raise ValueError("Modulordner ist unvollständig")
 
 
+def unfinished_module_run(db: Database, module_id: str) -> bool:
+    prefix = f"{module_id}__"
+    with db.connect() as connection:
+        return connection.execute(
+            "SELECT 1 FROM runs WHERE substr(tool_name,1,?)=? "
+            "AND status IN ('queued','running','waiting_approval') LIMIT 1",
+            (len(prefix), prefix)).fetchone() is not None
+
+
 def install_package(source: Path, data_dir: Path, db: Database | None = None) -> str:
     manifest = checked_package(source)
     source_digest = package_digest(source)
@@ -155,6 +164,8 @@ def upgrade_package(source: Path, data_dir: Path, db: Database,
         raise ValueError("Installierter Ordner kann nicht seine eigene Updatequelle sein")
     if db.get_settings().get(f"module.{manifest.id}.enabled") == "1":
         raise ValueError("Modul vor dem Update deaktivieren")
+    if unfinished_module_run(db, manifest.id):
+        raise ValueError("Offene Modulwerkzeugläufe zuerst abschließen oder ablehnen")
     checked_package(target)
     stored_version = db.get_settings().get(f"module.{manifest.id}.data_version", "0")
     try:
@@ -201,6 +212,8 @@ def remove_package(module_id: str, data_dir: Path, db: Database) -> str:
     checked_installed_directory(target, root)
     if db.get_settings().get(f"module.{module_id}.enabled") == "1":
         raise ValueError("Modul zuerst in Jarvis deaktivieren")
+    if unfinished_module_run(db, module_id):
+        raise ValueError("Offene Modulwerkzeugläufe zuerst abschließen oder ablehnen")
     shutil.rmtree(target)
     return module_id
 
