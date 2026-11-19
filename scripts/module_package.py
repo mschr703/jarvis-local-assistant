@@ -9,7 +9,14 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from jarvis.config import load_settings
 from jarvis.db import Database
-from jarvis.modules import install_package, remove_package, upgrade_package
+from jarvis.modules import (
+    check_package_syntax,
+    checked_package,
+    install_package,
+    package_digest,
+    remove_package,
+    upgrade_package,
+)
 
 
 def install(source: Path, data_dir: Path) -> str:
@@ -26,12 +33,20 @@ def upgrade(source: Path, data_dir: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["install", "upgrade", "remove"])
+    parser.add_argument("action", choices=["verify", "install", "upgrade", "remove"])
     parser.add_argument("module", help="Source directory for install/upgrade, module ID for remove")
     parser.add_argument("--data-dir", type=Path, default=load_settings().data_dir)
     args = parser.parse_args()
     data_dir = args.data_dir.expanduser().resolve()
-    if args.action == "install":
+    if args.action == "verify":
+        source = Path(args.module).expanduser()
+        manifest = checked_package(source)
+        digest = package_digest(source)
+        check_package_syntax(source)
+        if package_digest(source) != digest:
+            raise ValueError("Modulquelle hat sich während der Syntaxprüfung geändert")
+        print(f"Verified {manifest.id} {manifest.version} (SHA-256 {digest})")
+    elif args.action == "install":
         print(f"Installed {install(Path(args.module).expanduser(), data_dir)}")
     elif args.action == "upgrade":
         print(f"Upgraded {upgrade(Path(args.module).expanduser(), data_dir)} (data retained)")

@@ -18,6 +18,9 @@ In PowerShell **im Jarvis-Hauptordner**:
 
 ```powershell
 git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-private-modules
+.\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\day_notes
+.\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\reading_list
+.\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\evening_plans
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\reading_list
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\evening_plans
@@ -38,6 +41,13 @@ Alternativ lässt sich das Paket direkt in **Module → Lokales Paket installier
 hinzufügen. Dort den absoluten Pfad zum Ordner `day_notes` eintragen. Mit PowerShell
 liefert `(Resolve-Path ..\jarvis-private-modules\day_notes).Path` den passenden Wert.
 Die Oberfläche zeigt die deklarierte Version, Datenversion und Abhängigkeiten an.
+`verify` liest Manifest und Quelltext, prüft Dateigrenzen, Python-Syntax und
+JavaScript-Modulsyntax und zeigt die SHA-256-Prüfsumme. Der Befehl installiert oder
+startet nichts. Installation und Update wiederholen diese Prüfung vor dem Kopieren;
+eine in der Zwischenzeit veränderte Quelle wird abgewiesen. Node.js ist für die
+JavaScript-Prüfung nötig und gehört zur normalen Jarvis-Einrichtung. Syntaxprüfung
+beweist keine Sicherheit: Paketcode läuft nach Aktivierung weiterhin mit den
+Jarvis-Rechten und muss aus einer vertrauten Quelle stammen.
 
 ## Paket aktualisieren
 

@@ -7,11 +7,13 @@ keeps its tables in jarvis.db so the normal database backup includes its data.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -101,6 +103,28 @@ def checked_package(source: Path) -> ModuleManifest:
     return parsed
 
 
+def check_package_syntax(source: Path) -> None:
+    """Reject broken package source without importing Python or running JavaScript."""
+    source = Path(source)
+    try:
+        ast.parse((source / "module.py").read_text(encoding="utf-8"), filename="module.py")
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise ValueError("Ungültige Python-Syntax oder Kodierung im Modul") from exc
+    try:
+        ui = (source / "ui.js").read_bytes()
+        ui.decode("utf-8")
+        check = subprocess.run(["node", "--input-type=module", "--check"], input=ui,
+                               capture_output=True, check=False, timeout=8)
+    except UnicodeError as exc:
+        raise ValueError("Moduloberfläche muss UTF-8 sein") from exc
+    except FileNotFoundError as exc:
+        raise ValueError("Node.js fehlt für die Modul-Syntaxprüfung") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("JavaScript-Syntaxprüfung hat das Zeitlimit überschritten") from exc
+    if check.returncode != 0:
+        raise ValueError("Ungültige JavaScript-Syntax im Modul")
+
+
 def package_digest(source: Path) -> str:
     digest = hashlib.sha256()
     for name, limit in (("jarvis-module.json", 16_384), ("module.py", 2_000_000),
@@ -150,6 +174,9 @@ def unfinished_module_run(db: Database, module_id: str) -> bool:
 def install_package(source: Path, data_dir: Path, db: Database | None = None) -> str:
     manifest = checked_package(source)
     source_digest = package_digest(source)
+    check_package_syntax(source)
+    if package_digest(source) != source_digest:
+        raise ValueError("Modulquelle hat sich während der Syntaxprüfung geändert")
     root = Path(data_dir) / "modules"
     if root.is_symlink() or root.is_junction():
         raise ValueError("Modulverzeichnis darf kein Link sein")
@@ -175,6 +202,10 @@ def install_package(source: Path, data_dir: Path, db: Database | None = None) ->
 def upgrade_package(source: Path, data_dir: Path, db: Database,
                     expected_id: str | None = None) -> str:
     manifest = checked_package(source)
+    source_digest = package_digest(source)
+    check_package_syntax(source)
+    if package_digest(source) != source_digest:
+        raise ValueError("Modulquelle hat sich während der Syntaxprüfung geändert")
     if expected_id is not None and manifest.id != expected_id:
         raise ValueError("Paketordner gehört zu einem anderen Modul")
     root = Path(data_dir) / "modules"
@@ -194,7 +225,6 @@ def upgrade_package(source: Path, data_dir: Path, db: Database,
         raise ValueError("Gespeicherte Modul-Datenversion ist ungültig") from exc
     if previous_version > manifest.data_version:
         raise ValueError("Modulcode ist älter als die gespeicherten Moduldaten")
-    source_digest = package_digest(source)
     nonce = uuid4().hex
     stage = root.parent / f".jarvis-module-stage-{manifest.id}-{nonce}"
     backup = root.parent / f".jarvis-module-backup-{manifest.id}-{nonce}"

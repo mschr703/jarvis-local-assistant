@@ -166,6 +166,51 @@ def test_invalid_manifest_labels_rights_and_self_dependency_fail_at_install(tmp_
                            json={"path": str(source)}).status_code == 200
 
 
+def test_package_syntax_is_checked_without_running_code_and_upgrade_keeps_data(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    entry = source / "module.py"
+    ui = source / "ui.js"
+    original_ui = ui.read_text(encoding="utf-8")
+    data_dir = tmp_path / "data"
+    checked = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[2]
+                           / "scripts" / "module_package.py"), "verify", str(source),
+                           "--data-dir", str(data_dir)], capture_output=True, text=True,
+                             check=False)
+    assert checked.returncode == 0 and "Verified sample_notes" in checked.stdout
+    assert not (data_dir / "jarvis.db").exists()
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        entry.write_text("def broken(:\n", encoding="utf-8")
+        response = client.post("/modules/install", headers=headers,
+                               json={"path": str(source)})
+        assert response.status_code == 422 and "Python-Syntax" in response.text
+        assert client.get("/modules").json() == []
+        entry.write_text(SAMPLE_MODULE, encoding="utf-8")
+        ui.write_text("export const broken = ;", encoding="utf-8")
+        response = client.post("/modules/install", headers=headers,
+                               json={"path": str(source)})
+        assert response.status_code == 422 and "JavaScript-Syntax" in response.text
+        assert client.get("/modules").json() == []
+        ui.write_text(original_ui, encoding="utf-8")
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "kept"}).status_code == 200
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        installed = data_dir / "modules" / "sample_notes"
+        before = package_digest(installed)
+        ui.write_text("export const broken = ;", encoding="utf-8")
+        response = client.post("/modules/sample_notes/upgrade", headers=headers,
+                               json={"path": str(source)})
+        assert response.status_code == 422 and "JavaScript-Syntax" in response.text
+        assert package_digest(installed) == before
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").json() == ["kept"]
+
+
 def test_module_bad_package_does_not_break_core_and_dependency_is_enforced(tmp_path):
     data_dir = tmp_path / "data"
     install_fixture(data_dir, "requires_other", ["other_module"])
