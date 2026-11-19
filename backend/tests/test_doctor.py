@@ -30,10 +30,18 @@ def test_report_checks_required_and_optional_models_without_secret(tmp_path, mon
     monkeypatch.setattr(doctor.platform, "system", lambda: "Windows")
     monkeypatch.setattr(doctor, "program_check", lambda *_args: True)
     monkeypatch.setattr(doctor, "installed_models", lambda _url: {doctor.CHAT_MODEL})
+    monkeypatch.setattr(doctor, "ocr_languages", lambda: {"deu", "eng"})
     report = doctor.build_report(tmp_path)
     assert report["ok"] is True
+    assert any(item["name"] == "Scan-PDF-OCR" and item["ok"] and not item["required"]
+               for item in report["checks"])
     search = next(item for item in report["checks"] if item["name"] == "Suchmodell")
     assert search["required"] is False and search["ok"] is False
+    monkeypatch.setattr(doctor, "ocr_languages", lambda: None)
+    missing_ocr = doctor.build_report(tmp_path)
+    assert missing_ocr["ok"] is True
+    assert any(item["name"] == "Scan-PDF-OCR" and not item["ok"]
+               for item in missing_ocr["checks"])
     assert secret not in json.dumps(report)
     (tmp_path / ".env").write_text(
         f"JARVIS_PROVIDER=ollama\nJARVIS_OLLAMA_URL=http://{secret}@remote.example:11434\n",

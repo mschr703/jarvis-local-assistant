@@ -20,6 +20,7 @@ dependencies = [
   "pillow==13.0.0",
   "graphifyy==0.9.101",
   "agent-reach @ https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip",
+  "pypdfium2>=5,<6",
 ]
 
 [dependency-groups]

@@ -190,10 +190,11 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         document: { error?: string } | null }>(`/documents/${encodeURIComponent(id)}/index`,
         { method: 'POST' });
       setSelectedDraftSources([]); setSelectedChatDocuments([]);
+      if (semantic) setSemantic(null);
+      if (result) setResult(null);
       setDocuments(await api<Document[]>('/documents'));
       if (updated.outcome === 'removed' && documentId === id) setDocumentId('');
       if (result) await load(result.query);
-      if (semantic) setSemantic(null);
       setNotice(updated.outcome === 'indexed' ? `Datei neu indexiert. ${semantic ? 'Sinngemäße Suche bei Bedarf erneut starten.' : 'Aktuelle Treffer erneut prüfen.'}`
         : updated.outcome === 'removed' ? 'Original fehlt; der alte Suchindexeintrag wurde entfernt.'
           : updated.outcome === 'ocr_pending' ? 'Datei hat keine lesbare Textschicht; OCR steht aus.'

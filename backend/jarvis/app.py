@@ -1906,6 +1906,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (ValueError, OSError) as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @app.post("/documents/{document_id}/ocr")
+    async def document_ocr(document_id: str):
+        try:
+            return await run_in_threadpool(documents.ocr_document, document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @app.get("/documents/{document_id}/freshness")
     async def document_freshness(document_id: str):
         try:

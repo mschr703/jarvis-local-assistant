@@ -15,6 +15,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from jarvis.db import Database, utcnow
+from jarvis.ocr import OcrUnavailable, scan_pdf
 
 SUPPORTED = {".txt", ".md", ".markdown", ".pdf", ".docx"}
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -25,6 +26,10 @@ MAX_PDF_PAGES = 200
 MAX_DOCX_ENTRIES = 1000
 MAX_DOCX_XML_BYTES = 8 * 1024 * 1024
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+class SourceChanged(ValueError):
+    """The original changed while a deliberately selected OCR operation ran."""
 
 
 def fts_query(text: str) -> str:
@@ -271,12 +276,22 @@ class DocumentStore:
 
     def index_document(self, document_id: str) -> dict:
         """Refresh only an existing document inside its unchanged grant."""
+        return self._index_document(document_id)
+
+    def ocr_document(self, document_id: str) -> dict:
+        """Read one pending scanned PDF with local OCR after explicit selection."""
+        return self._index_document(document_id, ocr=True)
+
+    def _index_document(self, document_id: str, *, ocr: bool = False) -> dict:
         with self._scan_lock, self.mutation_lock:
             item = self.get_document(document_id)
             if item is None:
                 raise LookupError("Dokument nicht gefunden")
             if item["excluded"]:
                 raise ValueError("Ausgeschlossenes Dokument zuerst wieder einbeziehen")
+            if ocr and (Path(item["path"]).suffix.lower() != ".pdf"
+                        or item["status"] != "ocr_pending" or not item["sha256"]):
+                raise ValueError("OCR ist nur für ein PDF mit ausstehender Texterkennung möglich")
             folder = self.get_folder(item["folder_id"])
             if folder is None:
                 raise LookupError("Freigabeordner nicht mehr vorhanden")
@@ -298,12 +313,16 @@ class DocumentStore:
             if path.resolve(strict=True) != path or not path.is_file():
                 raise ValueError("Dokumentpfad wurde umgeleitet")
             try:
-                changed = self._index_file(folder, path)
+                changed = self._index_file(folder, path, ocr=ocr,
+                                           expected_sha=item["sha256"] if ocr else None)
                 outcome = "indexed" if changed else "unchanged"
             except OcrPending:
                 outcome = "ocr_pending"
+            except (SourceChanged, OcrUnavailable):
+                raise
             except (OSError, ValueError, PdfReadError) as exc:
                 reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
+                          or (ocr and isinstance(exc, ValueError))
                           or (path.suffix.lower() == ".docx" and isinstance(exc, ValueError))
                           else type(exc).__name__)
                 self._record_error(folder, path, reason)
@@ -396,7 +415,8 @@ class DocumentStore:
         self.db.log("folder_indexed", f"Ordner {folder_id}: {counts}")
         return counts
 
-    def _index_file(self, folder: dict, path: Path) -> bool:
+    def _index_file(self, folder: dict, path: Path, *, ocr: bool = False,
+                    expected_sha: str | None = None) -> bool:
         if path.is_symlink() or path.is_junction() or path.resolve(strict=True) != path:
             raise ValueError("Datei wurde während der Indexierung umgeleitet")
         stat = path.stat()
@@ -417,7 +437,9 @@ class DocumentStore:
                 != (after.st_size, after.st_mtime_ns, after.st_ino, after.st_dev)):
             raise ValueError("Datei wurde während der Indexierung geändert")
         digest = hashlib.sha256(data).hexdigest()
-        if (prior and prior["status"] in {"indexed", "ocr_pending"}
+        if expected_sha is not None and digest != expected_sha:
+            raise SourceChanged("Original geändert. Datei zuerst neu indexieren.")
+        if (not ocr and prior and prior["status"] in {"indexed", "ocr_pending"}
                 and prior["sha256"] == digest and prior["policy"] == folder["policy"]):
             return False
         segments: list[tuple[int | None, str]] = []
@@ -434,6 +456,9 @@ class DocumentStore:
                 if extracted > MAX_EXTRACTED_CHARS:
                     raise ValueError("PDF-Text ist zu lang")
                 segments.extend((number, piece) for piece in chunks(content))
+            if ocr and not segments:
+                for number, content in scan_pdf(data):
+                    segments.extend((number, piece) for piece in chunks(content))
         elif path.suffix.lower() == ".docx":
             segments.extend((None, piece) for piece in chunks(extract_docx(data)))
         else:
@@ -442,6 +467,17 @@ class DocumentStore:
                 raise ValueError("Dokumenttext ist zu lang")
             segments.extend((None, piece) for piece in chunks(content))
         status = "indexed" if segments else "ocr_pending"
+        if ocr:
+            if path.is_symlink() or path.is_junction() or path.resolve(strict=True) != path:
+                raise SourceChanged("Original wurde während der OCR umgeleitet")
+            current_stat = path.stat()
+            if ((stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_dev)
+                    != (current_stat.st_size, current_stat.st_mtime_ns,
+                        current_stat.st_ino, current_stat.st_dev)):
+                raise SourceChanged("Original wurde während der OCR geändert")
+            with path.open("rb") as stream:
+                if hashlib.sha256(stream.read(MAX_FILE_BYTES + 1)).hexdigest() != digest:
+                    raise SourceChanged("Original wurde während der OCR geändert")
         now = utcnow()
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")

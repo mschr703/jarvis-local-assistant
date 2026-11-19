@@ -66,6 +66,23 @@ def program_check(name: str, minimum: tuple[int, ...] | None = None) -> bool:
     return bool(version and (minimum is None or version >= minimum))
 
 
+def ocr_languages() -> set[str] | None:
+    binary = shutil.which("tesseract")
+    if not binary:
+        common = Path("C:/Program Files/Tesseract-OCR/tesseract.exe")
+        binary = str(common) if common.is_file() else None
+    if not binary:
+        return None
+    try:
+        result = subprocess.run([binary, "--list-langs"], capture_output=True, text=True,
+                                timeout=5, check=False)
+        if result.returncode != 0:
+            return None
+        return set((result.stdout + "\n" + result.stderr).splitlines())
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, newurl):
         raise HTTPError(request.full_url, code, "Weiterleitung gesperrt", headers, response)
@@ -114,6 +131,9 @@ def build_report(root: Path = ROOT) -> dict:
         True, "Fehlt: .\\scripts\\setup.ps1 ausführen.")
     add(".env", (root / ".env").is_file(), True,
         "Fehlt: .\\scripts\\setup.ps1 ausführen.")
+    languages = ocr_languages()
+    add("Scan-PDF-OCR", languages is not None and {"deu", "eng"} <= languages, False,
+        "Optional: Tesseract installieren und .\\scripts\\setup_ocr_languages.ps1 ausführen.")
 
     try:
         settings = settings_from_env(root)

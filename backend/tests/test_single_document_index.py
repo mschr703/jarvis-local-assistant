@@ -120,7 +120,7 @@ def test_ocr_pending_remains_explicit_after_single_refresh(tmp_path):
 
 def test_single_file_parser_error_does_not_change_neighbor(tmp_path, monkeypatch):
     _, docs, indexed, first, second = sample(tmp_path)
-    def broken_index(_folder, _path):
+    def broken_index(_folder, _path, **_options):
         raise ValueError("Synthetisch defektes Format")
 
     monkeypatch.setattr(docs, "_index_file", broken_index)
