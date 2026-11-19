@@ -322,9 +322,13 @@ class ContactStore:
         return next(plan for plan in self.get(contact_id)["plans"] if plan["id"] == plan_id)
 
     def recipient_snapshot(self, contact_id: str, expected_version: int,
-                           note_ids: list[str]) -> dict:
+                           note_ids: list[str], event_refs: list[tuple[str, int]] | None = None) -> dict:
+        event_refs = event_refs or []
         if expected_version < 1 or len(note_ids) > 5 or len(set(note_ids)) != len(note_ids):
             raise ValueError("Empfänger braucht eine aktuelle Version und höchstens fünf verschiedene Notizen")
+        if (len(event_refs) > 3 or len({event_id for event_id, _ in event_refs}) != len(event_refs)
+                or any(not event_id or version < 1 for event_id, version in event_refs)):
+            raise ValueError("Höchstens drei verschiedene bestätigte Ereignisse auswählen")
         with self.db.connect() as db:
             db.execute("BEGIN")
             person = db.execute("SELECT id,name,context,relationship,version FROM contacts "
@@ -343,7 +347,20 @@ class ContactStore:
                 notes.append(dict(note))
             if sum(len(note["content"]) for note in notes) > 3000:
                 raise ValueError("Ausgewählte Kontaktnotizen überschreiten 3000 Zeichen")
-            return {**dict(person), "notes": notes}
+            events = []
+            for event_id, version in event_refs:
+                event = db.execute("""SELECT e.id,e.date_local,e.title,e.location,
+                    e.description,e.version,l.source_kind,l.created_at AS linked_at
+                    FROM memory_event_contacts l JOIN memory_events e ON e.id=l.event_id
+                    WHERE l.contact_id=? AND l.event_id=?""",
+                    (contact_id, event_id)).fetchone()
+                if event is None:
+                    raise ValueError("Ausgewähltes Ereignis ist diesem Kontakt nicht mehr zugeordnet")
+                if event["version"] != version:
+                    raise ContactConflict("Ereignis wurde inzwischen geändert; erneut auswählen")
+                events.append({**dict(event), "description": event["description"][:1000],
+                               "description_truncated": len(event["description"]) > 1000})
+            return {**dict(person), "notes": notes, "events": events}
 
     @staticmethod
     def _missing_or_conflict(db: sqlite3.Connection, table: str, identifier: str,

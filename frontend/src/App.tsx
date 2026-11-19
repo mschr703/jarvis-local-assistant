@@ -77,6 +77,7 @@ export default function App() {
       kind: 'email', brief: '', inputText: '', namedStyleProfile: '',
       selectedSamples: [], allowCloud: false,
       recipientContactId: '', recipientExpectedVersion: null, recipientNoteIds: [],
+      recipientEvents: [],
     wordTarget: '600', outlineText: 'Einleitung\nHauptteil\nSchluss', feedbackNote: '',
   });
   const [styleForm, setStyleForm] = useState<StyleForm>({

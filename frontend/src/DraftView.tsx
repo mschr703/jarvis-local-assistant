@@ -20,8 +20,10 @@ type WritingSignal = { id: string; label: string; excerpt: string; start: number
 type ImportableDocument = { id: string; path: string; sha256: string | null; size: number | null;
   status: string; excluded: number };
 type ContactSummary = { id: string; name: string; context: string; relationship: string; version: number };
+type RecipientEvent = { id: string; date_local: string; title: string; location: string;
+  description?: string; description_truncated?: boolean; version: number };
 type RecipientSnapshot = ContactSummary & { notes: { id: string; content: string; version: number;
-  source_kind: 'manual'; updated_at: string }[] };
+  source_kind: 'manual'; updated_at: string }[]; events?: RecipientEvent[] };
 export type StyleForm = {
   profile: Profile; profileReady: boolean; profileSaving: boolean; profileTouched: boolean;
   namedProfile: Profile; namedReady: boolean; namedSaving: boolean; namedTouched: boolean;
@@ -46,6 +48,7 @@ export type DraftComposer = {
   namedStyleProfile: '' | 'Maxim';
   recipientContactId: string; recipientExpectedVersion: number | null;
   recipientNoteIds: string[];
+  recipientEvents: { event_id: string; expected_version: number }[];
   selectedSamples: string[]; allowCloud: boolean; wordTarget: string; outlineText: string;
   feedbackNote: string;
 };
@@ -69,6 +72,7 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
   const [contacts, setContacts] = useState<ContactSummary[]>([]);
   const [recipient, setRecipient] = useState<RecipientSnapshot | null>(null);
   const [recipientError, setRecipientError] = useState('');
+  const [recipientRefresh, setRecipientRefresh] = useState(0);
   const recipientRequest = useRef(0);
   const [essayFeedback, setEssayFeedback] = useState<EssayFeedback[]>([]);
   const [generalHistory, setGeneralHistory] = useState<ProfileHistory | null>(null);
@@ -92,7 +96,7 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
     draftId: string; content: string; signals: WritingSignal[];
   } | null>(null);
   const { kind, brief, inputText, namedStyleProfile, selectedSamples, allowCloud,
-    recipientContactId, recipientExpectedVersion, recipientNoteIds,
+    recipientContactId, recipientExpectedVersion, recipientNoteIds, recipientEvents,
     wordTarget, outlineText, feedbackNote } = composer;
   const updateComposer = (change: Partial<DraftComposer>) => setComposer((current) => ({ ...current, ...change }));
   const outline = essayOutline(outlineText);
@@ -104,13 +108,16 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
     recipient.version !== recipientExpectedVersion);
   const selectedRecipientNotes = recipient?.notes.filter((note) => recipientNoteIds.includes(note.id)) || [];
   const recipientNotesTooLong = selectedRecipientNotes.reduce((size, note) => size + note.content.length, 0) > 3000;
+  const recipientEventsStale = Boolean(recipient && recipientEvents.some((chosen) =>
+    !(recipient.events || []).some((event) => event.id === chosen.event_id
+      && event.version === chosen.expected_version)));
 
   const requestBody = () => JSON.stringify({
     kind, brief, input_text: inputText, passage_ids: selectedSources.map((item) => item.passage_id),
     style_sample_ids: selectedSamples, named_style_profile: namedStyleProfile || null,
     ...(recipientContactId ? { recipient_contact_id: recipientContactId,
       recipient_expected_version: recipientExpectedVersion,
-      recipient_note_ids: recipientNoteIds } : {}),
+      recipient_note_ids: recipientNoteIds, recipient_events: recipientEvents } : {}),
     allow_cloud: allowCloud,
     ...(kind === 'essay' ? { word_target: Number(wordTarget), outline } : {}),
   });
@@ -138,7 +145,7 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
         if (request === recipientRequest.current) setRecipientError(error.message);
       });
     return () => { ++recipientRequest.current; };
-  }, [recipientContactId]);
+  }, [recipientContactId, recipientRefresh]);
 
   useEffect(() => {
     const request = ++refreshRequest.current;
@@ -534,12 +541,13 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
     <section className="card"><h3>Neuen Entwurf erstellen</h3><div className="memory-form"><select aria-label="Entwurfstyp" value={kind} onChange={(event) => {
       const nextKind = event.target.value as Draft['kind'];
       updateComposer({ kind: nextKind, ...(nextKind === 'email' || nextKind === 'text' ? {} :
-        { recipientContactId: '', recipientExpectedVersion: null, recipientNoteIds: [] }) });
+        { recipientContactId: '', recipientExpectedVersion: null, recipientNoteIds: [],
+          recipientEvents: [] }) });
     }}><option value="email">E-Mail</option><option value="text">Text</option><option value="answer">Belegte Antwort</option><option value="essay">Essay</option></select><input aria-label="Schreibauftrag" value={brief} onChange={(event) => updateComposer({ brief: event.target.value })} placeholder="Was soll der Entwurf leisten?" /><textarea aria-label="Eingefügter Kontext" value={inputText} onChange={(event) => updateComposer({ inputText: event.target.value })} placeholder="Optional: eingegangene Nachricht oder weiterer Kontext" />
       {(kind === 'email' || kind === 'text') && <div className="memory-form"><label>Empfänger aus lokalen Kontakten
         <select aria-label="Empfänger auswählen" value={recipientContactId} onChange={(event) => updateComposer({
           recipientContactId: event.target.value, recipientExpectedVersion: null,
-          recipientNoteIds: [],
+          recipientNoteIds: [], recipientEvents: [],
         })}>
           <option value="">Kein Empfänger</option>
           {recipient && !contacts.some((person) => person.id === recipient.id) &&
@@ -548,13 +556,27 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
         </select></label>
         {recipientError && <p className="notice error" role="alert">{recipientError}</p>}
         {recipientContactId && !recipient && !recipientError && <p>Empfänger wird geladen…</p>}
-        {recipient && <><p>Beziehung: {recipient.relationship || 'nicht angegeben'} · Kontaktversion {recipient.version}. Nur ausgewählte Notizen werden für diesen lokalen Entwurf verwendet.</p>
-          {recipientStale && <p className="notice" role="status">Kontakt wurde seit der Auswahl geändert. <button onClick={() => updateComposer({ recipientExpectedVersion: recipient.version, recipientNoteIds: [] })}>Aktuellen Kontaktstand übernehmen</button></p>}
+        {recipient && <><p>Beziehung: {recipient.relationship || 'nicht angegeben'} · Kontaktversion {recipient.version}. Nur ausgewählte Notizen und Ereignisse werden für diesen lokalen Entwurf verwendet.</p>
+          {recipientStale && <p className="notice" role="status">Kontakt wurde seit der Auswahl geändert. <button onClick={() => updateComposer({ recipientExpectedVersion: recipient.version, recipientNoteIds: [], recipientEvents: [] })}>Aktuellen Kontaktstand übernehmen</button></p>}
           <div className="item-list">{recipient.notes.map((note) => <label key={note.id}><input type="checkbox" checked={recipientNoteIds.includes(note.id)}
             disabled={busy || (recipientNoteIds.length >= 5 && !recipientNoteIds.includes(note.id))}
             onChange={(event) => updateComposer({ recipientNoteIds: event.target.checked
               ? [...recipientNoteIds, note.id] : recipientNoteIds.filter((id) => id !== note.id) })} /> {note.content} <small>· manuell bestätigt, v{note.version}</small></label>)}</div>
           {recipientNotesTooLong && <p className="notice error">Ausgewählte Notizen überschreiten 3000 Zeichen. Auswahl verkleinern.</p>}
+          <p>Bestätigte gemeinsame Erlebnisse einzeln für diesen Entwurf auswählen (höchstens drei):</p>
+          <div className="item-list">{(recipient.events || []).map((event) => <label key={event.id}><input type="checkbox"
+            aria-label={`Ereignis ${event.date_local} · ${event.title}${event.location ? ` · ${event.location}` : ''} für Entwurf auswählen`}
+            checked={recipientEvents.some((chosen) => chosen.event_id === event.id)}
+            disabled={busy || (recipientEvents.length >= 3 && !recipientEvents.some((chosen) => chosen.event_id === event.id))}
+            onChange={(change) => updateComposer({ recipientEvents: change.target.checked
+              ? [...recipientEvents, { event_id: event.id, expected_version: event.version }]
+              : recipientEvents.filter((chosen) => chosen.event_id !== event.id) })} />
+            {event.date_local} · {event.title}{event.location ? ` · ${event.location}` : ''}
+            <small> · manuell verknüpft, v{event.version}</small></label>)}</div>
+          {recipientEventsStale && <p className="notice" role="status">Ein ausgewähltes Ereignis wurde geändert oder gelöst. Auswahl neu laden und erneut wählen.</p>}
+          <button type="button" disabled={busy} onClick={() => { updateComposer({ recipientEvents: [] });
+            setRecipientRefresh((current) => current + 1); }}>Kontakt und Ereignisse neu laden</button>
+          <small>Je Ereignis werden höchstens 1000 Zeichen Beschreibung an lokales Ollama gegeben. Kein automatischer Modellaufruf.</small>
           {provider !== 'ollama' && <p className="notice error">Empfängerkontext ist derzeit nur mit lokalem Ollama verfügbar. Entferne den Empfänger oder wechsle lokal.</p>}
         </>}
       </div>}
@@ -572,13 +594,13 @@ export default function DraftView({ personalStyleLabel, selectedSources, onClear
             {source.page != null ? ` · Seite ${source.page}` : ''} · Fundstelle {source.passage_id}
             <small> · SHA-256 {source.sha256}</small></li>)}</ul></div>}
       {provider === 'openrouter' && <label><input type="checkbox" checked={allowCloud} onChange={(event) => updateComposer({ allowCloud: event.target.checked })} /> Schreibauftrag, eingefügten Text, aktive Entwurfsregel sowie freigegebene Quellen und Stilangaben an OpenRouter senden</label>}
-      <button className="primary" onClick={() => void generate()} disabled={busy || !configured || !brief.trim() || (provider === 'openrouter' && !allowCloud) || (kind === 'essay' && (!essayValid || provider !== 'ollama')) || (recipientContactId !== '' && (!recipient || recipientStale || recipientNotesTooLong || provider !== 'ollama' || recipientExpectedVersion === null))}>{busy ? 'Erstelle…' : lastRequest === requestBody() ? 'Weitere Variante erstellen' : 'Entwurf erstellen'}</button></div></section>
+      <button className="primary" onClick={() => void generate()} disabled={busy || !configured || !brief.trim() || (provider === 'openrouter' && !allowCloud) || (kind === 'essay' && (!essayValid || provider !== 'ollama')) || (recipientContactId !== '' && (!recipient || recipientStale || recipientNotesTooLong || recipientEventsStale || provider !== 'ollama' || recipientExpectedVersion === null))}>{busy ? 'Erstelle…' : lastRequest === requestBody() ? 'Weitere Variante erstellen' : 'Entwurf erstellen'}</button></div></section>
     <section className="card"><h3>Bestätigte Essay-Stilhinweise</h3><p className="muted">Nur diese bewusst gespeicherten Hinweise fließen in künftige lokale Essays ein. Jarvis verwendet höchstens die fünf neuesten. Löschen entfernt einen Hinweis für neue Essays; frühere Entwürfe behalten ihren Herkunftsbeleg.</p>
       <div className="item-list">{essayFeedback.map((item) => <div className="item-row" key={item.id}><span>{item.note} <small>Entwurfsversion {item.draft_version} · {new Date(item.created_at).toLocaleString('de-DE')}</small></span><button disabled={busy} onClick={() => void deleteEssayFeedback(item.id)}>Löschen</button></div>)}</div>
       {essayFeedback.length === 0 && <p className="muted">Noch keine bestätigten Hinweise.</p>}
     </section>
     <section className="card"><h3>Gespeicherte Entwürfe</h3><div className="item-list">{drafts.map((draft) => <button key={draft.id} disabled={busy} onClick={() => selectDraft(draft)}>{draft.kind}: {draft.brief} · {draft.status} · {draft.rule_version != null ? `Entwurfsregel v${draft.rule_version}` : 'alte Fassung ohne Regelbeleg'}</button>)}</div></section>
-    {active && <section className="card"><h3>Entwurf bearbeiten</h3><p>{active.uncertainty}</p>{active.recipient_snapshot && <div className="memory-form"><strong>Empfänger beim Erstellen: {active.recipient_snapshot.name} · {active.recipient_snapshot.context}</strong><small>Beziehung: {active.recipient_snapshot.relationship || 'nicht angegeben'} · Kontaktversion {active.recipient_snapshot.version}; damaliger Stand</small>{active.recipient_snapshot.notes.length > 0 && <ul>{active.recipient_snapshot.notes.map((note) => <li key={note.id}>{note.content} <small>· manuell bestätigt, v{note.version}</small></li>)}</ul>}</div>}{active.kind === 'essay' && <p><strong>Essay:</strong> Wortziel {active.word_target}; aktuell {wordCount(editedContent)} Wörter · Gliederung: {active.outline.join(' · ')}{active.status === 'partial' ? ' · Teilentwurf nach Fehler' : ''}</p>}<p>{active.rule_version != null ? `Erzeugt mit Entwurfsregel v${active.rule_version}` : 'Alte Fassung ohne Entwurfsregel-Beleg'}</p><p>{active.named_style_profile
+    {active && <section className="card"><h3>Entwurf bearbeiten</h3><p>{active.uncertainty}</p>{active.recipient_snapshot && <div className="memory-form"><strong>Empfänger beim Erstellen: {active.recipient_snapshot.name} · {active.recipient_snapshot.context}</strong><small>Beziehung: {active.recipient_snapshot.relationship || 'nicht angegeben'} · Kontaktversion {active.recipient_snapshot.version}; damaliger Stand</small>{active.recipient_snapshot.notes.length > 0 && <ul>{active.recipient_snapshot.notes.map((note) => <li key={note.id}>{note.content} <small>· manuell bestätigt, v{note.version}</small></li>)}</ul>}{(active.recipient_snapshot.events || []).length > 0 && <ul aria-label="Ausgewählte gemeinsame Erlebnisse im Entwurf">{active.recipient_snapshot.events?.map((event) => <li key={event.id}>{event.date_local} · {event.title}{event.location ? ` · ${event.location}` : ''} <small>· damalige Fassung v{event.version}{event.description_truncated ? ' · Beschreibung gekürzt' : ''}</small></li>)}</ul>}</div>}{active.kind === 'essay' && <p><strong>Essay:</strong> Wortziel {active.word_target}; aktuell {wordCount(editedContent)} Wörter · Gliederung: {active.outline.join(' · ')}{active.status === 'partial' ? ' · Teilentwurf nach Fehler' : ''}</p>}<p>{active.rule_version != null ? `Erzeugt mit Entwurfsregel v${active.rule_version}` : 'Alte Fassung ohne Entwurfsregel-Beleg'}</p><p>{active.named_style_profile
         ? `Schreibprofil ${active.named_style_profile.name === 'Maxim' ? personalStyleLabel : active.named_style_profile.name} · Fassung ${active.named_style_profile.revision}`
         : 'Allgemeines oder Textsortenprofil'}</p><textarea aria-label="Entwurfstext"  className="draft-editor" value={editedContent} onChange={(event) => setEditedContent(event.target.value)} disabled={busy || active.exports.length > 0} />
       <div className="item-actions"><button onClick={() => void checkWritingSignals()} disabled={busy || !editedContent.trim()}>Schreibmuster prüfen</button>

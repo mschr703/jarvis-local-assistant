@@ -43,6 +43,11 @@ def test_local_draft_uses_only_selected_recipient_and_freezes_snapshot(tmp_path,
                     json={"content": "Privates Geheimnis"}, headers=headers).raise_for_status()
         client.post(f"/contacts/{second['id']}/notes",
                     json={"content": "Arbeitet im Labor"}, headers=headers).raise_for_status()
+        unselected_event = client.post("/memory-events", json={
+            "date_local": "2024-07-01", "title": "Vertraulicher Ausflug"},
+            headers=headers).json()
+        client.put(f"/memory-events/{unselected_event['id']}/contacts/{first['id']}",
+                   json={"expected_version": 1}, headers=headers).raise_for_status()
         first = client.get(f"/contacts/{first['id']}").json()
         response = client.post("/drafts/generate", json={
             "kind": "email", "brief": "Lade Alex ins Museum ein",
@@ -58,11 +63,13 @@ def test_local_draft_uses_only_selected_recipient_and_freezes_snapshot(tmp_path,
         assert "München" in prompts[0] and "Freund" in prompts[0]
         assert "Privates Geheimnis" not in prompts[0]
         assert "Arbeitet im Labor" not in prompts[0]
+        assert "Vertraulicher Ausflug" not in prompts[0]
         assert first["id"] not in prompts[0]
         snapshot = draft["recipient_snapshot"]
         assert draft["named_style_profile"]["revision"] == 1
         assert snapshot["id"] == first["id"] and snapshot["version"] == first["version"]
         assert [note["id"] for note in snapshot["notes"]] == [chosen["id"]]
+        assert snapshot["events"] == []
         client.put(f"/contacts/{first['id']}/notes/{chosen['id']}",
                    json={"content": "Mag jetzt Konzerte", "expected_version": 1},
                    headers=headers).raise_for_status()
@@ -136,6 +143,86 @@ def test_recipient_stale_foreign_notes_and_cloud_are_rejected_before_model(tmp_p
         assert client.post("/drafts/generate", json=payload,
                            headers=headers).status_code == 422
         assert calls == []
+
+
+def test_selected_shared_event_is_local_versioned_and_preserved_in_backup(tmp_path, monkeypatch):
+    prompts = []
+
+    async def fake_generate(_db, _config, purpose, messages):
+        assert purpose == "draft"
+        prompts.append(messages[-1]["content"])
+        return Completion("Hallo Alex, der Ausflug war schön.", 8, 7, 0.0,
+                          "local_no_api_charge")
+
+    monkeypatch.setattr("jarvis.app.generate_text", fake_generate)
+    root = tmp_path / "data"
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=root,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        headers = client_headers(client)
+        friend = client.post("/contacts", json={"name": "Alex", "context": "Privat"},
+                             headers=headers).json()
+        colleague = client.post("/contacts", json={"name": "Alex", "context": "Arbeit"},
+                                headers=headers).json()
+        shared = client.post("/memory-events", json={"date_local": "2024-08-12",
+                              "title": "Café in Lyon", "description": "Fluss " + "x" * 1000
+                              + "TAIL_NEVER_SEND", "location": "Lyon"},
+                             headers=headers).json()
+        foreign = client.post("/memory-events", json={"date_local": "2024-08-13",
+                               "title": "Bürogespräch"}, headers=headers).json()
+        link = f"/memory-events/{shared['id']}/contacts/{friend['id']}"
+        client.put(link, json={"expected_version": 1}, headers=headers).raise_for_status()
+        client.put(f"/memory-events/{foreign['id']}/contacts/{colleague['id']}",
+                   json={"expected_version": 1}, headers=headers).raise_for_status()
+        friend = client.get(f"/contacts/{friend['id']}").json()
+        assert [event["id"] for event in friend["events"]] == [shared["id"]]
+        payload = {"kind": "text", "brief": "Erinnere an unser Treffen",
+                   "recipient_contact_id": friend["id"],
+                   "recipient_expected_version": friend["version"],
+                   "recipient_events": [{"event_id": shared["id"],
+                                         "expected_version": 2}]}
+        assert client.post("/drafts/generate", json={**payload,
+                           "recipient_contact_id": None}, headers=headers).status_code == 422
+        assert client.post("/drafts/generate", json={**payload,
+                           "recipient_events": [{"event_id": foreign["id"],
+                                                  "expected_version": 2}]},
+                           headers=headers).status_code == 422
+        assert client.post("/drafts/generate", json={**payload,
+                           "recipient_events": payload["recipient_events"] * 2},
+                           headers=headers).status_code == 422
+        assert prompts == []
+        response = client.post("/drafts/generate", json=payload, headers=headers)
+        assert response.status_code == 200, response.text
+        draft = response.json()
+        assert "Café in Lyon" in prompts[0] and "Lyon" in prompts[0]
+        assert "Bürogespräch" not in prompts[0] and "TAIL_NEVER_SEND" not in prompts[0]
+        assert friend["id"] not in prompts[0] and shared["id"] not in prompts[0]
+        snapshot = draft["recipient_snapshot"]
+        assert len(snapshot["events"]) == 1
+        assert snapshot["events"][0]["id"] == shared["id"]
+        assert snapshot["events"][0]["version"] == 2
+        assert snapshot["events"][0]["description_truncated"] is True
+        assert len(snapshot["events"][0]["description"]) == 1000
+        changed = client.put(f"/memory-events/{shared['id']}", json={
+            "date_local": "2024-08-12", "title": "Neuer Titel", "description": "Neu",
+            "location": "Lyon", "expected_version": 2}, headers=headers).json()
+        assert changed["version"] == 3
+        assert client.post("/drafts/generate", json=payload,
+                           headers=headers).status_code == 409
+        assert len(prompts) == 1
+        assert client.get(f"/drafts/{draft['id']}").json()["recipient_snapshot"] == snapshot
+        client.delete(link, params={"expected_version": 3}, headers=headers).raise_for_status()
+        assert client.post("/drafts/generate", json={**payload,
+                           "recipient_events": [{"event_id": shared["id"],
+                                                  "expected_version": 3}]},
+                           headers=headers).status_code == 422
+        assert len(prompts) == 1
+
+    archive = tmp_path / "backup.zip"
+    assert create_backup(root, archive)["schema"] == 63
+    restored = tmp_path / "restored"
+    assert restore_backup(archive, restored)["schema"] == 63
+    assert DraftStore(Database(restored / "jarvis.db"), restored).get_draft(draft["id"])[
+        "recipient_snapshot"] == snapshot
 
 
 def test_schema_57_existing_draft_migrates_to_recipient_snapshots(tmp_path):

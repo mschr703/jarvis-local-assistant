@@ -631,6 +631,13 @@ class StyleProfileSuggestionInput(BaseModel):
     confirm_own_text: bool = Field(strict=True)
 
 
+class RecipientEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(min_length=1, max_length=80)
+    expected_version: int = Field(ge=1)
+
+
 class DraftGenerateInput(BaseModel):
     kind: str = Field(pattern="^(email|text|answer|essay)$")
     brief: str = Field(min_length=1, max_length=4000)
@@ -641,6 +648,7 @@ class DraftGenerateInput(BaseModel):
     recipient_contact_id: str | None = Field(default=None, min_length=1, max_length=80)
     recipient_expected_version: int | None = Field(default=None, ge=1)
     recipient_note_ids: list[str] = Field(default_factory=list, max_length=5)
+    recipient_events: list[RecipientEventInput] = Field(default_factory=list, max_length=3)
     allow_cloud: bool = False
     word_target: int | None = Field(default=None, ge=300, le=1200, strict=True)
     outline: list[str] = Field(default_factory=list, max_length=6)
@@ -2554,8 +2562,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def draft_generate(data: DraftGenerateInput):
         cloud = config.provider == "openrouter"
         if (data.recipient_contact_id is None and
-                (data.recipient_expected_version is not None or data.recipient_note_ids)):
-            raise HTTPException(422, "Kontaktnotizen benötigen einen ausgewählten Empfänger")
+                (data.recipient_expected_version is not None or data.recipient_note_ids
+                 or data.recipient_events)):
+            raise HTTPException(422, "Kontaktnotizen und Ereignisse benötigen einen ausgewählten Empfänger")
         if data.recipient_contact_id and data.kind not in {"email", "text"}:
             raise HTTPException(422, "Empfängerkontext gilt nur für E-Mail- und Textentwürfe")
         if data.recipient_contact_id and cloud:
@@ -2567,7 +2576,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 recipient = contacts.recipient_snapshot(
                     data.recipient_contact_id, data.recipient_expected_version,
-                    data.recipient_note_ids)
+                    data.recipient_note_ids,
+                    [(item.event_id, item.expected_version) for item in data.recipient_events])
             except ContactConflict as exc:
                 raise HTTPException(409, str(exc)) from exc
             except LookupError as exc:
@@ -2786,6 +2796,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 "beziehung": recipient["relationship"],
                                 "bestaetigte_notizen": [item["content"] for item in
                                                        recipient["notes"]],
+                                "ausgewaehlte_gemeinsame_ereignisse": [
+                                    {"datum": item["date_local"], "titel": item["title"],
+                                     "ort": item["location"], "beschreibung": item["description"]}
+                                    for item in recipient["events"]],
                             }, ensure_ascii=False) + "\n\n") if recipient else ""
         prompt = (f"Auftrag: {task}\nVorgabe: {data.brief}\n"
                   f"Vom Nutzer eingefügter Kontext:\n{data.input_text}\n\n"
