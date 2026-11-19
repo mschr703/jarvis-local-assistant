@@ -218,7 +218,8 @@ def _project_body(row: dict) -> str:
 
 def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict]:
     """Read bounded project links in stable order for corpus and post-model recheck."""
-    result = {project_id: {"people": [], "aliases": [], "tasks": [], "files": []}
+    result = {project_id: {"people": [], "aliases": [], "tasks": [], "files": [],
+                           "memories": []}
               for project_id in project_ids}
     if not project_ids:
         return result
@@ -258,6 +259,18 @@ def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict
                                project_ids)
     for file in files:
         result[file["state_id"]]["files"].append(dict(file))
+    memories = connection.execute(f"""SELECT link.id,link.state_id,link.memory_id,
+        link.memory_text,link.memory_source_ref,link.memory_policy,link.memory_sha256,
+        link.source_note,link.confidence,link.valid_from,link.valid_until,
+        link.version,link.updated_at,current.text AS current_text,
+        current.source_ref AS current_source_ref,current.policy AS current_policy,
+        current.updated_at AS current_updated_at
+        FROM project_memory_links link LEFT JOIN memories current
+            ON current.id=link.memory_id
+        WHERE link.state_id IN ({placeholders})
+        ORDER BY link.state_id,link.updated_at DESC,link.id DESC""", project_ids)
+    for memory in memories:
+        result[memory["state_id"]]["memories"].append(dict(memory))
     return result
 
 
@@ -284,12 +297,21 @@ def _project_relationship_text(row: dict) -> str:
     files = [f"Projektdatei: {portable_basename(file['saved_path'])}"
              " · Original und Freigabe im Arbeitsstand prüfen"
              for file in links["files"][:MAX_PROJECT_RELATIONS_PER_KIND]]
+    memories = ["Projekterinnerung (gespeichert): "
+                f"{memory['memory_text'][:100]}"
+                f" · Ursprüngliche Quelle: {memory['memory_source_ref'][:60]}"
+                f" · Herkunft: {memory['source_note'][:80]}"
+                " · aktuellen Status im Arbeitsstand prüfen"
+                for memory in links["memories"][:MAX_PROJECT_RELATIONS_PER_KIND]]
     parts = []
-    for index in range(max(len(people), len(aliases), len(tasks), len(files))):
+    for index in range(max(len(people), len(aliases), len(tasks), len(files),
+                           len(memories))):
         if index < len(people):
             parts.append(people[index])
         if index < len(aliases):
             parts.append(aliases[index])
+        if index < len(memories):
+            parts.append(memories[index])
         if index < len(tasks):
             parts.append(tasks[index])
         if index < len(files):
@@ -430,7 +452,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS
                or any(len(row["relationships"][kind]) > MAX_PROJECT_RELATIONS_PER_KIND
                       for row in projects[:MAX_PROJECTS]
-                      for kind in ("people", "aliases", "tasks", "files"))
+                      for kind in ("people", "aliases", "tasks", "files", "memories"))
                or any(len(_project_embedding_body(row)) > 1200
                       for row in projects[:MAX_PROJECTS]))
     freshness: dict[str, bool] = {}

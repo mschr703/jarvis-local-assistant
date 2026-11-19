@@ -4,6 +4,7 @@ Stand: 19.11.2026. Der veröffentlichte Stand liegt auf [GitHub](https://github.
 
 ## In Arbeit und laufende Prüfungen
 
+- N6x/A03: Die lokale Ollama-Projektsuche berücksichtigt bis zu fünf ausdrücklich zugeordnete Erinnerungen mit gekürztem gespeichertem Text, ursprünglicher Quelle und Herkunftsnotiz. Änderungen/Entfernung der Verknüpfung sowie Änderung/Löschung des Originals während des Modellaufrufs verwerfen veraltete Treffer. 23 gezielte Backendtests, vollständige Regression mit 760 bestandenen Tests und fünf erwarteten Windows-Skips, 40 Frontendtests, Build, Ruff und echter Edge/Ollama-Pfad bei 390 Pixel ohne Cloudaufruf bestanden; Public-Audit und CI folgen. [Trello-Teilkarte](https://trello.com/c/ZLr8zNY0).
 - N6w/A03: Ausdrücklich zugeordnete Projekterinnerungen werden über ihren gespeicherten Text, Quellenverweis und Herkunftsnotiz in der lokalen Stichwortsuche gefunden; der Treffer springt zum Beleg und kennzeichnet den gespeicherten Stand. Änderung und Entfernung werden berücksichtigt. 25 gezielte Backendtests, vollständige Regression mit 754 bestandenen Tests und fünf erwarteten Windows-Skips, 40 Frontendtests, Build, Ruff und Edge-Pfad bei 390 Pixel ohne Modellaufruf bestanden. Public-Audit und CI folgen. [Trello-Teilkarte](https://trello.com/c/fPsqGHcs).
 
 

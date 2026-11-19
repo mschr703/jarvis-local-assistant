@@ -10,6 +10,7 @@ from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
+from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
 from jarvis.semantic_search import search
 from jarvis.tasks import TaskStore
@@ -56,6 +57,74 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
     assert by_kind["project"]["id"] == project["id"]
     assert by_kind["project"]["version"] == 1
     assert not found["limited"] and not found["changed_sources"]
+
+
+def test_explicit_project_memory_reaches_local_semantic_corpus(tmp_path, monkeypatch):
+    db, docs, _, memory, project, _ = sample(tmp_path)
+    links = ProjectMemoryStore(db, WorkStateStore(db, docs, TaskStore(db)))
+    links.add(project["id"], project["version"], memory["id"],
+              "Absprache aus dem Erstgespräch")
+    docs.update_memory(memory["id"], "Die Schlüssel wurden abgegeben.",
+                       "Spätere Korrektur", "local_only")
+    observed = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        observed.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    found = search(db, "Welche Unterlage fehlt noch?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 1
+    assert len(observed) == 2
+    assert "Projekterinnerung (gespeichert): Die Wohnungsunterlagen kommen am Freitag an." in observed[1]
+    assert "Ursprüngliche Quelle: Gespräch vom Montag" in observed[1]
+    assert "Herkunft: Absprache aus dem Erstgespräch" in observed[1]
+    assert "Die Schlüssel wurden abgegeben" not in observed[1]
+    assert "Projekterinnerung (gespeichert)" in found["results"][0]["excerpt"]
+
+
+@pytest.mark.parametrize("change", ["link_removed", "link_updated", "original_updated",
+                                    "original_deleted"])
+def test_project_memory_change_during_embedding_is_rejected(tmp_path, monkeypatch, change):
+    db, docs, _, memory, project, _ = sample(tmp_path)
+    links = ProjectMemoryStore(db, WorkStateStore(db, docs, TaskStore(db)))
+    link = links.add(project["id"], project["version"], memory["id"],
+                     "Absprache aus dem Erstgespräch")
+
+    def mutate(_url, texts, _cache_path=None):
+        if change == "link_removed":
+            links.delete(project["id"], link["id"], project["version"], link["version"])
+        elif change == "link_updated":
+            links.update(project["id"], link["id"], project["version"], link["version"],
+                         "Korrigierte Herkunftsnotiz")
+        elif change == "original_updated":
+            docs.update_memory(memory["id"], "Korrigierter Inhalt", "Korrektur", "local_only")
+        else:
+            docs.delete_memory(memory["id"])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", mutate)
+    found = search(db, "Welche Unterlage fehlt noch?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 0
+    assert found["changed_sources"] == [{"kind": "project", "id": project["id"]}]
+
+
+def test_project_semantic_memory_limit_is_reported(tmp_path, monkeypatch):
+    db, docs, _, memory, project, _ = sample(tmp_path)
+    second = docs.add_memory("Die Schlüssel kommen am Samstag.",
+                             "Weitere Notiz", "local_only")
+    links = ProjectMemoryStore(db, WorkStateStore(db, docs, TaskStore(db)))
+    for item in (memory, second):
+        links.add(project["id"], project["version"], item["id"],
+                  "Manuell geprüfter Projektbeleg")
+    monkeypatch.setattr("jarvis.semantic_search.MAX_PROJECT_RELATIONS_PER_KIND", 1)
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts",
+                        lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
+    found = search(db, "Welche Unterlage fehlt noch?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["limited"] and found["counts"]["project"] == 1
 
 
 def test_project_people_and_aliases_reach_local_semantic_corpus(tmp_path, monkeypatch):
