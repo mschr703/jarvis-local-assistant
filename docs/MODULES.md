@@ -2,9 +2,10 @@
 
 Jarvis kann optionale, lokal installierte Feature-Pakete sofort aktivieren und deaktivieren.
 Ein aktives Paket registriert seine eigene API und eine eigene Oberfläche in der normalen
-Jarvis-Navigation. Ohne Paket startet der Kern weiter. Der erste private Pilot heißt
-`day_notes` und bietet Tagesnotizen. Diese Funktion liegt ausschließlich im privaten
-Modul-Repository. Bestehende ältere Bereiche des Jarvis-Monolithen sind noch nicht in
+Jarvis-Navigation. Ohne Paket startet der Kern weiter. Die privaten Piloten `day_notes`
+(Tagesnotizen) und `reading_list` (lokale Leseliste) liegen ausschließlich im privaten
+Modul-Repository. Die Leseliste prüft auch den gleichzeitigen Betrieb zweier Pakete und
+ein schreibendes Werkzeug mit Freigabe. Bestehende ältere Bereiche des Jarvis-Monolithen sind noch nicht in
 solche Pakete ausgelagert; [P04 in Trello](https://trello.com/c/BcttXfbZ) verfolgt diese
 Migration.
 
@@ -17,14 +18,16 @@ In PowerShell **im Jarvis-Hauptordner**:
 ```powershell
 git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-private-modules
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_notes
+.\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\reading_list
 python scripts\dev.py
 ```
 
-Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“ aktivieren und
-den neuen Navigationspunkt öffnen. Eine Notiz speichern, die Seite neu laden und
-den Eintrag wiederfinden. Unter **Module** deaktivieren: Navigationspunkt, API und
-ausgelieferter UI-Code sind sofort gesperrt. Beim erneuten Aktivieren sind die Notizen
-wieder da. Das Modul braucht weder OpenRouter noch Ollama für seine Einträge.
+Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“ und „Leseliste“
+aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz oder einen HTTP(S)-Link
+speichern, die Seite neu laden und den Eintrag wiederfinden. Unter **Module** eines
+deaktivieren: Sein Navigationspunkt, seine API und sein ausgelieferter UI-Code sind
+sofort gesperrt; das andere Modul bleibt nutzbar. Beim erneuten Aktivieren sind die
+Daten wieder da. Beide Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
 
 Alternativ lässt sich das Paket direkt in **Module → Lokales Paket installieren**
 hinzufügen. Dort den absoluten Pfad zum Ordner `day_notes` eintragen. Mit PowerShell
@@ -109,10 +112,14 @@ werden im Modulstatus gezeigt, während der Kern weiterläuft.
 ```powershell
 .\backend\.venv\Scripts\python.exe -m pytest backend\tests\test_modules.py -q
 .\backend\.venv\Scripts\python.exe scripts\smoke_modules_ui.py --module-source ..\jarvis-private-modules\day_notes
+.\backend\.venv\Scripts\python.exe -m pytest ..\jarvis-private-modules\tests\test_reading_list.py -q
+.\backend\.venv\Scripts\python.exe ..\jarvis-private-modules\tests\smoke_reading_list_ui.py --core .
 ```
 
 Der zweite Befehl startet einen isolierten Edge-Klicktest mit temporärem
 Datenprofil und benötigt freie Ports 8765/5173. Er prüft Installation,
 Aktivierung, privates UI-Bundle, Speichern, Reload, Deaktivierung, gesperrte
 API/UI-Routen und Werkzeuge, Reaktivierung, Entfernen/Wiederinstallieren mit
-erhaltenen Daten und 390-Pixel-Ansicht.
+erhaltenen Daten und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
+Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
+beide Module gleichzeitig im echten Edge-Browser.

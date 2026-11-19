@@ -4,7 +4,7 @@ Stand: 19.11.2026. Die Trello-Karten bleiben die fachliche Quelle. Der Nutzer ha
 
 ## Technischer Schnitt
 
-Der bisherige Code ist noch überwiegend eine gemeinsame FastAPI-/React-Anwendung. Die erste Paketgrenze und ein privater `day_notes`-Pilot sind in Arbeit und in [MODULES.md](MODULES.md) dokumentiert. Bestehende Bereiche lassen sich noch **nicht** durch bloßes Entfernen eines Verzeichnisses sicher deinstallieren. [P04](https://trello.com/c/BcttXfbZ) führt die Migration fort:
+Der bisherige Code ist noch überwiegend eine gemeinsame FastAPI-/React-Anwendung. Die erste Paketgrenze und zwei private Piloten `day_notes` und `reading_list` sind in [MODULES.md](MODULES.md) dokumentiert. Bestehende Bereiche lassen sich noch **nicht** durch bloßes Entfernen eines Verzeichnisses sicher deinstallieren. [P04](https://trello.com/c/BcttXfbZ) führt die Migration fort:
 
 1. Ein kleines Basisprogramm behält Konfiguration, Ollama/OpenRouter-Adapter, Freigaben, Werkzeuglauf, Datenbank-/Backup-Grundlagen und eine Modul-Registry.
 2. Ein Modul besitzt eine eindeutige ID, Version, kompatible Kernversion, Abhängigkeiten und angeforderte Rechte. Es registriert eigene API-Routen, Werkzeuge, UI-Navigation und Datenmigrationen. Fehlende/ausgeschaltete Module erscheinen weder als ausführbare Werkzeuge noch in der Navigation.
@@ -28,4 +28,4 @@ Die vom Nutzer ausgewählten GitHub-Ideen sind auf [G00](https://trello.com/c/jn
 
 ## Entscheidung, die noch offen ist
 
-Der private Pilot ist `day_notes`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt; sie dient bis zur Migration als Archiv und Referenz.
+Die privaten Piloten sind `day_notes` und `reading_list`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt; sie dient bis zur Migration als Archiv und Referenz.
