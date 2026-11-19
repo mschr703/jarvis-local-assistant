@@ -48,6 +48,7 @@ from jarvis.chat_suggestions import parse_suggestions
 from jarvis.chat_suggestions import prompt as suggestion_prompt
 from jarvis.code_projects import CodeProjectStore
 from jarvis.config import Settings, load_settings, valid_personal_style_label
+from jarvis.contacts import ContactConflict, ContactStore
 from jarvis.db import Database
 from jarvis.desktop import register_desktop_tools
 from jarvis.document_packages import build_document_package
@@ -168,6 +169,28 @@ class ChatTitleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=80)
+
+
+class ContactInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    context: str = Field(min_length=1, max_length=120)
+    relationship: str = Field(default="", max_length=120)
+
+
+class ContactUpdateInput(ContactInput):
+    expected_version: int = Field(ge=1)
+
+
+class ContactNoteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ContactNoteUpdateInput(ContactNoteInput):
+    expected_version: int = Field(ge=1)
 
 
 class ChatSuggestionInput(BaseModel):
@@ -746,6 +769,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     voice = VoiceTranscriber(config.data_dir)
     research = ResearchStore(db)
     tasks = TaskStore(db)
+    contacts = ContactStore(db)
     extension_captures = ExtensionCaptureStore(db)
     focus = FocusStore(db)
     time_model = TimeModelStore(db)
@@ -873,6 +897,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.drafts = drafts
     app.state.research = research
     app.state.tasks = tasks
+    app.state.contacts = contacts
     app.state.extension_captures = extension_captures
     app.state.focus = focus
     app.state.time_model = time_model
@@ -3200,6 +3225,87 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except EveningPlanConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"deleted": True}
+
+    @app.get("/contacts")
+    async def contact_list(q: str = Query(default="", max_length=200)):
+        try:
+            return await run_in_threadpool(contacts.list, q)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/contacts/{contact_id}")
+    async def contact_get(contact_id: str):
+        try:
+            return await run_in_threadpool(contacts.get, contact_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/contacts", status_code=201)
+    async def contact_create(data: ContactInput):
+        try:
+            return await run_in_threadpool(contacts.create, data.name, data.context,
+                                           data.relationship)
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.put("/contacts/{contact_id}")
+    async def contact_update(contact_id: str, data: ContactUpdateInput):
+        try:
+            return await run_in_threadpool(contacts.update, contact_id,
+                                           data.expected_version, data.name, data.context,
+                                           data.relationship)
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/contacts/{contact_id}")
+    async def contact_delete(contact_id: str, expected_version: int = Query(ge=1)):
+        try:
+            await run_in_threadpool(contacts.delete, contact_id, expected_version)
+            return {"deleted": True}
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/contacts/{contact_id}/notes", status_code=201)
+    async def contact_note_create(contact_id: str, data: ContactNoteInput):
+        try:
+            return await run_in_threadpool(contacts.add_note, contact_id, data.content)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.put("/contacts/{contact_id}/notes/{note_id}")
+    async def contact_note_update(contact_id: str, note_id: str,
+                                  data: ContactNoteUpdateInput):
+        try:
+            return await run_in_threadpool(contacts.update_note, contact_id, note_id,
+                                           data.expected_version, data.content)
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/contacts/{contact_id}/notes/{note_id}")
+    async def contact_note_delete(contact_id: str, note_id: str,
+                                  expected_version: int = Query(ge=1)):
+        try:
+            await run_in_threadpool(contacts.delete_note, contact_id, note_id,
+                                    expected_version)
+            return {"deleted": True}
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @app.get("/work-states")
     async def work_state_list():

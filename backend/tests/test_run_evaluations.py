@@ -70,9 +70,9 @@ def test_parallel_evaluation_version_and_backup_roundtrip(tmp_path):
                 pass
     assert successes == 1
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 54
+    assert create_backup(data, archive)["schema"] == 55
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 54
+    assert restore_backup(archive, restored)["schema"] == 55
     reopened = Database(restored / "jarvis.db")
     assert len(reopened.list_evaluation_cases()) == 1
     assert reopened.list_runs()[0]["evaluation"]["version"] == 1

@@ -51,7 +51,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 54:
+            if version > 55:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -966,6 +966,34 @@ class Database:
                         PRIMARY KEY (query_key, document_id)
                     );
                     PRAGMA user_version=54;
+                """)
+            if version < 55:
+                apply_migration("""
+                    CREATE TABLE IF NOT EXISTS contacts (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        name_key TEXT NOT NULL,
+                        context TEXT NOT NULL,
+                        context_key TEXT NOT NULL,
+                        relationship TEXT NOT NULL DEFAULT '',
+                        version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS contacts_identity
+                        ON contacts(name_key, context_key);
+                    CREATE TABLE IF NOT EXISTS contact_notes (
+                        id TEXT PRIMARY KEY,
+                        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+                        content TEXT NOT NULL,
+                        source_kind TEXT NOT NULL CHECK(source_kind='manual'),
+                        version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS contact_notes_contact
+                        ON contact_notes(contact_id, created_at);
+                    PRAGMA user_version=55;
                 """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:

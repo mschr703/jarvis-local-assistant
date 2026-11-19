@@ -45,7 +45,7 @@ def test_plan_rule_versions_conflict_rollback_and_backup(tmp_path):
         store.activate(1, 1)
     assert store.activate(1, 2)["active_version"] == 1
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 54
+    assert create_backup(data, archive)["schema"] == 55
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert PlanRuleStore(Database(restored / "jarvis.db")).history()["revision"] == 3
@@ -111,7 +111,7 @@ async def test_plan_keeps_rule_snapshot_during_model_switch_execution_and_restar
     manager.close()
     engine.close()
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 54
+    assert create_backup(data, archive)["schema"] == 55
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert PlanRuleStore(Database(restored / "jarvis.db")).history()["active_version"] == 1

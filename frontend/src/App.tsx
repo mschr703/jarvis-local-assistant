@@ -22,15 +22,16 @@ const FileGraphView = lazy(() => import('./FileGraphView'));
 const CodeProjectView = lazy(() => import('./CodeProjectView'));
 const ModelChoiceBanner = lazy(() => import('./ModelChoiceBanner'));
 const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
+const ContactView = lazy(() => import('./ContactView'));
 
-type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
+type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
 type QuickCapture = { text: string; files: string[]; notice: string };
 type SearchSourceRequest =
   | { kind: 'project'; id: string; serial: number }
   | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
-const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
+const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
 
 export default function App() {
   const [page, setPage] = useState<Page>('status');
@@ -43,6 +44,7 @@ export default function App() {
   const [requestedChatSource, setRequestedChatSource] = useState<{ chatId: string; messageId: string } | null>(null);
   const [requestedChatAttachments, setRequestedChatAttachments] = useState<File[] | null>(null);
   const [tasksOpened, setTasksOpened] = useState(false);
+  const [contactsOpened, setContactsOpened] = useState(false);
   const [activityOpened, setActivityOpened] = useState(false);
   const [researchOpened, setResearchOpened] = useState(false);
   const [requestedResearchReport, setRequestedResearchReport] = useState('');
@@ -109,6 +111,7 @@ export default function App() {
     if (target === 'learning') setLearningOpened(true);
     if (target === 'memory_review') setMemoryReviewOpened(true);
     if (target === 'tasks') setTasksOpened(true);
+    if (target === 'contacts') setContactsOpened(true);
     if (target === 'activity') setActivityOpened(true);
     if (target === 'research') setResearchOpened(true);
     if (target === 'work_states') setWorkStatesOpened(true);
@@ -225,6 +228,7 @@ export default function App() {
         page === 'drafts' ? <DraftView personalStyleLabel={settingsDraft?.personal_style_label || 'Mein Stil'} selectedSources={selectedSources} onClearSources={() => setSelectedSources([])} configured={modelReady} provider={health?.provider || 'ollama'} composer={draftComposer} setComposer={setDraftComposer} active={activeDraft} setActive={setActiveDraft} editedContent={editedDraftContent} setEditedContent={setEditedDraftContent} lastRequest={lastDraftRequest} setLastRequest={setLastDraftRequest} busy={draftBusy} setBusy={setDraftBusy} notice={draftNotice} setNotice={setDraftNotice} operationRef={draftOperationRef} profileEpoch={styleProfileEpoch} revision={draftRevision} onChanged={() => setDraftRevision((current) => current + 1)} styleForm={styleForm} setStyleForm={setStyleForm} /> :
         page === 'research' ? null :
         page === 'tasks' ? null :
+        page === 'contacts' ? null :
         page === 'time_model' ? null :
         page === 'evening_plans' ? null :
         page === 'work_states' ? null :
@@ -246,6 +250,7 @@ export default function App() {
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}
+      {contactsOpened && <div hidden={page !== 'contacts'}><ContactView visible={page === 'contacts'} /></div>}
       {draftRulesOpened && <div hidden={page !== 'draft_rules'}><ChatRulesView visible={page === 'draft_rules'} scope="draft" /></div>}
       {planRulesOpened && <div hidden={page !== 'plan_rules'}><ChatRulesView visible={page === 'plan_rules'} scope="plan" /></div>}
       </Suspense>
