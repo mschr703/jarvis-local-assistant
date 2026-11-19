@@ -7,6 +7,8 @@ type Folder = { id: string; path: string; policy: 'local_only' | 'cloud_allowed'
 type Document = { id: string; folder_id: string; path: string; policy: string; status: string; excluded: number; error: string | null; sha256: string | null; indexed_at: string | null; size: number | null };
 type Freshness = { folder_id: string; checked: number; current: number; stale: number; limited: boolean; stale_sources: { document_id: string; path: string; status: string }[] };
 type DocumentIndexResult = { document_id: string; outcome: 'indexed' | 'unchanged' | 'removed' | 'ocr_pending' | 'error'; document: Document | null };
+type OcrPagePreview = { document_id: string; sha256: string; pages_total: number;
+  pages: { page: number; already_indexed: boolean }[]; max_selection: number; filename: string };
 type Memory = { id: string; text: string; source_ref: string; policy: 'local_only' | 'cloud_allowed'; updated_at: string };
 type RequestedSource = { kind: 'document' | 'memory'; id: string; serial: number };
 
@@ -19,6 +21,9 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
   const [packageSelection, setPackageSelection] = useState<string[]>([]);
   const [packageBusy, setPackageBusy] = useState(false);
   const [indexTextBusy, setIndexTextBusy] = useState<string | null>(null);
+  const [ocrPreview, setOcrPreview] = useState<OcrPagePreview | null>(null);
+  const [ocrPageSelection, setOcrPageSelection] = useState<number[]>([]);
+  const [ocrPreviewBusy, setOcrPreviewBusy] = useState<string | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [folderPath, setFolderPath] = useState('');
   const [folderPolicy, setFolderPolicy] = useState<Folder['policy']>('local_only');
@@ -59,6 +64,9 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
       ]);
       if (request === refreshRequest.current) {
         setFolders(nextFolders); setDocuments(nextDocuments); setMemories(nextMemories);
+        setOcrPreview((current) => current && nextDocuments.some((item) =>
+          item.id === current.document_id && item.sha256 === current.sha256
+          && item.status === 'indexed' && !item.excluded) ? current : null);
         setPackageSelection((current) => current.filter((id) => nextDocuments.some(
           (item) => item.id === id && item.status === 'indexed' && !item.excluded)));
         if (requestedSource && handledSourceSerial.current !== requestedSource.serial) {
@@ -147,12 +155,15 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
     } catch (error) { setNotice((error as Error).message); }
     finally { indexingRef.current = false; setIndexing(false); }
   };
-  const ocrDocument = async (id: string, wasIndexed = false) => {
+  const ocrDocument = async (id: string, wasIndexed = false,
+                             pages?: number[], expectedSha256?: string) => {
     if (indexingRef.current) return;
     indexingRef.current = true; setIndexing(true);
     try {
       const result = await api<DocumentIndexResult>(`/documents/${encodeURIComponent(id)}/ocr`,
-        { method: 'POST' });
+        { method: 'POST', ...(pages && expectedSha256 ? { body: JSON.stringify({
+          pages, expected_sha256: expectedSha256,
+        }) } : {}) });
       if (result.outcome === 'indexed') {
         clearResults(); onSourcesInvalidated();
       }
@@ -162,9 +173,22 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
         : result.outcome === 'unchanged' ? 'Keine neuen Bildseiten-Texte erkannt; der Index bleibt unverändert.'
           : result.outcome === 'ocr_pending' ? 'OCR hat keinen lesbaren Text erkannt.'
             : `OCR fehlgeschlagen: ${result.document?.error || 'unbekannter Fehler'}.`);
+      setOcrPreview(null); setOcrPageSelection([]);
       await refresh();
     } catch (error) { setNotice((error as Error).message); }
     finally { indexingRef.current = false; setIndexing(false); }
+  };
+  const previewOcrPages = async (document: Document) => {
+    if (indexing || ocrPreviewBusy) return;
+    setOcrPreviewBusy(document.id); setNotice('');
+    try {
+      const preview = await api<Omit<OcrPagePreview, 'filename'>>(
+        `/documents/${encodeURIComponent(document.id)}/ocr-pages`);
+      setOcrPreview({ ...preview, filename: document.path.split(/[\\/]/).at(-1) || 'PDF' });
+      setOcrPageSelection([]);
+      if (!preview.pages.length) setNotice('Dieses PDF hat keine Seiten ohne extrahierbare Textschicht.');
+    } catch (error) { setNotice((error as Error).message); }
+    finally { setOcrPreviewBusy(null); }
   };
   const checkFreshness = async (id: string) => {
     if (checkingFolder) return;
@@ -299,8 +323,32 @@ export default function DocumentView({ onDraft, onLearn, onSourcesInvalidated, v
         <button className="primary" onClick={() => void addFolder()} disabled={!folderPath.trim()}>Freigeben</button></div>
       <div className="item-list">{folders.map((folder) => <div key={folder.id} className="item-row"><div><strong>{folder.path}</strong><small>{folder.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'}</small>{freshness[folder.id] && <div role="status"><small>Frischecheck: {freshness[folder.id].current} aktuell, {freshness[folder.id].stale} geändert oder fehlend (von {freshness[folder.id].checked} geprüft). {freshness[folder.id].limited && 'Auf 100 Dokumente begrenzt; weitere Dateien wurden nicht geprüft.'}</small>{freshness[folder.id].stale_sources.map((source) => <small key={source.document_id}>Neu indexieren: {source.path}</small>)}</div>}</div><div className="item-actions"><button disabled={indexing || checkingFolder !== null} onClick={() => void checkFreshness(folder.id)}>{checkingFolder === folder.id ? 'Prüfe…' : 'Frische prüfen'}</button><button disabled={indexing || checkingFolder !== null} onClick={() => void index(folder.id)}>{indexing ? 'Indexiere…' : 'Index aktualisieren'}</button><button onClick={() => void changePolicy(folder)}>{folder.policy === 'local_only' ? 'Cloud für ausgewählte Ausschnitte erlauben' : 'Cloud-Freigabe entfernen'}</button><button onClick={() => void removeFolder(folder)}>Ordnerfreigabe entfernen</button></div></div>)}</div>
     </section>
-    <section className="card"><h3>Dokumente</h3>{documents.length === 0 ? <p>Noch keine Dokumente indexiert.</p> : <div className="item-list">{documents.map((document) => <div id={`search-source-document-${document.id}`} key={document.id} className={`item-row document-row${requestedSource?.kind === 'document' && requestedSource.id === document.id ? ' source-opened' : ''}`}><div><strong>{document.path}</strong><small>{document.excluded ? 'Ausgeschlossen' : document.status === 'ocr_pending' ? 'OCR ausstehend: keine Textschicht' : document.status === 'pending_index' ? 'Index ausstehend' : document.status}{document.error && ` · ${document.error}`} · {document.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}</small>{!document.excluded && document.sha256 && document.indexed_at && document.status === 'indexed' && <small>Indexstand: {new Date(document.indexed_at).toLocaleString('de-DE')} · SHA-256 {document.sha256}</small>}</div><div className="item-actions">{!document.excluded && document.status === 'indexed' && <label><input type="checkbox" aria-label={`Dokument ${document.path} für Unterlagenpaket auswählen`} checked={packageSelection.includes(document.id)} disabled={indexing || packageBusy || (packageSelection.length >= 10 && !packageSelection.includes(document.id))} onChange={() => setPackageSelection((current) => current.includes(document.id) ? current.filter((selectedId) => selectedId !== document.id) : current.length < 10 ? [...current, document.id] : current)} />Für Paket auswählen</label>}{!document.excluded && <button disabled={indexing} onClick={() => void reindexDocument(document.id)}>Diese Datei neu indexieren</button>}{!document.excluded && document.status === 'ocr_pending' && document.sha256 && /\.pdf$/i.test(document.path) && <button disabled={indexing} onClick={() => void ocrDocument(document.id)}>{indexing ? 'OCR läuft…' : 'Scan-PDF lokal per OCR lesen'}</button>}{!document.excluded && document.status === 'indexed' && /\.pdf$/i.test(document.path) && <button disabled={indexing} onClick={() => void ocrDocument(document.id, true)}>{indexing ? 'OCR läuft…' : 'PDF-Bildseiten lokal per OCR ergänzen'}</button>}{!document.excluded && document.status === 'indexed' && /\.pdf$/i.test(document.path) && <button disabled={indexing || indexTextBusy !== null} onClick={() => void downloadIndexText(document)}>{indexTextBusy === document.id ? 'Indextext wird geprüft…' : 'Geprüften PDF-Indextext herunterladen'}</button>}{!document.excluded && document.status === 'indexed' && /\.(?:md|markdown)$/i.test(document.path) && <button disabled={indexing} onClick={() => setEditingMarkdown(document.id)}>Markdown bearbeiten</button>}<button disabled={indexing} onClick={() => void toggleDocument(document)}>{document.excluded ? 'Einbeziehen' : 'Ausschließen'}</button></div></div>)}</div>}
+    <section className="card"><h3>Dokumente</h3>{documents.length === 0 ? <p>Noch keine Dokumente indexiert.</p> : <div className="item-list">{documents.map((document) => <div id={`search-source-document-${document.id}`} key={document.id} className={`item-row document-row${requestedSource?.kind === 'document' && requestedSource.id === document.id ? ' source-opened' : ''}`}><div><strong>{document.path}</strong><small>{document.excluded ? 'Ausgeschlossen' : document.status === 'ocr_pending' ? 'OCR ausstehend: keine Textschicht' : document.status === 'pending_index' ? 'Index ausstehend' : document.status}{document.error && ` · ${document.error}`} · {document.policy === 'local_only' ? 'nur lokal' : 'Cloud erlaubt'}</small>{!document.excluded && document.sha256 && document.indexed_at && document.status === 'indexed' && <small>Indexstand: {new Date(document.indexed_at).toLocaleString('de-DE')} · SHA-256 {document.sha256}</small>}</div><div className="item-actions">{!document.excluded && document.status === 'indexed' && <label><input type="checkbox" aria-label={`Dokument ${document.path} für Unterlagenpaket auswählen`} checked={packageSelection.includes(document.id)} disabled={indexing || packageBusy || (packageSelection.length >= 10 && !packageSelection.includes(document.id))} onChange={() => setPackageSelection((current) => current.includes(document.id) ? current.filter((selectedId) => selectedId !== document.id) : current.length < 10 ? [...current, document.id] : current)} />Für Paket auswählen</label>}{!document.excluded && <button disabled={indexing} onClick={() => void reindexDocument(document.id)}>Diese Datei neu indexieren</button>}{!document.excluded && document.status === 'ocr_pending' && document.sha256 && /\.pdf$/i.test(document.path) && <button disabled={indexing} onClick={() => void ocrDocument(document.id)}>{indexing ? 'OCR läuft…' : 'Scan-PDF lokal per OCR lesen'}</button>}{!document.excluded && document.status === 'indexed' && /\.pdf$/i.test(document.path) && <button disabled={indexing || ocrPreviewBusy !== null} onClick={() => void previewOcrPages(document)}>{ocrPreviewBusy === document.id ? 'Prüfe PDF-Seiten…' : 'PDF-Bildseiten für OCR auswählen'}</button>}{!document.excluded && document.status === 'indexed' && /\.pdf$/i.test(document.path) && <button disabled={indexing || indexTextBusy !== null} onClick={() => void downloadIndexText(document)}>{indexTextBusy === document.id ? 'Indextext wird geprüft…' : 'Geprüften PDF-Indextext herunterladen'}</button>}{!document.excluded && document.status === 'indexed' && /\.(?:md|markdown)$/i.test(document.path) && <button disabled={indexing} onClick={() => setEditingMarkdown(document.id)}>Markdown bearbeiten</button>}<button disabled={indexing} onClick={() => void toggleDocument(document)}>{document.excluded ? 'Einbeziehen' : 'Ausschließen'}</button></div></div>)}</div>}
       {packageSelection.length > 0 && <div className="item-actions package-actions"><p>{packageSelection.length} von höchstens zehn Dokumenten ausgewählt. Zusammen höchstens 32 MiB Originaldaten. Der Download ist ein unverschlüsseltes ZIP.</p><button type="button" className="primary" disabled={indexing || packageBusy} onClick={() => void downloadPackage()}>{packageBusy ? 'Originale werden geprüft…' : `Geprüftes Unterlagenpaket herunterladen (${packageSelection.length})`}</button><button type="button" disabled={packageBusy} onClick={() => setPackageSelection([])}>Paketauswahl entfernen</button></div>}</section>
+    {ocrPreview && <section className="card" aria-label="PDF-Seiten für OCR auswählen">
+      <h3>PDF-Seiten lokal per OCR prüfen</h3>
+      <p>{ocrPreview.filename} · {ocrPreview.pages_total} Seiten insgesamt. Nur Seiten ohne extrahierbare Textschicht sind wählbar. Bereits erkannte Bildseiten können erneut gelesen werden.</p>
+      {ocrPreview.pages.length === 0 ? <p>Keine Seiten ohne Textschicht gefunden.</p> : <>
+        <p>{ocrPageSelection.length} von höchstens {ocrPreview.max_selection} Seiten ausgewählt. OCR läuft nur lokal und ändert das Original nicht.</p>
+        <div className="ocr-page-choices">{ocrPreview.pages.map((item) => <label key={item.page}>
+          <input type="checkbox" aria-label={`PDF-Seite ${item.page} für OCR auswählen`}
+            checked={ocrPageSelection.includes(item.page)}
+            disabled={indexing || (ocrPageSelection.length >= ocrPreview.max_selection && !ocrPageSelection.includes(item.page))}
+            onChange={() => setOcrPageSelection((current) => current.includes(item.page)
+              ? current.filter((page) => page !== item.page)
+              : current.length < ocrPreview.max_selection ? [...current, item.page] : current)} />
+          Seite {item.page}{item.already_indexed ? ' · OCR-Text bereits im Index' : ' · noch kein OCR-Text im Index'}
+        </label>)}</div>
+      </>}
+      <div className="item-actions"><button type="button" className="primary"
+        disabled={indexing || !ocrPageSelection.length}
+        onClick={() => void ocrDocument(ocrPreview.document_id, true,
+          ocrPageSelection, ocrPreview.sha256)}>
+        {indexing ? 'OCR läuft…' : `Ausgewählte ${ocrPageSelection.length} Seiten per OCR lesen`}</button>
+        <button type="button" disabled={indexing} onClick={() => {
+          setOcrPreview(null); setOcrPageSelection([]);
+        }}>Auswahl schließen</button></div>
+    </section>}
     {editingMarkdown && <MarkdownEditor key={editingMarkdown} documentId={editingMarkdown} onClose={() => setEditingMarkdown(null)} onChanged={async () => { clearResults(); onSourcesInvalidated(); await refresh(); }} />}
     <section className="card"><h3>Suche</h3><div className="inline-form"><input aria-label="Dokumente durchsuchen" value={query} onChange={(event) => { clearResults(); setQuery(event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter') void search(); }} /><button onClick={() => void search()} disabled={!query.trim()}>Suchen</button></div>
       <p>Wähle höchstens fünf aktuelle Fundstellen.</p><div className="item-list">{results.map((result) => <label key={result.passage_id} className="source-result"><input type="checkbox" checked={selected.includes(result.passage_id)} disabled={result.source_status === 'needs_reindex' || (selected.length >= 5 && !selected.includes(result.passage_id))} onChange={(event) => setSelected(event.target.checked ? [...selected, result.passage_id] : selected.filter((id) => id !== result.passage_id))} /><span><strong>{result.path}{result.page ? ` · Seite ${result.page}` : ''}</strong><small>{result.policy === 'local_only' ? 'Nur lokal' : 'Cloud erlaubt'} · {result.source_status === 'needs_reindex' ? 'Original geändert oder fehlt: zuerst Index aktualisieren' : 'Original geprüft'}</small><p>{result.source_status === 'needs_reindex' ? 'Gespeicherter Auszug (veraltet): ' : ''}{result.text}</p></span></label>)}</div>

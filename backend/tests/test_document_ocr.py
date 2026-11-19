@@ -152,7 +152,7 @@ def test_ocr_route_requires_csrf_and_returns_page_status(tmp_path, monkeypatch):
         assert repeated.json()["outcome"] == "unchanged"
 
 
-def mixed_pdf(path):
+def mixed_pdf(path, *, second_image=False):
     image = Image.new("RGB", (900, 220), "white")
     ImageDraw.Draw(image).text((40, 80), "Saturn Bildbeleg", fill="black")
     scan = io.BytesIO()
@@ -160,6 +160,8 @@ def mixed_pdf(path):
     writer = PdfWriter()
     writer.append(io.BytesIO(text_pdf("Orion Textbeleg")))
     writer.append(io.BytesIO(scan.getvalue()))
+    if second_image:
+        writer.append(io.BytesIO(scan.getvalue()))
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -252,3 +254,102 @@ def test_text_pdf_ocr_is_noop_and_selected_page_limit_is_bounded(tmp_path):
         scan_pdf(output.getvalue(), binary="unused", page_numbers=list(range(1, 12)))
     with pytest.raises(ValueError, match="Ungültige PDF-Seitenauswahl"):
         scan_pdf(output.getvalue(), binary="unused", page_numbers=[1, 1])
+
+
+def test_selected_ocr_pages_keep_previous_image_page_and_reject_text_page(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Gemischt.pdf"
+    mixed_pdf(path, second_image=True)
+    documents = DocumentStore(Database(tmp_path / "data" / "jarvis.db"))
+    folder = documents.add_folder(str(root), "local_only")
+    documents.index_folder(folder["id"])
+    item = documents.documents()[0]
+    preview = documents.ocr_page_preview(item["id"])
+    assert preview["sha256"] == item["sha256"]
+    assert preview["pages_total"] == 3
+    assert preview["pages"] == [
+        {"page": 2, "already_indexed": False},
+        {"page": 3, "already_indexed": False},
+    ]
+    selected = []
+
+    def recognize(_data, *, page_numbers):
+        selected.append(page_numbers)
+        return [(page_numbers[0], f"Bildseite {page_numbers[0]}")]
+
+    monkeypatch.setattr(document_module, "scan_pdf", recognize)
+    result = documents.ocr_document(item["id"], page_numbers=[2],
+                                    expected_sha256=item["sha256"])
+    assert result["outcome"] == "indexed"
+    assert selected == [[2]]
+    assert documents.ocr_page_preview(item["id"])["pages"] == [
+        {"page": 2, "already_indexed": True},
+        {"page": 3, "already_indexed": False},
+    ]
+    for invalid in ([1], [2, 2], [4]):
+        with pytest.raises(ValueError, match="Seiten ohne Textschicht"):
+            documents.ocr_document(item["id"], page_numbers=invalid,
+                                   expected_sha256=item["sha256"])
+    assert documents.search("Bildseite")[0]["page"] == 2
+    monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: (_ for _ in ())
+                        .throw(ValueError("OCR-Zeitlimit für eine PDF-Seite erreicht")))
+    with pytest.raises(ValueError, match="OCR-Zeitlimit"):
+        documents.ocr_document(item["id"], page_numbers=[3],
+                               expected_sha256=item["sha256"])
+    assert documents.search("Bildseite")[0]["page"] == 2
+    monkeypatch.setattr(document_module, "scan_pdf", recognize)
+    assert documents.ocr_document(item["id"], page_numbers=[3],
+                                  expected_sha256=item["sha256"])["outcome"] == "indexed"
+    assert selected == [[2], [3]]
+    assert {hit["page"] for hit in documents.search("Bildseite")} == {2, 3}
+    assert documents.search("Orion")[0]["page"] == 1
+    _, exported = documents.indexed_pdf_text(item["id"])
+    assert "=== Seite 2 ===\nBildseite 2" in exported
+    assert "=== Seite 3 ===\nBildseite 3" in exported
+
+
+def test_ocr_preview_route_and_selection_hash_block_stale_pdf(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Gemischt.pdf"
+    mixed_pdf(path)
+    note = root / "Notiz.md"
+    note.write_text("Nur Text", encoding="utf-8")
+    db = Database(tmp_path / "data" / "jarvis.db")
+    documents = DocumentStore(db)
+    folder = documents.add_folder(str(root), "local_only")
+    documents.index_folder(folder["id"])
+    item = next(entry for entry in documents.documents()
+                if entry["path"] == str(path))
+    note_id = next(entry["id"] for entry in documents.documents()
+                   if entry["path"] == str(note))
+    monkeypatch.setattr(document_module, "scan_pdf", lambda _data, *, page_numbers:
+                        [(page_numbers[0], "Saturn Bildbeleg")])
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        endpoint = f"/documents/{item['id']}/ocr"
+        preview_url = f"/documents/{item['id']}/ocr-pages"
+        token = client.get("/session").json()["csrf"]
+        preview = client.get(preview_url)
+        assert preview.status_code == 200
+        assert preview.json()["pages"] == [{"page": 2, "already_indexed": False}]
+        payload = {"pages": [2], "expected_sha256": item["sha256"]}
+        assert client.post(endpoint, json=payload).status_code == 403
+        assert client.post(endpoint, json={**payload, "pages": list(range(11))},
+                           headers={"x-jarvis-csrf": token}).status_code == 422
+        assert client.post(endpoint, json={**payload, "expected_sha256": "0" * 64},
+                           headers={"x-jarvis-csrf": token}).status_code == 409
+        assert client.post(endpoint, json=payload,
+                           headers={"x-jarvis-csrf": token}).json()["outcome"] == "indexed"
+        path.write_bytes(path.read_bytes() + b"\n")
+        assert client.get(preview_url).status_code == 409
+        assert client.post(endpoint, json=payload,
+                           headers={"x-jarvis-csrf": token}).status_code == 409
+        assert client.get(f"/documents/{note_id}/ocr-pages").status_code == 409
+        assert documents.index_document(item["id"])["outcome"] == "indexed"
+        assert client.post(endpoint, json=payload,
+                           headers={"x-jarvis-csrf": token}).status_code == 409
+        documents.set_excluded(item["id"], True)
+        assert client.get(preview_url).status_code == 404
+        assert client.get("/documents/missing/ocr-pages").status_code == 404

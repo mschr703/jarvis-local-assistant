@@ -310,6 +310,13 @@ class DocumentPackageInput(BaseModel):
     document_ids: list[str] = Field(min_length=1, max_length=10)
 
 
+class DocumentOcrPagesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pages: list[int] = Field(min_length=1, max_length=10)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class GraphVaultInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1906,10 +1913,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (ValueError, OSError) as exc:
             raise HTTPException(409, str(exc)) from exc
 
-    @app.post("/documents/{document_id}/ocr")
-    async def document_ocr(document_id: str):
+    @app.get("/documents/{document_id}/ocr-pages")
+    async def document_ocr_pages(document_id: str):
         try:
-            return await run_in_threadpool(documents.ocr_document, document_id)
+            return await run_in_threadpool(documents.ocr_page_preview, document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/documents/{document_id}/ocr")
+    async def document_ocr(document_id: str, data: DocumentOcrPagesInput | None = None):
+        try:
+            return await run_in_threadpool(documents.ocr_document, document_id,
+                                           page_numbers=data.pages if data else None,
+                                           expected_sha256=data.expected_sha256 if data else None)
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
         except (ValueError, OSError) as exc:

@@ -53,10 +53,12 @@ def text_pdf(text: str) -> bytes:
     return bytes(output)
 
 
-def write_mixed(path: Path, scanned_page: Path) -> None:
+def write_mixed(path: Path, scanned_page: Path, extra_page: Path | None = None) -> None:
     writer = PdfWriter()
     writer.append(io.BytesIO(text_pdf("Projekt Orion Textbeleg 2026")))
     writer.append(str(scanned_page))
+    if extra_page:
+        writer.append(str(extra_page))
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -72,8 +74,10 @@ def main() -> None:
         write_scan(pdf, "Orion")
         scanned_page = root / "image-page.pdf"
         write_scan(scanned_page, "Saturn")
+        extra_page = root / "extra-page.pdf"
+        write_scan(extra_page, "Neptun")
         mixed = allowed / "Gemischt.pdf"
-        write_mixed(mixed, scanned_page)
+        write_mixed(mixed, scanned_page, extra_page)
         db = Database(root / "data" / "jarvis.db")
         documents = DocumentStore(db)
         folder = documents.add_folder(str(allowed), "local_only")
@@ -108,7 +112,14 @@ def main() -> None:
 
                         mixed_row = page.locator(".document-row").filter(has_text="Gemischt.pdf")
                         expect(mixed_row).to_contain_text("Indexstand:")
-                        mixed_row.get_by_role("button", name="PDF-Bildseiten lokal per OCR ergänzen")\
+                        mixed_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
+                            .click()
+                        preview = page.get_by_role("region", name="PDF-Seiten für OCR auswählen")
+                        expect(preview).to_contain_text("Seite 2 · noch kein OCR-Text")
+                        expect(preview).to_contain_text("Seite 3 · noch kein OCR-Text")
+                        preview.get_by_role("checkbox", name="PDF-Seite 2 für OCR auswählen")\
+                            .check()
+                        preview.get_by_role("button", name="Ausgewählte 1 Seiten per OCR lesen")\
                             .click()
                         expect(page.get_by_role("status").filter(
                             has_text="PDF-Bildseiten lokal ergänzt"))\
@@ -120,9 +131,32 @@ def main() -> None:
                         assert "=== Seite 1 ===\nProjekt Orion Textbeleg 2026" in mixed_text
                         assert "=== Seite 2 ===" in mixed_text
                         assert "Projekt Saturn Vertrag 2026" in mixed_text
+                        assert "=== Seite 3 ===" not in mixed_text
                         assert str(allowed) not in mixed_text
                         assert documents.search("Saturn")[0]["document_id"] == mixed_id
-                        mixed_row.get_by_role("button", name="PDF-Bildseiten lokal per OCR ergänzen")\
+                        mixed_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
+                            .click()
+                        expect(preview).to_contain_text("Seite 2 · OCR-Text bereits im Index")
+                        expect(preview).to_contain_text("Seite 3 · noch kein OCR-Text")
+                        preview.get_by_role("checkbox", name="PDF-Seite 3 für OCR auswählen")\
+                            .check()
+                        preview.get_by_role("button", name="Ausgewählte 1 Seiten per OCR lesen")\
+                            .click()
+                        expect(page.get_by_role("status").filter(
+                            has_text="PDF-Bildseiten lokal ergänzt"))\
+                            .to_be_visible(timeout=120000)
+                        with page.expect_download() as final_mixed_download:
+                            mixed_row.get_by_role(
+                                "button", name="Geprüften PDF-Indextext herunterladen").click()
+                        final_text = Path(final_mixed_download.value.path()).read_text(encoding="utf-8")
+                        assert "=== Seite 2 ===\nProjekt Saturn Vertrag 2026" in final_text
+                        assert "=== Seite 3 ===\nProjekt Neptun Vertrag 2026" in final_text
+                        assert documents.search("Neptun")[0]["page"] == 3
+                        mixed_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
+                            .click()
+                        preview.get_by_role("checkbox", name="PDF-Seite 2 für OCR auswählen")\
+                            .check()
+                        preview.get_by_role("button", name="Ausgewählte 1 Seiten per OCR lesen")\
                             .click()
                         expect(page.get_by_role("status").filter(
                             has_text="Index bleibt unverändert"))\
@@ -183,7 +217,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"ocr": "real_tesseract", "page": 1,
-                                          "mixed_pdf": "text_and_image_pages",
+                                          "mixed_pdf": "text_and_two_selected_image_pages",
                                           "semantic_search": "local_ollama",
                                           "stale_original": "refused", "index_text": "verified_download",
                                           "source_id": "preserved",
