@@ -640,6 +640,7 @@ def main() -> None:
                         page.get_by_role("button", name="Aufgaben", exact=True).click()
                         page.get_by_label("Aufgabe", exact=True).fill("Vorschauprobe")
                         page.get_by_label("Lokale Fälligkeit").fill("2027-10-31T02:30")
+                        page.get_by_label("IANA-Zeitzone").fill("")
                         page.get_by_label("IANA-Zeitzone").fill("Europe/Paris")
                         try:
                             page.get_by_text("Diese lokale Zeit kommt zweimal vor", exact=False).wait_for()

@@ -1096,8 +1096,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/modules")
     async def module_list():
-        modules.refresh()
-        return modules.list()
+        return await run_in_threadpool(modules.snapshot)
 
     @app.post("/modules/install")
     async def module_install(data: ModuleInstallInput):
@@ -1113,7 +1112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/modules/{module_id}/enable")
     async def module_enable(module_id: str):
-        modules.refresh()
+        await run_in_threadpool(modules.refresh)
         try:
             return await run_in_threadpool(modules.enable, module_id)
         except ValueError as exc:
@@ -4249,7 +4248,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/tools")
     async def tools_view():
-        return engine.capabilities()
+        return await run_in_threadpool(engine.capabilities)
 
     @app.get("/plans")
     async def plan_list():

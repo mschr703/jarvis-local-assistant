@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.responses import JSONResponse
@@ -173,6 +174,11 @@ class ModuleRegistry:
             remove_package(module_id, self.directory.parent, self.db)
             self.refresh()
             return {"id": module_id, "removed": True, "data_retained": True}
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        with self._lock:
+            self.refresh()
+            return self.list()
 
     def refresh(self) -> None:
         """Discover manifests without importing module code."""
@@ -457,7 +463,7 @@ class ModuleDispatcher:
             await JSONResponse({"detail": "Modul nicht gefunden"}, status_code=404)(scope, receive, send)
             return
         module_id, _, remaining = path[len("/modules/"):].partition("/")
-        module_app = self.registry.app_for(module_id)
+        module_app = await run_in_threadpool(self.registry.app_for, module_id)
         if module_app is None:
             await JSONResponse({"detail": "Modul nicht aktiv"}, status_code=404)(scope, receive, send)
             return
