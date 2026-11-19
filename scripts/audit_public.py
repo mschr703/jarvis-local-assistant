@@ -54,6 +54,23 @@ def publishable_files() -> list[Path]:
             for token in result.stdout.split(b"\0") if token]
 
 
+def staged_file_contents(root: Path) -> list[tuple[Path, bytes]]:
+    """Inspect the exact bytes Git would commit, even if the worktree differs."""
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"],
+        cwd=root, check=True, capture_output=True,
+    )
+    staged = []
+    for token in result.stdout.split(b"\0"):
+        if not token:
+            continue
+        relative = Path(token.decode("utf-8", errors="surrogateescape"))
+        blob = subprocess.run(["git", "show", f":{relative.as_posix()}"],
+                              cwd=root, check=True, capture_output=True).stdout
+        staged.append((relative, blob))
+    return staged
+
+
 def history_findings(root: Path, secret: bytes = b"") -> list[tuple[str, str]]:
     """Scan commits reachable from HEAD, including files removed before a push."""
     names = subprocess.run(
@@ -97,16 +114,31 @@ def main() -> int:
         if file_risk:
             findings.append((relative, file_risk))
             continue
-        content = path.read_bytes()
+        if path.is_symlink():
+            findings.append((relative, "tracked link requires manual review"))
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            findings.append((relative, "tracked file missing or unreadable; stage deletion or restore"))
+            continue
         for label, pattern in PATTERNS.items():
             if pattern.search(content):
                 findings.append((relative, label))
         if secret and secret in content:
             findings.append((relative, "provided secret"))
+    staged = staged_file_contents(ROOT)
+    for relative_path, content in staged:
+        relative = str(relative_path)
+        for label, pattern in PATTERNS.items():
+            if pattern.search(content):
+                findings.append((f"Git index: {relative}", label))
+        if secret and secret in content:
+            findings.append((f"Git index: {relative}", "provided secret"))
     findings.extend(history_findings(ROOT, secret))
     for name, label in findings:
         print(f"{name}: {label}")
-    print(f"Scanned {len(files)} publishable files and HEAD history; "
+    print(f"Scanned {len(files)} publishable files, {len(staged)} staged blobs and HEAD history; "
           f"{len(findings)} findings.")
     return 1 if findings else 0
 
