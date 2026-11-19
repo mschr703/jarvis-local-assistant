@@ -95,7 +95,7 @@ def package_digest(source: Path) -> str:
     return digest.hexdigest()
 
 
-def checked_installed_directory(target: Path, root: Path) -> None:
+def checked_installed_directory(target: Path, root: Path, *, allow_missing: bool = False) -> None:
     if (root.is_symlink() or root.is_junction() or not _safe_directory(target, root)):
         raise ValueError("Modul ist nicht installiert")
     required = {"jarvis-module.json", "module.py", "ui.js"}
@@ -114,7 +114,7 @@ def checked_installed_directory(target: Path, root: Path) -> None:
         if child.is_symlink() or child.is_junction():
             raise ValueError("Modulordner enthält einen Link")
         found.add(child.name)
-    if found != required:
+    if not allow_missing and found != required:
         raise ValueError("Modulordner ist unvollständig")
 
 
@@ -209,7 +209,7 @@ def remove_package(module_id: str, data_dir: Path, db: Database) -> str:
         raise ValueError("Ungültige Modul-ID")
     root = Path(data_dir) / "modules"
     target = root / module_id
-    checked_installed_directory(target, root)
+    checked_installed_directory(target, root, allow_missing=True)
     if db.get_settings().get(f"module.{module_id}.enabled") == "1":
         raise ValueError("Modul zuerst in Jarvis deaktivieren")
     if unfinished_module_run(db, module_id):

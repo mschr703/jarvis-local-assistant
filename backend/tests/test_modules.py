@@ -440,6 +440,31 @@ def test_modified_installed_package_is_blocked_until_reinstalled(tmp_path):
         assert client.get("/modules/sample_notes/entries").json() == ["preserved"]
 
 
+def test_incomplete_installed_package_can_be_removed_without_losing_data(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "retained"}).status_code == 200
+        target = data_dir / "modules" / "sample_notes"
+        (target / "ui.js").unlink()
+        item = client.get("/modules").json()[0]
+        assert item["enabled"] is False and item["error"]
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 200
+        assert not target.exists()
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").json() == ["retained"]
+
+
 def test_module_upgrade_failure_restores_previous_package(tmp_path, monkeypatch):
     source_root = tmp_path / "source"
     install_fixture(source_root)

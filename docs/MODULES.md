@@ -82,6 +82,9 @@ wieder aktivieren; seine Daten bleiben erhalten. Eine automatische Datenlöschun
 gibt es nicht.
 Der Knopf **Entfernen (Daten behalten)** in der Modulansicht führt denselben
 Vorgang aus; er ist erst nach Deaktivierung nutzbar.
+Fehlt eine der drei Paketdateien, kann Jarvis den verbliebenen Ordner nach dem
+Deaktivieren trotzdem entfernen. Zusätzliche unbekannte Dateien oder Links werden
+weiterhin nicht automatisch gelöscht; diese bitte selbst prüfen.
 
 ## Paketvertrag (Modul-API 1)
 
