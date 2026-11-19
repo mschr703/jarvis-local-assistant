@@ -20,6 +20,7 @@ export default function MemoryTimelineView() {
   const [notice, setNotice] = useState('');
   const inFlight = useRef(false);
   const searchRequest = useRef(0);
+  const eventForm = useRef<HTMLElement | null>(null);
 
   const refresh = async () => {
     const request = ++searchRequest.current;
@@ -93,7 +94,7 @@ export default function MemoryTimelineView() {
         <button disabled={busy} onClick={() => void exportMarkdown()}>Gefilterte Zeitleiste als Markdown herunterladen</button></div>
       <small>Die Ansicht zeigt höchstens 200 Treffer. Der Export enthält bis zu 1000 passende Ereignisse.</small>
     </div></section>
-    <section className="card"><h3>{editing ? 'Ereignis korrigieren' : 'Ereignis eintragen'}</h3>
+    <section className="card" ref={eventForm}><h3>{editing ? 'Ereignis korrigieren' : 'Ereignis eintragen'}</h3>
       <div className="memory-form"><label>Datum <input aria-label="Ereignisdatum" type="date" value={form.date_local}
         onChange={(event) => setForm({ ...form, date_local: event.target.value })} /></label>
       <input aria-label="Ereignistitel" maxLength={160} value={form.title}
@@ -113,6 +114,15 @@ export default function MemoryTimelineView() {
         <button disabled={busy} onClick={() => void remove(item)}>Löschen</button></div></div>)}</div>
       {!items.length && <p>Keine passenden Ereignisse.</p>}
     </section>
-    <PhotoLibraryView events={eventOptions} />
+    <PhotoLibraryView events={eventOptions} onSuggestDate={(date) => {
+      if ((editing || form.date_local || form.title || form.description || form.location)
+          && !window.confirm('Aktuelle Eingaben im Ereignisformular verwerfen und EXIF-Datum übernehmen?'))
+        return false;
+      setEditing(null); setForm({ ...emptyForm(), date_local: date });
+      setNotice('EXIF-Datum nur vorbereitet. Prüfe es und speichere ein Ereignis bewusst.');
+      eventForm.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      eventForm.current?.querySelector<HTMLInputElement>('input[aria-label="Ereignistitel"]')?.focus();
+      return true;
+    }} />
   </div>;
 }

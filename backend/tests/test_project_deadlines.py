@@ -52,7 +52,7 @@ def test_project_deadline_snapshot_dst_change_removal_and_legacy(tmp_path):
     assert removed["due_utc"] == original["due_utc"]
     assert removed["current_due_utc"] is None
     archive = tmp_path / "fristen.jarvis"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     restored_db = Database(restored / "jarvis.db")

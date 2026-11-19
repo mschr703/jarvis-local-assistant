@@ -51,7 +51,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 61:
+            if version > 62:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -1084,6 +1084,15 @@ class Database:
                     apply_migration("""
                         ALTER TABLE photo_folders ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
                         PRAGMA user_version=61;
+                    """)
+            if version < 62:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(photo_assets)")}
+                if "capture_local" in columns:
+                    apply_migration("PRAGMA user_version=62;")
+                else:
+                    apply_migration("""
+                        ALTER TABLE photo_assets ADD COLUMN capture_local TEXT;
+                        PRAGMA user_version=62;
                     """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:

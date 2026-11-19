@@ -5,11 +5,13 @@ export type TimelineEventOption = { id: string; title: string; date_local: strin
 type Folder = { id: string; path: string; created_at: string; version: number };
 type Photo = { id: string; name: string; size: number; sha256: string; media_type: string;
   event_id: string | null; event_title: string | null; event_date: string | null;
-  version: number; indexed_at: string; status: 'current' | 'changed' | 'unavailable' };
+  version: number; indexed_at: string; capture_local: string | null;
+  status: 'current' | 'changed' | 'unavailable' };
 
-function PhotoRow({ photo, events, busy, onChange }: { photo: Photo;
+function PhotoRow({ photo, events, busy, onChange, onSuggestDate }: { photo: Photo;
   events: TimelineEventOption[]; busy: boolean;
-  onChange: (photo: Photo, eventId: string | null) => Promise<void> }) {
+  onChange: (photo: Photo, eventId: string | null) => Promise<void>;
+  onSuggestDate: (photo: Photo) => Promise<void> }) {
   const [selection, setSelection] = useState(photo.event_id ?? '');
   const [previewFailed, setPreviewFailed] = useState(false);
   useEffect(() => setSelection(photo.event_id ?? ''), [photo.event_id, photo.version]);
@@ -23,6 +25,10 @@ function PhotoRow({ photo, events, busy, onChange }: { photo: Photo;
         `Original ${photo.status === 'changed' ? 'geändert' : 'nicht verfügbar'}`}</div>}
     <strong>{photo.name}</strong>
     <small>{photo.status === 'current' ? 'Größe und Zeit unverändert; Vorschau prüft Inhalt' : 'Neu einlesen oder Quelle prüfen'} · {Math.round(photo.size / 1024)} KiB</small>
+    <small>{photo.capture_local ? `EXIF: ${photo.capture_local.replace('T', ' ')} (ohne Zeitzone, unbestätigt)` : 'Kein EXIF-Aufnahmedatum bekannt'}</small>
+    {photo.capture_local && <button disabled={busy || photo.status !== 'current'}
+      onClick={() => void onSuggestDate(photo)}>
+      EXIF-Datum in Ereignisformular übernehmen</button>}
     <label>Ereignis
       <select aria-label={`Ereignis für ${photo.name}`} value={selection}
         onChange={(event) => setSelection(event.target.value)}>
@@ -38,7 +44,8 @@ function PhotoRow({ photo, events, busy, onChange }: { photo: Photo;
   </div>;
 }
 
-export default function PhotoLibraryView({ events }: { events: TimelineEventOption[] }) {
+export default function PhotoLibraryView({ events, onSuggestDate }: { events: TimelineEventOption[];
+  onSuggestDate: (date: string) => boolean }) {
   const [folder, setFolder] = useState<Folder | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [path, setPath] = useState('');
@@ -91,6 +98,13 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
       body: JSON.stringify({ event_id: eventId, expected_version: photo.version }) });
     return eventId ? 'Foto dem Ereignis zugeordnet.' : 'Fotozuordnung gelöst.';
   });
+  const suggestDate = (photo: Photo) => run(async () => {
+    const checked = await api<{ capture_local: string; source: string }>(
+      `/photo-assets/${photo.id}/capture-date`);
+    return onSuggestDate(checked.capture_local.slice(0, 10))
+      ? 'EXIF-Datum im Ereignisformular vorbereitet; bitte selbst prüfen und speichern.'
+      : 'Übernahme abgebrochen.';
+  });
   const exportAlbum = (eventId: string) => run(async () => {
     const blob = await downloadMemoryAlbum(eventId);
     const url = URL.createObjectURL(blob);
@@ -130,11 +144,11 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
           <button disabled={busy} onClick={() => void exportAlbum(event.id)}>Album als ZIP herunterladen</button>
           <div className="photo-grid">{linked.filter((photo) => photo.event_id === event.id)
             .map((photo) => <PhotoRow key={photo.id} photo={photo} events={events}
-              busy={busy} onChange={link} />)}</div></div>)}
+              busy={busy} onChange={link} onSuggestDate={suggestDate} />)}</div></div>)}
     </>}
     {unlinked.length > 0 && <><h4>Noch nicht zugeordnet</h4><div className="photo-grid">
       {unlinked.map((photo) => <PhotoRow key={photo.id} photo={photo} events={events}
-        busy={busy} onChange={link} />)}</div></>}
+        busy={busy} onChange={link} onSuggestDate={suggestDate} />)}</div></>}
     {folder && !photos.length && <p>Noch keine Fotos eingelesen.</p>}
   </section>;
 }

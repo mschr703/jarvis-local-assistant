@@ -127,7 +127,7 @@ def test_research_api_persists_verified_claims_and_backup(tmp_path, monkeypatch)
         assert client.get("/research/missing").status_code == 404
     assert calls == ["https://science.nasa.gov/mission/europa-clipper/"]
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     target = tmp_path / "restored"
     restore_backup(archive, target)
     assert ResearchStore(Database(target / "jarvis.db")).get(report["id"]) == report

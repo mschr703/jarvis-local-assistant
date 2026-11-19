@@ -7,6 +7,7 @@ import io
 import json
 import re
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,7 +38,23 @@ def _root(path: str) -> Path:
     return resolved
 
 
-def _image_format(data: bytes, suffix: str) -> str:
+def _capture_local(image: Image.Image) -> str | None:
+    try:
+        metadata = image.getexif()
+        detailed = metadata.get_ifd(0x8769)
+    except (OSError, ValueError, RuntimeError):
+        return None
+    for tag in (36867, 36868, 306):  # DateTimeOriginal, DateTimeDigitized, DateTime
+        value = detailed.get(tag) or metadata.get(tag)
+        if isinstance(value, str) and re.fullmatch(r"\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}", value):
+            try:
+                return datetime.strptime(value, "%Y:%m:%d %H:%M:%S").isoformat(timespec="seconds")
+            except ValueError:
+                continue
+    return None
+
+
+def _image_format(data: bytes, suffix: str) -> tuple[str, str | None]:
     try:
         with Image.open(io.BytesIO(data)) as image:
             image_format = image.format
@@ -45,7 +62,8 @@ def _image_format(data: bytes, suffix: str) -> str:
                     or image.width * image.height > MAX_PHOTO_PIXELS):
                 raise ValueError("Fotoformat oder Bildgröße ist nicht unterstützt")
             image.verify()
-            return image_format
+        with Image.open(io.BytesIO(data)) as image:
+            return image_format, _capture_local(image)
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValueError("Foto kann nicht sicher gelesen werden") from exc
 
@@ -158,7 +176,7 @@ class PhotoLibrary:
         for candidate in candidates[:MAX_PHOTOS]:
             try:
                 data, mtime_ns = self._read_source(root, candidate.name)
-                image_format = _image_format(data, candidate.suffix)
+                image_format, capture_local = _image_format(data, candidate.suffix)
             except (OSError, ValueError):
                 counts["skipped"] += 1
                 continue
@@ -167,14 +185,14 @@ class PhotoLibrary:
                 current = db.execute("SELECT * FROM photo_assets WHERE folder_id=? AND name=?",
                                      (folder_id, candidate.name)).fetchone()
                 if current and current["sha256"] == digest:
-                    db.execute("UPDATE photo_assets SET mtime_ns=?,indexed_at=? WHERE id=?",
-                               (mtime_ns, utcnow(), current["id"]))
+                    db.execute("UPDATE photo_assets SET mtime_ns=?,indexed_at=?,capture_local=? "
+                               "WHERE id=?", (mtime_ns, utcnow(), capture_local, current["id"]))
                     counts["unchanged"] += 1
                 elif current:
                     db.execute("UPDATE photo_assets SET sha256=?,size=?,mtime_ns=?,media_type=?,"
-                               "event_id=NULL,version=version+1,indexed_at=? WHERE id=?",
+                               "capture_local=?,event_id=NULL,version=version+1,indexed_at=? WHERE id=?",
                                (digest, len(data), mtime_ns, MEDIA_TYPES[image_format],
-                                utcnow(), current["id"]))
+                                capture_local, utcnow(), current["id"]))
                     counts["indexed"] += 1
                 else:
                     total = db.execute("SELECT count(*) FROM photo_assets").fetchone()[0]
@@ -183,9 +201,9 @@ class PhotoLibrary:
                         counts["limited"] = True
                         continue
                     db.execute("INSERT INTO photo_assets(id,folder_id,name,sha256,size,mtime_ns,"
-                               "media_type,indexed_at) VALUES(?,?,?,?,?,?,?,?)",
+                               "media_type,capture_local,indexed_at) VALUES(?,?,?,?,?,?,?,?,?)",
                                (str(uuid4()), folder_id, candidate.name, digest, len(data),
-                                mtime_ns, MEDIA_TYPES[image_format], utcnow()))
+                                mtime_ns, MEDIA_TYPES[image_format], capture_local, utcnow()))
                     counts["indexed"] += 1
         return counts
 
@@ -211,7 +229,7 @@ class PhotoLibrary:
             status = "unavailable"
         return {key: asset[key] for key in ("id", "name", "sha256", "size", "media_type",
                                             "event_id", "event_title", "event_date", "version",
-                                            "indexed_at")} | {"status": status}
+                                            "indexed_at", "capture_local")} | {"status": status}
 
     def list(self) -> list[dict]:
         with self.db.connect() as db:
@@ -249,6 +267,13 @@ class PhotoLibrary:
                 return output.getvalue()
         except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
             raise PhotoConflict("Foto kann nicht angezeigt werden") from exc
+
+    def verified_capture_date(self, asset_id: str) -> dict:
+        asset = self._asset(asset_id)
+        self._verified_bytes(asset)
+        if not asset["capture_local"]:
+            raise ValueError("Kein EXIF-Aufnahmedatum vorhanden")
+        return {"capture_local": asset["capture_local"], "source": "exif_unconfirmed"}
 
     def set_event(self, asset_id: str, event_id: str | None, expected_version: int) -> dict:
         asset = self._asset(asset_id)
@@ -297,6 +322,7 @@ class PhotoLibrary:
                         ("date_local", "title", "description", "location", "source_kind")}
         manifest = {"format": "jarvis-life-album-v1", "event": event_public,
                     "photos": [{"name": asset["name"], "archive_name": archive_name,
+                                "capture_local_unconfirmed": asset["capture_local"],
                                 "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
                                for archive_name, data, asset in photo_bytes]}
         lines = [f"# {event['date_local']} · {event['title']}", "",

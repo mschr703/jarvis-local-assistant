@@ -33,11 +33,11 @@ def test_rebind_after_backup_preserves_verified_links(tmp_path):
     first = library.list()[0]
     library.set_event(first["id"], event["id"], first["version"])
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     new = tmp_path / "new-photos"
     old.rename(new)
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 61
+    assert restore_backup(archive, restored_root)["schema"] == 62
     restored = PhotoLibrary(Database(restored_root / "jarvis.db"))
     assert restored.list()[0]["status"] == "unavailable"
     with pytest.raises(PhotoConflict):
@@ -106,13 +106,10 @@ def test_rebind_api_csrf_conflict_and_success(tmp_path):
 def test_rebind_migration_from_60(tmp_path):
     db = Database(tmp_path / "jarvis.db")
     with db.connect() as connection:
-        connection.execute("DROP TABLE photo_assets")
-        connection.execute("DROP TABLE photo_folders")
-        connection.execute("CREATE TABLE photo_folders (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, "
-                           "created_at TEXT NOT NULL)")
+        connection.execute("ALTER TABLE photo_folders DROP COLUMN version")
         connection.execute("PRAGMA user_version=60")
     migrated = Database(db.path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 61
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 62
         columns = [row[1] for row in connection.execute("PRAGMA table_info(photo_folders)")]
         assert "version" in columns

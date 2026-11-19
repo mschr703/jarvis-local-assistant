@@ -3445,6 +3445,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         return Response(content, media_type="image/jpeg")
 
+    @app.get("/photo-assets/{asset_id}/capture-date")
+    async def photo_asset_capture_date(asset_id: str):
+        try:
+            return await run_in_threadpool(photo_library.verified_capture_date, asset_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except PhotoConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.put("/photo-assets/{asset_id}/event")
     async def photo_asset_set_event(asset_id: str, data: PhotoEventInput):
         try:

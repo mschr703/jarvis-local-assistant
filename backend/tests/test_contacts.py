@@ -34,9 +34,9 @@ def test_two_people_same_name_notes_search_and_backup(tmp_path):
     assert contacts.get(colleague["id"])["notes"] == []
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 61
+    assert restore_backup(archive, restored_root)["schema"] == 62
     restored = ContactStore(Database(restored_root / "jarvis.db"))
     assert restored.get(friend["id"])["notes"][0]["content"] == "Wir wollen ins Museum."
     assert restored.get(colleague["id"])["notes"] == []
@@ -116,7 +116,7 @@ def test_schema_54_migrates_without_dropping_existing_data(tmp_path):
         connection.execute("PRAGMA user_version=54")
     migrated = Database(path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 61
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 62
         assert connection.execute("SELECT detail FROM activity WHERE id='old'").fetchone()[0] == "kept"
     assert ContactStore(migrated).create("Alt", "Migration")["name"] == "Alt"
 
@@ -143,9 +143,9 @@ def test_shared_plans_search_versions_backup_and_cascade(tmp_path):
         store.update_plan(alex["id"], plan["id"], 2, "X", "", "maybe")
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 61
+    assert restore_backup(archive, restored_root)["schema"] == 62
     restored = ContactStore(Database(restored_root / "jarvis.db"))
     assert restored.get(alex["id"])["plans"][0]["title"] == "Kunstmuseum"
     restored.delete_plan(alex["id"], plan["id"], 2)
@@ -244,9 +244,9 @@ def test_reminder_link_backup_migration_and_actual_local_notification(tmp_path):
     task = tasks.create("Kino mit Alex", "", future_due(), "Europe/Paris")
     contacts.link_reminder(person["id"], plan["id"], 1, task["id"])
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 61
+    assert create_backup(root, archive)["schema"] == 62
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 61
+    assert restore_backup(archive, restored_root)["schema"] == 62
     restored_db = Database(restored_root / "jarvis.db")
     assert ContactStore(restored_db).get(person["id"])["plans"][0]["reminder"][
         "status"] == "active"
