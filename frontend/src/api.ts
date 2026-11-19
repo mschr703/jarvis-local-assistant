@@ -138,6 +138,13 @@ export async function downloadMemoryTimeline(query: string, fromDate: string,
   return response.blob();
 }
 
+export async function downloadMemoryAlbum(eventId: string): Promise<Blob> {
+  const response = await requestWithSession(`/memory-events/${encodeURIComponent(eventId)}/album`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
 export async function verifiedSearchDocumentForLocalChat(documentId: string,
   expectedPath: string, expectedSha256: string): Promise<File> {
   if (!/\.pdf$/i.test(expectedPath))

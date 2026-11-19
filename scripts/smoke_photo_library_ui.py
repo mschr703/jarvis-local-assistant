@@ -1,9 +1,11 @@
 """Exercise selected local photos, manual event links, and stale originals in Edge."""
 
+import io
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -38,7 +40,8 @@ def main() -> None:
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(channel="msedge", headless=True)
                     try:
-                        page = browser.new_page(viewport={"width": 390, "height": 844})
+                        page = browser.new_page(viewport={"width": 390, "height": 844},
+                                                accept_downloads=True)
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded")
                         page.get_by_role("button", name="Lebenschronik", exact=True).click()
                         page.get_by_label("Ereignisdatum").fill("2024-08-12")
@@ -58,7 +61,18 @@ def main() -> None:
                         expect(page.get_by_alt_text("Vorschau von urlaub.jpg")).to_be_visible()
                         assert page.get_by_alt_text("Vorschau von urlaub.jpg").evaluate(
                             "(img) => img.complete && img.naturalWidth > 0")
+                        with page.expect_download() as album_download:
+                            page.get_by_role("button", name="Album als ZIP herunterladen").click()
+                        download = album_download.value
+                        assert download.suggested_filename == "lebensalbum.zip"
+                        with zipfile.ZipFile(io.BytesIO(Path(download.path()).read_bytes())) as album:
+                            manifest = json.loads(album.read("manifest.json"))
+                            assert manifest["event"]["title"] == "Urlaub am See"
+                            assert album.read(manifest["photos"][0]["archive_name"]) == photo.read_bytes()
                         Image.new("RGB", (50, 40), "green").save(photo)
+                        page.get_by_role("button", name="Album als ZIP herunterladen").click()
+                        expect(page.get_by_text("Fotoquelle wurde geändert; Ordner neu einlesen"))\
+                            .to_be_visible()
                         page.get_by_role("button", name="Status aktualisieren").click()
                         expect(page.get_by_text("Original geändert")).to_be_visible()
                         page.get_by_role("button", name="Fotos einlesen").click()
@@ -78,6 +92,7 @@ def main() -> None:
                             assert connection.execute("SELECT count(*) FROM memory_events").fetchone()[0] == 1
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"folder": "selected", "photo": "linked_reconfirmed",
+                                          "album": "downloaded_then_stale_blocked",
                                           "stale": "blocked", "original": "unchanged",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:

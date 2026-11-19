@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import re
+import zipfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +17,8 @@ from jarvis.db import Database, utcnow
 MAX_PHOTOS = 300
 MAX_PHOTO_BYTES = 15 * 1024 * 1024
 MAX_PHOTO_PIXELS = 20_000_000
+MAX_ALBUM_PHOTOS = 10
+MAX_ALBUM_BYTES = 64 * 1024 * 1024
 FORMATS = {"JPEG": (".jpg", ".jpeg"), "PNG": (".png",), "WEBP": (".webp",)}
 MEDIA_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
 
@@ -221,3 +226,48 @@ class PhotoLibrary:
                     raise PhotoConflict("Fotozuordnung wurde inzwischen geändert")
                 raise LookupError("Foto nicht gefunden")
         return self._public(self._asset(asset_id))
+
+    def album(self, event_id: str) -> bytes:
+        with self.db.connect() as db:
+            event = db.execute("SELECT * FROM memory_events WHERE id=?", (event_id,)).fetchone()
+            if event is None:
+                raise LookupError("Ereignis nicht gefunden")
+            rows = db.execute("SELECT a.*,f.path AS folder_path FROM photo_assets a "
+                              "JOIN photo_folders f ON f.id=a.folder_id "
+                              "WHERE a.event_id=? ORDER BY a.name COLLATE NOCASE",
+                              (event_id,)).fetchall()
+        if not rows:
+            raise ValueError("Für dieses Ereignis sind keine Fotos zugeordnet")
+        if len(rows) > MAX_ALBUM_PHOTOS:
+            raise ValueError("Ein Album enthält höchstens zehn zugeordnete Fotos")
+        if sum(row["size"] for row in rows) > MAX_ALBUM_BYTES:
+            raise ValueError("Album überschreitet 64 MiB")
+        photo_bytes: list[tuple[str, bytes, dict]] = []
+        total = 0
+        for index, row in enumerate(rows, 1):
+            asset = dict(row)
+            data = self._verified_bytes(asset)
+            total += len(data)
+            if total > MAX_ALBUM_BYTES:
+                raise ValueError("Album überschreitet 64 MiB")
+            stem = re.sub(r"[^\w.-]", "_", Path(asset["name"]).stem, flags=re.UNICODE)
+            archive_name = f"photos/{index:02d}-{stem[:60]}{Path(asset['name']).suffix.lower()}"
+            photo_bytes.append((archive_name, data, asset))
+        event_public = {key: event[key] for key in
+                        ("date_local", "title", "description", "location", "source_kind")}
+        manifest = {"format": "jarvis-life-album-v1", "event": event_public,
+                    "photos": [{"name": asset["name"], "archive_name": archive_name,
+                                "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+                               for archive_name, data, asset in photo_bytes]}
+        lines = [f"# {event['date_local']} · {event['title']}", "",
+                 f"Ort: {event['location'] or 'Nicht angegeben'}", "",
+                 event["description"] or "Keine Beschreibung.", "", "## Fotos", ""]
+        lines.extend(f"- {asset['name']} → {archive_name}" for archive_name, _, asset in photo_bytes)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("album.md", "\n".join(lines).encode("utf-8"))
+            archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False,
+                                                         indent=2).encode("utf-8"))
+            for archive_name, data, _asset in photo_bytes:
+                archive.writestr(archive_name, data)
+        return output.getvalue()

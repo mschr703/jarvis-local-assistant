@@ -3343,6 +3343,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @app.get("/memory-events/{event_id}/album")
+    async def memory_event_album(event_id: str):
+        try:
+            content = await run_in_threadpool(photo_library.album, event_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except PhotoConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return Response(content, media_type="application/zip",
+                        headers={"Content-Disposition": 'attachment; filename="lebensalbum.zip"'})
+
     @app.post("/memory-events", status_code=201)
     async def memory_event_create(data: MemoryEventInput):
         try:

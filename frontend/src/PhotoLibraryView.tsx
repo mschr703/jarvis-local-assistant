@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from './api';
+import { api, downloadMemoryAlbum } from './api';
 
 export type TimelineEventOption = { id: string; title: string; date_local: string };
 type Folder = { id: string; path: string; created_at: string };
@@ -27,6 +27,8 @@ function PhotoRow({ photo, events, busy, onChange }: { photo: Photo;
       <select aria-label={`Ereignis für ${photo.name}`} value={selection}
         onChange={(event) => setSelection(event.target.value)}>
         <option value="">Nicht zugeordnet</option>
+        {photo.event_id && !events.some((event) => event.id === photo.event_id) &&
+          <option value={photo.event_id}>{photo.event_date} · {photo.event_title}</option>}
         {events.map((event) => <option key={event.id} value={event.id}>{event.date_local} · {event.title}</option>)}
       </select>
     </label>
@@ -81,9 +83,20 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
       body: JSON.stringify({ event_id: eventId, expected_version: photo.version }) });
     return eventId ? 'Foto dem Ereignis zugeordnet.' : 'Fotozuordnung gelöst.';
   });
+  const exportAlbum = (eventId: string) => run(async () => {
+    const blob = await downloadMemoryAlbum(eventId);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = 'lebensalbum.zip';
+    document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return 'Lebensalbum mit Originalfotos heruntergeladen.';
+  });
 
   const linked = photos.filter((photo) => photo.event_id);
   const unlinked = photos.filter((photo) => !photo.event_id);
+  const albums = Array.from(new Map(linked.map((photo) => [photo.event_id,
+    { id: photo.event_id!, title: photo.event_title, date: photo.event_date }])).values());
   return <section className="card photo-library">
     <h3>Ausgewählte Fotos</h3>
     <p>Gib einen Fotoordner auf diesem Laptop ausdrücklich frei. Jarvis liest höchstens 300 JPEG-, PNG- oder WebP-Dateien direkt aus diesem Ordner, jeweils bis 15 MiB. Originale bleiben unverändert; du ordnest Fotos einzeln einem Ereignis zu.</p>
@@ -99,8 +112,9 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
       <button className="primary" disabled={busy || !path.trim()} onClick={() => void addFolder()}>Fotoordner freigeben</button>
     </div>}
     {linked.length > 0 && <><h4>Alben nach Ereignis</h4>
-      {events.filter((event) => linked.some((photo) => photo.event_id === event.id)).map((event) =>
-        <div key={event.id}><h5>{event.date_local} · {event.title}</h5>
+      {albums.map((event) =>
+        <div key={event.id}><h5>{event.date} · {event.title}</h5>
+          <button disabled={busy} onClick={() => void exportAlbum(event.id)}>Album als ZIP herunterladen</button>
           <div className="photo-grid">{linked.filter((photo) => photo.event_id === event.id)
             .map((photo) => <PhotoRow key={photo.id} photo={photo} events={events}
               busy={busy} onChange={link} />)}</div></div>)}
