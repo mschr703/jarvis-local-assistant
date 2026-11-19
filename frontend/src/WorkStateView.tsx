@@ -146,7 +146,7 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
 export default function WorkStateView({ visible, onTasks, onResearch, requestedSource }: {
   visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void;
   requestedSource: { kind: 'project'; id: string; serial: number;
-    match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory'; id: string } } | null }) {
+    match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task'; id: string } } | null }) {
   const [items, setItems] = useState<WorkSummary[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -278,7 +278,8 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
         || lastSourceScroll.current === requestedSource.serial) return;
     const frame = window.requestAnimationFrame(() => {
       const match = requestedSource.match;
-      const target = match ? window.document.getElementById(`project-${match.kind}-${match.id}`) : null;
+      const target = match ? window.document.getElementById(
+        `project-${match.kind.replace('_', '-')}-${match.id}`) : null;
       (target || window.document.getElementById(`search-source-project-${requestedSource.id}`))
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       lastSourceScroll.current = requestedSource.serial;

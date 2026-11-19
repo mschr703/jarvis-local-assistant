@@ -19,6 +19,7 @@ from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
 from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
+from jarvis.project_person_tasks import ProjectPersonTaskStore
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
 
@@ -54,6 +55,10 @@ def main() -> None:
         memory_links = ProjectMemoryStore(db, states)
         memory_link = memory_links.add(project["id"], project["version"],
                                        memory["id"], "Absprache aus dem Erstgespräch")
+        person_tasks = ProjectPersonTaskStore(db, states, people)
+        person_task = person_tasks.add(project["id"], project["version"],
+                                       person["id"], task["id"], "responsible",
+                                       "Kontrolliert Nebenkostenaufstellung", None)
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -115,6 +120,25 @@ def main() -> None:
                         expect(task_hit).to_contain_text("offen")
                         task_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
                         expect(page.locator(f"#project-task-{task['id']}")).to_be_in_viewport()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Nebenkostenaufstellung")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        person_task_hit = results.locator("article").filter(
+                            has_text="Person-Aufgabe-Beleg: Míra Weber")
+                        expect(person_task_hit).to_contain_text("Kontrolliert Nebenkostenaufstellung")
+                        person_task_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
+                        expect(page.locator(f"#project-person-task-{person_task['id']}")).to_be_in_viewport()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Nebenkostenaufstellung")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        stale_person_task_hit = results.locator("article").filter(
+                            has_text="Person-Aufgabe-Beleg: Míra Weber")
+                        expect(stale_person_task_hit).to_be_visible()
+                        person_tasks.delete(project["id"], person_task["id"], project["version"],
+                                            person_task["version"])
+                        stale_person_task_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
+                        expect(page.locator(f"#project-person-task-{person_task['id']}")).to_have_count(0)
+                        expect(page.locator(f"#search-source-project-{project['id']}")).to_be_in_viewport()
                         page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()

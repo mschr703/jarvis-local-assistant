@@ -16,6 +16,7 @@ MAX_PROJECT_ALIAS_ROWS = 2000
 MAX_PROJECT_TASK_ROWS = 2000
 MAX_PROJECT_FILE_ROWS = 2000
 MAX_PROJECT_MEMORY_ROWS = 2000
+MAX_PROJECT_PERSON_TASK_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -28,6 +29,10 @@ STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "
                        "am", "an", "aus", "bei", "nach", "bekannt"})
 PROJECT_RELATIONS = {"lead": "Leitung", "contributor": "Mitwirkung",
                      "contact": "Kontakt", "reviewer": "Prüfung", "other": "Andere Beziehung"}
+PERSON_TASK_RELATIONS = {"responsible": "Verantwortlich", "involved": "Beteiligt",
+                         "reviewer": "Prüfend"}
+PROJECT_MATCH_PRIORITY = {"document": 0, "task": 1, "alias": 2, "person": 3,
+                          "memory": 4, "person_task": 5}
 
 
 def query_terms(query: str) -> tuple[str, list[str]]:
@@ -167,6 +172,18 @@ def search(db: Database, query: str, kind: str = "all",
             ORDER BY m.updated_at DESC,m.id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_MEMORY_ROWS + 1))] if kind in {
             "all", "project"} else []
+        project_person_tasks = [dict(row) for row in connection.execute("""
+            SELECT link.id,link.state_id,link.task_id,link.task_title,
+                   link.relation_type,link.source_note,link.source_document_id,
+                   p.name AS person_name,t.title AS current_title,t.status AS current_status
+            FROM project_person_tasks link
+            JOIN project_people p ON p.id=link.person_id AND p.state_id=link.state_id
+            JOIN (SELECT id FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?) s
+                ON s.id=link.state_id
+            LEFT JOIN tasks t ON t.id=link.task_id
+            ORDER BY link.updated_at DESC,link.id DESC LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_PERSON_TASK_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -220,6 +237,7 @@ def search(db: Database, query: str, kind: str = "all",
                or len(project_tasks) > MAX_PROJECT_TASK_ROWS
                or len(project_files) > MAX_PROJECT_FILE_ROWS
                or len(project_memories) > MAX_PROJECT_MEMORY_ROWS
+               or len(project_person_tasks) > MAX_PROJECT_PERSON_TASK_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -307,6 +325,9 @@ def search(db: Database, query: str, kind: str = "all",
     memories_by_project: dict[str, list[dict]] = {}
     for memory in project_memories[:MAX_PROJECT_MEMORY_ROWS]:
         memories_by_project.setdefault(memory["state_id"], []).append(memory)
+    person_tasks_by_project: dict[str, list[dict]] = {}
+    for link in project_person_tasks[:MAX_PROJECT_PERSON_TASK_ROWS]:
+        person_tasks_by_project.setdefault(link["state_id"], []).append(link)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -364,14 +385,30 @@ def search(db: Database, query: str, kind: str = "all",
         matching_memories.sort(key=lambda item: (-item[0], item[1]["id"]))
         if matching_memories:
             score += matching_memories[0][0]
+        matching_person_tasks = []
+        for link in person_tasks_by_project.get(row["id"], []):
+            current_title = link["current_title"] or link["task_title"]
+            role = PERSON_TASK_RELATIONS[link["relation_type"]]
+            link_score = _score(folded_query, folded_terms,
+                                _fold(f"{link['person_name']} {current_title}"),
+                                _fold(f"{link['task_title']} {role} {link['source_note']}"))
+            if link_score:
+                matching_person_tasks.append((link_score, link, role))
+        matching_person_tasks.sort(key=lambda item: (-item[0], item[1]["id"]))
+        if matching_person_tasks:
+            score += matching_person_tasks[0][0]
         if score:
             relation_matches = (
+                [(value, "person_task", item["id"]) for value, item, _
+                 in matching_person_tasks[:1]]
+                +
                 [(value, "memory", item["id"]) for value, item in matching_memories[:1]]
                 + [(value, "document", item["id"]) for value, item in matching_files[:1]]
                 + [(value, "task", item["task_id"]) for value, item in matching_tasks[:1]]
                 + [(value, "alias", item["id"]) for value, item in matching_aliases[:1]]
                 + [(value, "person", item["id"]) for value, item, _ in matching_people[:1]])
-            relation_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+            relation_matches.sort(key=lambda item: (-item[0],
+                                                    PROJECT_MATCH_PRIORITY[item[1]], item[2]))
             match = relation_matches[0] if relation_matches else None
             file_excerpts = [f"Projektdatei: {file['name']} · Original und Freigabe"
                              " im Arbeitsstand prüfen"
@@ -382,6 +419,18 @@ def search(db: Database, query: str, kind: str = "all",
                                f" · Herkunft: {memory['source_note'][:100]}"
                                " · aktuellen Status im Arbeitsstand prüfen"
                                for _, memory in matching_memories[:2]]
+            person_task_excerpts = []
+            for _, link, role in matching_person_tasks[:2]:
+                current = link["current_title"]
+                title = current or link["task_title"]
+                renamed = f" (damals: {link['task_title']})" if current and current != link["task_title"] else ""
+                status = ("gelöscht" if current is None else
+                          "erledigt" if link["current_status"] == "done" else "offen")
+                person_task_excerpts.append(
+                    f"Person-Aufgabe-Beleg: {link['person_name']} → {title}{renamed}"
+                    f" · {role} · {status} · Herkunft: {link['source_note']}"
+                    + (" · Dateibeleg im Arbeitsstand prüfen"
+                       if link["source_document_id"] else " · eigene Angabe"))
             task_excerpts = []
             for _, task in matching_tasks[:2]:
                 if task["current_title"] is None:
@@ -404,7 +453,8 @@ def search(db: Database, query: str, kind: str = "all",
                                for _, person, role in matching_people[:2]]
             project_items.append({"kind": "project", "id": row["id"],
                                   "title": row["project"],
-                                  "excerpt": " · ".join([*memory_excerpts, *file_excerpts,
+                                  "excerpt": " · ".join([*person_task_excerpts,
+                                                         *memory_excerpts, *file_excerpts,
                                                          *task_excerpts,
                                                          *alias_excerpts,
                                                          *person_excerpts, body])[:500],

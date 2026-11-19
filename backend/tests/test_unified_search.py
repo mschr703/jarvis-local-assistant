@@ -13,6 +13,7 @@ from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
 from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
+from jarvis.project_person_tasks import ProjectPersonTaskStore
 from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
 from jarvis.unified_search import search
@@ -96,6 +97,57 @@ def test_project_memory_search_reports_bounded_candidates(tmp_path, monkeypatch)
         links.add(project["id"], project["version"], item["id"],
                   "Manuell geprüfter Projektbeleg")
     monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_MEMORY_ROWS", 1)
+    result = search(db, "Orion", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
+
+
+def test_project_person_task_evidence_is_searchable_and_openable(tmp_path):
+    db, _docs, states, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [], [task["id"]], [])
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber",
+                        "reviewer", "Prüft Heizkosten", None)
+    links = ProjectPersonTaskStore(db, states, people)
+    link = links.add(project["id"], project["version"], person["id"], task["id"],
+                     "responsible", "Kontrolliert Nebenkostenaufstellung", None)
+    hit = search(db, "Nebenkostenaufstellung", "project")["results"][0]
+    assert hit["match_kind"] == "person_task" and hit["match_id"] == link["id"]
+    assert "Person-Aufgabe-Beleg: Mira Weber → Budgetplanung" in hit["excerpt"]
+    assert "Verantwortlich · offen · Herkunft: Kontrolliert Nebenkostenaufstellung" in hit["excerpt"]
+    assert search(db, "Budgetplanung", "project")["results"][0]["match_kind"] == "task"
+    tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+    renamed = search(db, "Nebenkostenaufstellung", "project")["results"][0]
+    assert "Kostenprüfung (damals: Budgetplanung)" in renamed["excerpt"]
+    assert renamed["match_id"] == link["id"]
+    tasks.complete(task["id"])
+    assert "Verantwortlich · erledigt" in search(
+        db, "Nebenkostenaufstellung", "project")["results"][0]["excerpt"]
+    tasks.delete(task["id"])
+    assert "Verantwortlich · gelöscht" in search(
+        db, "Nebenkostenaufstellung", "project")["results"][0]["excerpt"]
+    links.delete(project["id"], link["id"], project["version"], link["version"])
+    assert search(db, "Nebenkostenaufstellung", "project")["results"] == []
+
+
+def test_project_person_task_search_reports_bounded_candidates(tmp_path, monkeypatch):
+    db, _docs, states, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [], [task["id"]], [])
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber",
+                        "reviewer", "Prüft Heizkosten", None)
+    links = ProjectPersonTaskStore(db, states, people)
+    for role in ("responsible", "reviewer"):
+        links.add(project["id"], project["version"], person["id"], task["id"],
+                  role, "Manuell geprüfte Aufgabenbeziehung", None)
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_PERSON_TASK_ROWS", 1)
     result = search(db, "Orion", "project")
     assert result["limited"] and result["counts"]["project"] == 1
 
