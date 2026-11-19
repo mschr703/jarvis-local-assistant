@@ -35,7 +35,7 @@ def test_draft_rule_versions_conflict_rollback_and_backup(tmp_path):
     assert store.activate(1, 2)["active_version"] == 1
     assert store.history()["activations"][0]["from_version"] == 2
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 58
+    assert create_backup(data, archive)["schema"] == 59
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert DraftRuleStore(Database(restored / "jarvis.db")).history()["revision"] == 3

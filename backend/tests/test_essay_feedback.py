@@ -112,7 +112,7 @@ def test_feedback_survives_restart_backup_and_schema_32_migration(tmp_path):
                                feedback_snapshot=[{"id": item["id"], "note": item["note"]}])
     assert DraftStore(Database(root / "jarvis.db"), root).essay_feedback()[0]["id"] == item["id"]
     archive = tmp_path / "feedback.zip"
-    assert create_backup(root, archive)["schema"] == 58
+    assert create_backup(root, archive)["schema"] == 59
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     recovered = DraftStore(Database(restored / "jarvis.db"), restored)
@@ -150,4 +150,4 @@ def test_feedback_survives_restart_backup_and_schema_32_migration(tmp_path):
     migrated = Database(legacy)
     assert DraftStore(migrated, tmp_path).essay_feedback() == []
     with sqlite3.connect(legacy) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 58
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 59

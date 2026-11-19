@@ -102,7 +102,7 @@ def test_work_state_backup_restore_keeps_snapshot(environment, tmp_path):
     db, _, _, store, path, document, task = environment
     saved = create_state(store, document, task)
     archive = tmp_path / "work-backup.zip"
-    assert create_backup(db.path.parent, archive)["schema"] == 58
+    assert create_backup(db.path.parent, archive)["schema"] == 59
     restored_path = tmp_path / "restored"
     restore_backup(archive, restored_path)
     restored_db = Database(restored_path / "jarvis.db")

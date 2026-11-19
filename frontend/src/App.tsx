@@ -23,15 +23,16 @@ const CodeProjectView = lazy(() => import('./CodeProjectView'));
 const ModelChoiceBanner = lazy(() => import('./ModelChoiceBanner'));
 const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
 const ContactView = lazy(() => import('./ContactView'));
+const MemoryTimelineView = lazy(() => import('./MemoryTimelineView'));
 
-type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
+type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'life_events' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
 type QuickCapture = { text: string; files: string[]; notice: string };
 type SearchSourceRequest =
   | { kind: 'project'; id: string; serial: number }
   | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
-const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
+const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['life_events', 'Lebenschronik'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
 
 export default function App() {
   const [page, setPage] = useState<Page>('status');
@@ -230,6 +231,7 @@ export default function App() {
         page === 'research' ? null :
         page === 'tasks' ? null :
         page === 'contacts' ? null :
+        page === 'life_events' ? <MemoryTimelineView /> :
         page === 'time_model' ? null :
         page === 'evening_plans' ? null :
         page === 'work_states' ? null :

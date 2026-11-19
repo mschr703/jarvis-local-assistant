@@ -166,7 +166,7 @@ def test_snooze_conflict_api_and_backup_restore(tmp_path):
                            json={"minutes": 15}, headers=headers).status_code == 409
         assert client.post("/notifications/not-found/ack", headers=headers).status_code == 404
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 58
+    assert create_backup(root, archive)["schema"] == 59
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     notices = TaskStore(Database(restored / "jarvis.db")).notifications()

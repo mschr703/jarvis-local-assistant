@@ -115,7 +115,7 @@ def test_focus_api_priority_change_and_backup_restore(tmp_path):
         assert lowered["priority"] == 2
         assert client.get("/notifications").json()[0]["focus_suppressed"]
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 58
+    assert create_backup(root, archive)["schema"] == 59
     target = tmp_path / "restored"
     restore_backup(archive, target)
     restored_focus = FocusStore(Database(target / "jarvis.db"))

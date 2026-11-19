@@ -52,7 +52,7 @@ def test_schema_48_migrates_to_learning_store(tmp_path):
         connection.execute("PRAGMA user_version=48")
     Database(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 58
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 59
         assert connection.execute("SELECT COUNT(*) FROM learning_sessions").fetchone()[0] == 0
 
 
@@ -134,9 +134,9 @@ def test_learning_round_api_revision_and_backup(tmp_path, monkeypatch):
         assert retried.json()["feedback_quote"] == ""
         assert retried.json()["user_answer"] == "Sonnenlicht.\nAuch Wasser."
     archive = tmp_path / "learning.zip"
-    assert create_backup(data, archive)["schema"] == 58
+    assert create_backup(data, archive)["schema"] == 59
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 58
+    assert restore_backup(archive, restored)["schema"] == 59
     store = LearningStore(Database(restored / "jarvis.db"))
     assert store.get(item["id"])["user_answer"] == "Sonnenlicht.\nAuch Wasser."
     with TestClient(create_app(settings)) as client:

@@ -69,9 +69,9 @@ def test_local_draft_uses_only_selected_recipient_and_freezes_snapshot(tmp_path,
         assert client.get(f"/drafts/{draft['id']}").json()["recipient_snapshot"] == snapshot
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 58
+    assert create_backup(root, archive)["schema"] == 59
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 58
+    assert restore_backup(archive, restored_root)["schema"] == 59
     restored_db = Database(restored_root / "jarvis.db")
     assert DraftStore(restored_db, restored_root).get_draft(draft["id"])[
         "recipient_snapshot"] == snapshot

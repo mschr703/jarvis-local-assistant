@@ -66,7 +66,7 @@ def test_evaluation_conflict_case_and_backup_restore(tmp_path):
         assert client.put(path, json=payload).status_code == 403
     assert store.get(report["id"])["sources"] == report["sources"]
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 58
+    assert create_backup(root, archive)["schema"] == 59
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert ResearchStore(Database(restored / "jarvis.db")).get(report["id"])["evaluation"] == second.json()
@@ -105,7 +105,7 @@ def test_schema_29_report_migrates_with_empty_evaluation(tmp_path):
     migrated = ResearchStore(Database(root / "jarvis.db")).get(report["id"])
     assert migrated["evaluation"] is None
     with sqlite3.connect(root / "jarvis.db") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 58
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 59
 
 
 def test_export_reflects_latest_case_version_after_restore(tmp_path):

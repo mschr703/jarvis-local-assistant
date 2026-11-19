@@ -126,6 +126,18 @@ export async function downloadChatArchive(chatId: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function downloadMemoryTimeline(query: string, fromDate: string,
+  toDate: string): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('q', query.trim());
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const response = await requestWithSession(`/memory-events/export?${params.toString()}`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
 export async function verifiedSearchDocumentForLocalChat(documentId: string,
   expectedPath: string, expectedSha256: string): Promise<File> {
   if (!/\.pdf$/i.test(expectedPath))

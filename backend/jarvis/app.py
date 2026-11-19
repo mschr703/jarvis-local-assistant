@@ -74,6 +74,7 @@ from jarvis.generation import generate_text
 from jarvis.instance import InstanceLock
 from jarvis.learning import LearningConflict, LearningStore, parse_feedback, parse_question
 from jarvis.markdown import MarkdownConflict, MarkdownNotes
+from jarvis.memory_events import MemoryEventConflict, MemoryEventStore
 from jarvis.memory_review import (
     MemoryProposalConflict,
     MemoryReviewStore,
@@ -210,6 +211,19 @@ class ContactPlanReminderInput(BaseModel):
 
     expected_plan_version: int = Field(ge=1)
     task_id: str = Field(min_length=1, max_length=80)
+
+
+class MemoryEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date_local: str = Field(min_length=10, max_length=10)
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=5000)
+    location: str = Field(default="", max_length=160)
+
+
+class MemoryEventUpdateInput(MemoryEventInput):
+    expected_version: int = Field(ge=1)
 
 
 class ChatSuggestionInput(BaseModel):
@@ -792,6 +806,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     research = ResearchStore(db)
     tasks = TaskStore(db)
     contacts = ContactStore(db)
+    memory_events = MemoryEventStore(db)
     extension_captures = ExtensionCaptureStore(db)
     focus = FocusStore(db)
     time_model = TimeModelStore(db)
@@ -920,6 +935,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.research = research
     app.state.tasks = tasks
     app.state.contacts = contacts
+    app.state.memory_events = memory_events
     app.state.extension_captures = extension_captures
     app.state.focus = focus
     app.state.time_model = time_model
@@ -3281,6 +3297,67 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except EveningPlanConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"deleted": True}
+
+    @app.get("/memory-events")
+    async def memory_event_list(q: str = Query(default="", max_length=200),
+                                from_date: str | None = None,
+                                to_date: str | None = None):
+        try:
+            return await run_in_threadpool(memory_events.list, q, from_date, to_date)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/memory-events/export")
+    async def memory_event_export(q: str = Query(default="", max_length=200),
+                                  from_date: str | None = None,
+                                  to_date: str | None = None):
+        try:
+            content = await run_in_threadpool(memory_events.export_markdown,
+                                              q, from_date, to_date)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return Response(content=content, media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="lebenschronik.md"',
+                                 "Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
+
+    @app.get("/memory-events/{event_id}")
+    async def memory_event_get(event_id: str):
+        try:
+            return await run_in_threadpool(memory_events.get, event_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/memory-events", status_code=201)
+    async def memory_event_create(data: MemoryEventInput):
+        try:
+            return await run_in_threadpool(memory_events.create, data.date_local,
+                                           data.title, data.description, data.location)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.put("/memory-events/{event_id}")
+    async def memory_event_update(event_id: str, data: MemoryEventUpdateInput):
+        try:
+            return await run_in_threadpool(memory_events.update, event_id,
+                                           data.expected_version, data.date_local,
+                                           data.title, data.description, data.location)
+        except MemoryEventConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/memory-events/{event_id}")
+    async def memory_event_delete(event_id: str, expected_version: int = Query(ge=1)):
+        try:
+            await run_in_threadpool(memory_events.delete, event_id, expected_version)
+            return {"deleted": True}
+        except MemoryEventConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @app.get("/contacts")
     async def contact_list(q: str = Query(default="", max_length=200)):
