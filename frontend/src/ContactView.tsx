@@ -122,7 +122,7 @@ export default function ContactView({ visible, requestedContact, onPrepareTask, 
     {notice && <p className="notice" role="status">{notice}</p>}
     <section className="card"><h3>Kontakt suchen</h3>
       <div className="memory-form"><input aria-label="Kontakte durchsuchen" maxLength={200} value={query}
-        onChange={(event) => { setQuery(event.target.value); setSemantic(null); }} placeholder="Name, Kontext, Beziehung oder Notiz" />
+        onChange={(event) => { setQuery(event.target.value); setSemantic(null); }} placeholder="Name, Kontext, Notiz, Vorhaben oder Erlebnis" />
       <div className="item-actions"><button disabled={busy} onClick={() => void reload().catch((error: Error) => setNotice(error.message))}>Suchen</button>
         <button disabled={busy || query.trim().length < 2 || query.trim().length > 160}
           onClick={() => void runSemantic()}>

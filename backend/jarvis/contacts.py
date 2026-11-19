@@ -27,12 +27,17 @@ def _key(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold()
 
 
+def _search_key(value: str) -> str:
+    return "".join(char for char in unicodedata.normalize("NFKD", value).casefold()
+                   if not unicodedata.combining(char))
+
+
 class ContactStore:
     def __init__(self, db: Database):
         self.db = db
 
     def list(self, query: str = "") -> list[dict]:
-        query = _key(_clean(query, "Suche", 200, required=False))
+        query = _search_key(_clean(query, "Suche", 200, required=False))
         with self.db.connect() as db:
             rows = db.execute("SELECT * FROM contacts ORDER BY name_key,context_key,id").fetchall()
             notes = db.execute("SELECT contact_id,content FROM contact_notes").fetchall()
@@ -40,6 +45,10 @@ class ContactStore:
             event_counts = {row["contact_id"]: row["count"] for row in db.execute(
                 "SELECT contact_id,COUNT(*) AS count FROM memory_event_contacts "
                 "GROUP BY contact_id")}
+            events = (db.execute("SELECT l.contact_id,e.date_local,e.title,e.location,"
+                                 "e.description FROM memory_event_contacts l "
+                                 "JOIN memory_events e ON e.id=l.event_id").fetchall()
+                      if query else [])
         by_contact: dict[str, list[str]] = {}
         for note in notes:
             by_contact.setdefault(note["contact_id"], []).append(note["content"])
@@ -49,14 +58,20 @@ class ContactStore:
             plan_by_contact.setdefault(plan["contact_id"], []).extend(
                 (plan["title"], plan["details"]))
             plan_counts[plan["contact_id"]] = plan_counts.get(plan["contact_id"], 0) + 1
+        event_by_contact: dict[str, list[str]] = {}
+        for event in events:
+            event_by_contact.setdefault(event["contact_id"], []).extend(
+                (event["date_local"], event["title"], event["location"],
+                 event["description"]))
         results = []
         for row in rows:
             person = dict(row)
             contents = by_contact.get(person["id"], [])
-            if query and not any(query in _key(value) for value in
+            if query and not any(query in _search_key(value) for value in
                                  (person["name"], person["context"],
                                   person["relationship"], *contents,
-                                  *plan_by_contact.get(person["id"], []))):
+                                  *plan_by_contact.get(person["id"], []),
+                                  *event_by_contact.get(person["id"], []))):
                 continue
             person["note_count"] = len(contents)
             person["plan_count"] = plan_counts.get(person["id"], 0)

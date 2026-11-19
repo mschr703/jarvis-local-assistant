@@ -113,9 +113,14 @@ def main() -> None:
                         expect(results).not_to_contain_text("Alex · Arbeit")
                         results.get_by_role("button", name="Quelle öffnen").click()
                         expect(page.get_by_role("heading", name="Alex · Lyon privat")).to_be_visible()
-                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        page.get_by_label("Kontakte durchsuchen").fill("Café")
+                        page.get_by_role("button", name="Suchen", exact=True).click()
                         contact_list = page.locator("section.card").filter(
                             has=page.get_by_role("heading", name="Kontakt suchen"))
+                        expect(contact_list.locator(".item-row")).to_have_count(1)
+                        expect(contact_list).to_contain_text("Lyon privat")
+                        expect(contact_list).not_to_contain_text("Alex · Arbeit")
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
                         contact_list.locator(".item-row").filter(has_text="Lyon privat")\
                             .get_by_role("button", name="Öffnen").click()
                         contact_detail = page.locator("section.card").filter(
@@ -128,6 +133,7 @@ def main() -> None:
                         expect(opened).to_contain_text("Bewusst zugeordnete Kontakte: keine")
                         page.get_by_role("button", name="Kontakte", exact=True).click()
                         expect(contact_detail).to_contain_text("Gemeinsame Lebensereignisse (0)")
+                        expect(contact_list).to_contain_text("Keine passenden Kontakte.")
                         page.reload(wait_until="domcontentloaded")
                         page.get_by_role("button", name="Kontakte", exact=True).click()
                         contact_list = page.locator("section.card").filter(

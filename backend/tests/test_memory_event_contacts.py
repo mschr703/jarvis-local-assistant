@@ -49,6 +49,26 @@ def test_manual_event_contacts_same_name_search_and_unlink(tmp_path):
     assert remaining["version"] == 5 and remaining["contacts"] == []
 
 
+def test_contact_list_search_follows_confirmed_event_changes(tmp_path):
+    db = Database(tmp_path / "jarvis.db")
+    contacts = ContactStore(db)
+    private = contacts.create("Alex", "Privat")
+    work = contacts.create("Alex", "Arbeit")
+    events = MemoryEventStore(db)
+    event = events.create("2024-08-12", "Café in Zürich", "Am Fluss", "Schweiz")
+    assert contacts.list("cafe") == []
+    linked = events.link_contact(event["id"], private["id"], 1)
+    for query in ("cafe", "Zurich", "Schweiz", "Fluss", "2024-08-12"):
+        assert [person["id"] for person in contacts.list(query)] == [private["id"]]
+    assert [person["id"] for person in contacts.list("Arbeit")] == [work["id"]]
+    changed = events.update(event["id"], linked["version"], "2024-08-12",
+                            "Galerie in Zürich", "Am Fluss", "Schweiz")
+    assert contacts.list("cafe") == []
+    assert [person["id"] for person in contacts.list("Galerie")] == [private["id"]]
+    events.unlink_contact(event["id"], private["id"], changed["version"])
+    assert contacts.list("Galerie") == []
+
+
 def test_event_contact_api_and_backup(tmp_path):
     root = tmp_path / "data"
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=root, JARVIS_OLLAMA_MODEL="fixture"))) as client:
