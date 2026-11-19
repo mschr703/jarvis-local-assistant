@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, downloadMemoryAlbum } from './api';
 
 export type TimelineEventOption = { id: string; title: string; date_local: string };
-type Folder = { id: string; path: string; created_at: string };
+type Folder = { id: string; path: string; created_at: string; version: number };
 type Photo = { id: string; name: string; size: number; sha256: string; media_type: string;
   event_id: string | null; event_title: string | null; event_date: string | null;
   version: number; indexed_at: string; status: 'current' | 'changed' | 'unavailable' };
@@ -42,6 +42,7 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
   const [folder, setFolder] = useState<Folder | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [path, setPath] = useState('');
+  const [rebindPath, setRebindPath] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -70,6 +71,13 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
     const result = await api<{ indexed: number; unchanged: number; skipped: number;
       limited: boolean }>(`/photo-folder/${folder.id}/index`, { method: 'POST' });
     return `${result.indexed} Fotos eingelesen, ${result.unchanged} unverändert, ${result.skipped} übersprungen.${result.limited ? ' Grenze von 300 Fotos erreicht.' : ''}`;
+  });
+  const rebind = () => run(async () => {
+    if (!folder) return '';
+    await api(`/photo-folder/${folder.id}/path`, { method: 'PUT',
+      body: JSON.stringify({ path: rebindPath.trim(), expected_version: folder.version }) });
+    setRebindPath('');
+    return 'Fotoordner nach vollständigem Dateiabgleich neu verbunden. Zuordnungen erhalten.';
   });
   const remove = () => {
     if (!folder || !window.confirm('Fotoordnerfreigabe und Zuordnungen entfernen? Die Originaldateien bleiben erhalten.')) return;
@@ -106,6 +114,11 @@ export default function PhotoLibraryView({ events }: { events: TimelineEventOpti
         <button disabled={busy} onClick={() => void refresh().catch((error: Error) => setNotice(error.message))}>Status aktualisieren</button>
         <button disabled={busy} onClick={remove}>Fotoordnerfreigabe entfernen</button></div>
       <small>Eine geänderte Datei wird vor der Vorschau oder Zuordnung abgewiesen. Nach erneutem Einlesen musst du eine geänderte Datei bewusst neu zuordnen.</small>
+      <label>Nach Backup auf neuem Pfad verbinden
+        <input aria-label="Neuer Fotoordnerpfad" value={rebindPath}
+          onChange={(event) => setRebindPath(event.target.value)} placeholder="C:\\Pfad\\zu\\Fotos" /></label>
+      <button disabled={busy || !rebindPath.trim()} onClick={() => void rebind()}>Fotoordner neu verbinden</button>
+      <small>Alle registrierten Fotos müssen am neuen Ort denselben Dateinamen und Inhalt haben. Bei Abweichung bleibt der bisherige Pfad erhalten.</small>
     </div> : <div className="memory-form">
       <input aria-label="Absoluter Fotoordnerpfad" value={path}
         onChange={(event) => setPath(event.target.value)} placeholder="C:\\Pfad\\zu\\Fotos" />

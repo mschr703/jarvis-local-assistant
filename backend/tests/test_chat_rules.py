@@ -59,7 +59,7 @@ def test_rule_versions_activation_conflict_and_restore(tmp_path):
     assert system_prompt("Grundregel", "") == "Grundregel"
     assert "Stil" in system_prompt("Grundregel", "Stil")
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 60
+    assert create_backup(data, archive)["schema"] == 61
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert ChatRuleStore(Database(restored / "jarvis.db")).history()["active_version"] == 1

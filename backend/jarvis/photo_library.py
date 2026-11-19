@@ -70,13 +70,53 @@ class PhotoLibrary:
             identifier, now = str(uuid4()), utcnow()
             db.execute("INSERT INTO photo_folders(id,path,created_at) VALUES(?,?,?)",
                        (identifier, str(root), now))
-            return {"id": identifier, "path": str(root), "created_at": now}
+            return {"id": identifier, "path": str(root), "created_at": now, "version": 1}
 
     def remove_folder(self, folder_id: str) -> None:
         with self.db.connect() as db:
             removed = db.execute("DELETE FROM photo_folders WHERE id=?", (folder_id,))
             if not removed.rowcount:
                 raise LookupError("Fotoordner nicht gefunden")
+
+    def rebind_folder(self, folder_id: str, path: str, expected_version: int) -> dict:
+        new_root = _root(path)
+        with self.db.connect() as db:
+            folder = db.execute("SELECT * FROM photo_folders WHERE id=?", (folder_id,)).fetchone()
+            if folder is None:
+                raise LookupError("Fotoordner nicht gefunden")
+            if folder["version"] != expected_version:
+                raise PhotoConflict("Fotoordner wurde inzwischen geändert")
+            if folder["path"] == str(new_root):
+                raise ValueError("Neuer Fotoordnerpfad muss sich unterscheiden")
+            assets = [dict(row) for row in db.execute(
+                "SELECT id,name,size,sha256 FROM photo_assets WHERE folder_id=? ORDER BY id",
+                (folder_id,))]
+        mtimes = {}
+        for asset in assets:
+            try:
+                data, mtime_ns = self._read_source(new_root, asset["name"])
+            except (OSError, ValueError) as exc:
+                raise PhotoConflict(f"Foto {asset['name']} fehlt oder ist nicht lesbar") from exc
+            if len(data) != asset["size"] or hashlib.sha256(data).hexdigest() != asset["sha256"]:
+                raise PhotoConflict(f"Foto {asset['name']} stimmt nicht mit dem Register überein")
+            mtimes[asset["id"]] = mtime_ns
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT path,version FROM photo_folders WHERE id=?",
+                                 (folder_id,)).fetchone()
+            if (not current or current["version"] != expected_version
+                    or current["path"] != folder["path"]):
+                raise PhotoConflict("Fotoordner wurde inzwischen geändert")
+            current_assets = [dict(row) for row in db.execute(
+                "SELECT id,name,size,sha256 FROM photo_assets WHERE folder_id=? ORDER BY id",
+                (folder_id,))]
+            if current_assets != assets:
+                raise PhotoConflict("Fotoregister wurde inzwischen geändert")
+            db.execute("UPDATE photo_folders SET path=?,version=version+1 WHERE id=?",
+                       (str(new_root), folder_id))
+            for asset_id, mtime_ns in mtimes.items():
+                db.execute("UPDATE photo_assets SET mtime_ns=? WHERE id=?", (mtime_ns, asset_id))
+        return self.folder()
 
     @staticmethod
     def _source(root: Path, name: str) -> Path:

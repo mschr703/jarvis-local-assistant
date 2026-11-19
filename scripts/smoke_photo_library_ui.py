@@ -81,10 +81,24 @@ def main() -> None:
                         select.select_option(label="2024-08-12 · Urlaub am See")
                         photo_item.get_by_role("button", name="Zuordnung speichern").click()
                         expect(page.get_by_role("heading", name="Alben nach Ereignis")).to_be_visible()
+                        wrong = root / "Falsche-Fotos"
+                        wrong.mkdir()
+                        Image.new("RGB", (50, 40), "blue").save(wrong / "urlaub.jpg")
+                        page.get_by_label("Neuer Fotoordnerpfad").fill(str(wrong))
+                        page.get_by_role("button", name="Fotoordner neu verbinden").click()
+                        expect(page.get_by_text("Foto urlaub.jpg stimmt nicht mit dem Register überein"))\
+                            .to_be_visible()
+                        moved = root / "Umgezogene-Fotos"
+                        folder.rename(moved)
+                        page.get_by_label("Neuer Fotoordnerpfad").fill(str(moved))
+                        page.get_by_role("button", name="Fotoordner neu verbinden").click()
+                        expect(page.get_by_text("Fotoordner nach vollständigem Dateiabgleich neu verbunden.", exact=False))\
+                            .to_be_visible()
+                        expect(page.get_by_alt_text("Vorschau von urlaub.jpg")).to_be_visible()
                         page.once("dialog", lambda dialog: dialog.accept())
                         page.get_by_role("button", name="Fotoordnerfreigabe entfernen").click()
                         expect(page.get_by_label("Absoluter Fotoordnerpfad")).to_be_visible()
-                        assert photo.exists()
+                        assert (moved / "urlaub.jpg").exists()
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
@@ -93,6 +107,7 @@ def main() -> None:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"folder": "selected", "photo": "linked_reconfirmed",
                                           "album": "downloaded_then_stale_blocked",
+                                          "rebind": "mismatch_blocked_then_verified_move",
                                           "stale": "blocked", "original": "unchanged",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:

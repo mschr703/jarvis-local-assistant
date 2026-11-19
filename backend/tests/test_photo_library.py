@@ -155,9 +155,9 @@ def test_photo_api_session_and_backup(tmp_path):
         with Database(root / "jarvis.db").connect() as connection:
             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
     archive = tmp_path / "photos.zip"
-    assert create_backup(root, archive)["schema"] == 60
+    assert create_backup(root, archive)["schema"] == 61
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 60
+    assert restore_backup(archive, restored)["schema"] == 61
     restored_library = PhotoLibrary(Database(restored / "jarvis.db"))
     assert restored_library.list()[0]["event_id"] == event["id"]
     assert restored_library.preview(asset["id"]).startswith(bytes([0xff, 0xd8]))
@@ -171,7 +171,7 @@ def test_photo_migration_from_59(tmp_path):
         connection.execute("PRAGMA user_version=59")
     migrated = Database(db.path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 60
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 61
         assert connection.execute("SELECT count(*) FROM photo_folders").fetchone()[0] == 0
 
 
