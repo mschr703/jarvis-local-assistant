@@ -29,3 +29,23 @@ Die vom Nutzer ausgewählten GitHub-Ideen sind auf [G00](https://trello.com/c/jn
 ## Entscheidung, die noch offen ist
 
 Die privaten Piloten sind `day_notes` und `reading_list`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt; sie dient bis zur Migration als Archiv und Referenz.
+
+## Nächster möglicher Schnitt: Abendplanung (noch offen)
+
+Der Bereich ist fachlich optional und an klaren Stellen angebunden: Logik in
+`backend/jarvis/evening_plans.py`, API-Routen in `backend/jarvis/app.py`, Ansicht in
+`frontend/src/EveningPlanView.tsx` und Navigation in `frontend/src/App.tsx`.
+Die vorhandene Tabelle `evening_plans` stammt aus der Kernmigration 15; bestehende
+IDs, gespeicherte Eingaben, Ergebnisse und Versionen müssen beim Auslagern erhalten
+bleiben. `EveningPlanStore` nutzt `TaskStore` und `TimeModelStore` des Kerns.
+
+Ein sicherer Umzug braucht zuerst einen privaten Moduladapter für diese beiden
+Kern-Dienste, eine Migration mit altem und neuem Datenbestand, die API unter der
+Modulroute und eine eigene Web-Component-Ansicht. Danach müssen die festen
+Navigations- und API-Einträge sowie der Quellcode aus dem öffentlichen Kern
+entfernt werden. Erfolgskriterium: vorhandener Abendplan nach Backup/Restore und
+Modulinstallation wieder sichtbar; ohne Paket kein Abendplan-Navigationspunkt
+oder ausführbare Route; Kern und andere Module laufen weiter. Die bisherigen
+`test_evening_plans.py`-Fälle und ein echter Edge-Pfad müssen dann im privaten
+Repository gegen den öffentlichen Kern laufen. Bis dieser vollständige Pfad
+bestanden ist, bleibt die bestehende Funktion im öffentlichen Übergangsstand.
