@@ -125,6 +125,72 @@ def test_project_semantic_relationship_limit_is_reported(tmp_path, monkeypatch):
     assert found["limited"] and found["counts"]["project"] == 1
 
 
+def test_linked_project_task_reaches_local_semantic_corpus(tmp_path, monkeypatch):
+    db, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    states = WorkStateStore(db, DocumentStore(db), tasks)
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [], [task["id"]], [])
+    tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+    observed = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        observed.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    found = search(db, "Was kostet der Umzug?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert "Projektaufgabe: Kostenprüfung (damals: Budgetplanung) · offen" in observed[1]
+    assert "Kostenprüfung (damals: Budgetplanung) · offen" in found["results"][0]["excerpt"]
+    assert found["results"][0]["id"] == project["id"]
+
+
+@pytest.mark.parametrize("change", ["rename", "complete", "delete"])
+def test_linked_task_changed_during_embedding_is_rejected(tmp_path, monkeypatch, change):
+    db, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    states = WorkStateStore(db, DocumentStore(db), tasks)
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [], [task["id"]], [])
+
+    def mutate(_url, texts, _cache_path=None):
+        if change == "rename":
+            tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+        elif change == "complete":
+            tasks.complete(task["id"])
+        else:
+            tasks.delete(task["id"])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", mutate)
+    found = search(db, "Was kostet der Umzug?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 0
+    assert found["changed_sources"] == [{"kind": "project", "id": project["id"]}]
+
+
+def test_project_semantic_task_limit_is_reported(tmp_path, monkeypatch):
+    db, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    ids = [tasks.create(f"Budgetaufgabe {index}", "", None, "Europe/Paris")["id"]
+           for index in range(3)]
+    states = WorkStateStore(db, DocumentStore(db), tasks)
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], [], ids, [])
+    monkeypatch.setattr("jarvis.semantic_search.MAX_PROJECT_RELATIONS_PER_KIND", 2)
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts",
+                        lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
+    found = search(db, "Budgetaufgabe", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["limited"] and found["counts"]["project"] == 1
+
+
 def test_semantic_source_kind_filters_corpus_before_local_embedding(tmp_path, monkeypatch):
     db, _, folder, memory, project, _ = sample(tmp_path)
     calls = []

@@ -213,7 +213,8 @@ def _project_body(row: dict) -> str:
 
 def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict]:
     """Read bounded project links in stable order for corpus and post-model recheck."""
-    result = {project_id: {"people": [], "aliases": []} for project_id in project_ids}
+    result = {project_id: {"people": [], "aliases": [], "tasks": []}
+              for project_id in project_ids}
     if not project_ids:
         return result
     placeholders = ",".join("?" for _ in project_ids)
@@ -233,6 +234,16 @@ def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict
         ORDER BY a.state_id,a.updated_at DESC,a.id DESC""", project_ids)
     for alias in aliases:
         result[alias["state_id"]]["aliases"].append(dict(alias))
+    tasks = connection.execute(f"""SELECT s.id AS state_id,
+        json_extract(link.value,'$.id') AS task_id,
+        json_extract(link.value,'$.title') AS saved_title,
+        t.title AS current_title,t.status AS current_status,t.updated_at AS task_updated_at
+        FROM work_states s JOIN json_each(s.tasks_json) link
+        LEFT JOIN tasks t ON t.id=json_extract(link.value,'$.id')
+        WHERE s.id IN ({placeholders}) ORDER BY s.id,CAST(link.key AS INTEGER)""",
+                               project_ids)
+    for task in tasks:
+        result[task["state_id"]]["tasks"].append(dict(task))
     return result
 
 
@@ -244,12 +255,26 @@ def _project_relationship_text(row: dict) -> str:
     aliases = [f"Personenalias: {alias['alias']} → {alias['person_name']}"
                f" · {alias['source_note'][:120]}"
                for alias in links["aliases"][:MAX_PROJECT_RELATIONS_PER_KIND]]
+    tasks = []
+    for task in links["tasks"][:MAX_PROJECT_RELATIONS_PER_KIND]:
+        current = task["current_title"]
+        saved = task["saved_title"]
+        if current is None:
+            tasks.append(f"Projektaufgabe: {saved} · gelöscht")
+        elif current != saved:
+            tasks.append(f"Projektaufgabe: {current} (damals: {saved})"
+                         f" · {'erledigt' if task['current_status'] == 'done' else 'offen'}")
+        else:
+            tasks.append(f"Projektaufgabe: {current}"
+                         f" · {'erledigt' if task['current_status'] == 'done' else 'offen'}")
     parts = []
-    for index in range(max(len(people), len(aliases))):
+    for index in range(max(len(people), len(aliases), len(tasks))):
         if index < len(people):
             parts.append(people[index])
         if index < len(aliases):
             parts.append(aliases[index])
+        if index < len(tasks):
+            parts.append(tasks[index])
     return " · ".join(parts)
 
 
@@ -385,7 +410,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     limited = (len(rows) > MAX_PASSAGES or len(memories) > MAX_MEMORIES
                or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS
                or any(len(row["relationships"][kind]) > MAX_PROJECT_RELATIONS_PER_KIND
-                      for row in projects[:MAX_PROJECTS] for kind in ("people", "aliases"))
+                      for row in projects[:MAX_PROJECTS]
+                      for kind in ("people", "aliases", "tasks"))
                or any(len(_project_embedding_body(row)) > 1200
                       for row in projects[:MAX_PROJECTS]))
     freshness: dict[str, bool] = {}

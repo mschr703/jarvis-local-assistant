@@ -37,9 +37,11 @@ def main() -> None:
         docs.index_folder(folder["id"])
         memory = docs.add_memory("Die Schlüsselübergabe für die Wohnung ist am Freitag.",
                                  "Gespräch vom Dienstag", "local_only")
-        states = WorkStateStore(db, docs, TaskStore(db))
+        tasks = TaskStore(db)
+        task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+        states = WorkStateStore(db, docs, tasks)
         project = states.create("Umzug", "Mietvertrag unterschrieben", "",
-                                "Schlüssel am Freitag abholen", [], [], [])
+                                "Schlüssel am Freitag abholen", [], [task["id"]], [])
         people = ProjectPeopleStore(db, states)
         person = people.add(project["id"], project["version"], "Mira Weber",
                             "reviewer", "Prüft die Nebenkosten", None)
@@ -75,6 +77,8 @@ def main() -> None:
                             "Projektperson: Mira Weber")
                         expect(results.locator("article").filter(has_text="Umzug")).to_contain_text(
                             "Personenalias: Mimi → Mira Weber")
+                        expect(results.locator("article").filter(has_text="Umzug")).to_contain_text(
+                            "Projektaufgabe: Budgetplanung · offen")
                         expect(results.get_by_text("Ähnlichkeit", exact=False).first).to_be_visible()
                         assert "Kuchen.md" not in results.locator("article").first.inner_text()
                         assert not overflow_nodes(page), overflow_nodes(page)
