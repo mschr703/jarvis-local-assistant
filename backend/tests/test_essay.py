@@ -85,7 +85,7 @@ def test_essay_uses_selected_style_source_and_survives_edit_export_restore(tmp_p
         client.get("/session")
         assert client.get(f"/drafts/{draft['id']}").json()["word_target"] == 300
     archive = tmp_path / "essay.zip"
-    assert create_backup(root, archive)["schema"] == 59
+    assert create_backup(root, archive)["schema"] == 60
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     recovered = DraftStore(Database(restored / "jarvis.db"), restored).get_draft(draft["id"])
@@ -292,7 +292,7 @@ def test_schema_31_migrates_existing_draft_without_essay_metadata(tmp_path):
     assert migrated["word_target"] is None and migrated["outline"] == []
     assert migrated["actual_words"] == 2
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 59
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 60
 
 
 def test_long_essay_word_and_outline_boundaries(tmp_path, monkeypatch):
@@ -460,9 +460,9 @@ def test_schema35_essay_metadata_migrates_to_longer_limit(tmp_path):
                                  word_target=1200, outline=six)
     assert long["word_target"] == 1200 and long["outline"] == six
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 59
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 60
     archive = tmp_path.parent / f"{tmp_path.name}-long-essay.zip"
-    assert create_backup(tmp_path, archive)["schema"] == 59
+    assert create_backup(tmp_path, archive)["schema"] == 60
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     recovered = DraftStore(Database(restored / "jarvis.db"), restored).get_draft(long["id"])

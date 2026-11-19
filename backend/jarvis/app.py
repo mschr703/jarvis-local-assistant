@@ -86,6 +86,7 @@ from jarvis.memory_review import (
 )
 from jarvis.model_routing import choice as model_choice
 from jarvis.model_routing import settings_for, validate_model_routes
+from jarvis.photo_library import PhotoConflict, PhotoLibrary
 from jarvis.plans import PlanManager
 from jarvis.project_aliases import ProjectAliasConflict, ProjectAliasStore
 from jarvis.project_checks import ProjectCheckStore
@@ -223,6 +224,19 @@ class MemoryEventInput(BaseModel):
 
 
 class MemoryEventUpdateInput(MemoryEventInput):
+    expected_version: int = Field(ge=1)
+
+
+class PhotoFolderInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=2048)
+
+
+class PhotoEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str | None = Field(default=None, max_length=80)
     expected_version: int = Field(ge=1)
 
 
@@ -807,6 +821,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     tasks = TaskStore(db)
     contacts = ContactStore(db)
     memory_events = MemoryEventStore(db)
+    photo_library = PhotoLibrary(db)
     extension_captures = ExtensionCaptureStore(db)
     focus = FocusStore(db)
     time_model = TimeModelStore(db)
@@ -3358,6 +3373,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/photo-folder")
+    async def photo_folder_get():
+        return await run_in_threadpool(photo_library.folder)
+
+    @app.post("/photo-folder", status_code=201)
+    async def photo_folder_add(data: PhotoFolderInput):
+        try:
+            return await run_in_threadpool(photo_library.add_folder, data.path)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/photo-folder/{folder_id}")
+    async def photo_folder_delete(folder_id: str):
+        try:
+            await run_in_threadpool(photo_library.remove_folder, folder_id)
+            return {"removed": True, "original_files_changed": False}
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/photo-folder/{folder_id}/index")
+    async def photo_folder_index(folder_id: str):
+        try:
+            return await run_in_threadpool(photo_library.index, folder_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/photo-assets")
+    async def photo_assets_list():
+        return await run_in_threadpool(photo_library.list)
+
+    @app.get("/photo-assets/{asset_id}/preview")
+    async def photo_asset_preview(asset_id: str):
+        try:
+            content = await run_in_threadpool(photo_library.preview, asset_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except PhotoConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return Response(content, media_type="image/jpeg")
+
+    @app.put("/photo-assets/{asset_id}/event")
+    async def photo_asset_set_event(asset_id: str, data: PhotoEventInput):
+        try:
+            return await run_in_threadpool(photo_library.set_event, asset_id,
+                                           data.event_id, data.expected_version)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except PhotoConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.get("/contacts")
     async def contact_list(q: str = Query(default="", max_length=200)):

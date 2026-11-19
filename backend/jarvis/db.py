@@ -51,7 +51,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 59:
+            if version > 60:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -1052,6 +1052,29 @@ class Database:
                     CREATE INDEX IF NOT EXISTS memory_events_date
                         ON memory_events(date_local DESC,id DESC);
                     PRAGMA user_version=59;
+                """)
+            if version < 60:
+                apply_migration("""
+                    CREATE TABLE IF NOT EXISTS photo_folders (
+                        id TEXT PRIMARY KEY,
+                        path TEXT NOT NULL UNIQUE,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS photo_assets (
+                        id TEXT PRIMARY KEY,
+                        folder_id TEXT NOT NULL REFERENCES photo_folders(id) ON DELETE CASCADE,
+                        name TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        size INTEGER NOT NULL,
+                        mtime_ns INTEGER NOT NULL,
+                        media_type TEXT NOT NULL,
+                        event_id TEXT REFERENCES memory_events(id) ON DELETE SET NULL,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        indexed_at TEXT NOT NULL,
+                        UNIQUE(folder_id,name)
+                    );
+                    CREATE INDEX IF NOT EXISTS photo_assets_event ON photo_assets(event_id);
+                    PRAGMA user_version=60;
                 """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:

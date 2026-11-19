@@ -84,7 +84,7 @@ def test_parallel_prepare_restart_completion_and_new_step(project, tmp_path):
     assert new["task_id"] != task_id and not new["reused"]
     assert len(restarted_tasks.list_tasks()) == 3
     archive = tmp_path / "project-backup.zip"
-    assert create_backup(db.path.parent, archive)["schema"] == 59
+    assert create_backup(db.path.parent, archive)["schema"] == 60
     target = tmp_path / "restored"
     restore_backup(archive, target)
     restored_db = Database(target / "jarvis.db")

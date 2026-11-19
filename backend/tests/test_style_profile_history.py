@@ -75,9 +75,9 @@ def test_general_history_conflict_restore_and_unchanged_draft(tmp_path, monkeypa
         assert client.get("/style/profile/history").json()["versions"][0]["restored_from"] == 1
 
     archive = tmp_path / "profile-history.zip"
-    assert create_backup(root, archive)["schema"] == 59
+    assert create_backup(root, archive)["schema"] == 60
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 59
+    assert restore_backup(archive, restored_root)["schema"] == 60
     recovered = DraftStore(Database(restored_root / "jarvis.db"), restored_root)
     assert recovered.profile()["revision"] == 4
     assert recovered.profile_history("general")["versions"][0]["restored_from"] == 1
@@ -219,7 +219,7 @@ def test_schema36_migration_seeds_only_active_profiles(tmp_path):
     migrated = Database(root / "jarvis.db")
     profiles = DraftStore(migrated, root)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 59
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 60
     assert profiles.profile_history("general")["revision"] == 1
     assert profiles.profile_history("general")["versions"][0]["description"] == (
         "Vorhandenes allgemeines Profil.")

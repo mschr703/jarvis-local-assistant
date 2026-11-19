@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, downloadMemoryTimeline } from './api';
+import PhotoLibraryView, { type TimelineEventOption } from './PhotoLibraryView';
 
 type Event = { id: string; date_local: string; title: string; description: string;
   location: string; source_kind: 'manual'; version: number; created_at: string;
@@ -9,6 +10,7 @@ const emptyForm = (): Form => ({ date_local: '', title: '', description: '', loc
 
 export default function MemoryTimelineView() {
   const [items, setItems] = useState<Event[]>([]);
+  const [eventOptions, setEventOptions] = useState<TimelineEventOption[]>([]);
   const [query, setQuery] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -25,8 +27,10 @@ export default function MemoryTimelineView() {
     if (query.trim()) params.set('q', query.trim());
     if (fromDate) params.set('from_date', fromDate);
     if (toDate) params.set('to_date', toDate);
-    const results = await api<Event[]>(`/memory-events?${params}`);
-    if (request === searchRequest.current) setItems(results);
+    const [results, options] = await Promise.all([
+      api<Event[]>(`/memory-events?${params}`), api<TimelineEventOption[]>('/memory-events'),
+    ]);
+    if (request === searchRequest.current) { setItems(results); setEventOptions(options); }
   };
   useEffect(() => { void refresh().catch((error: Error) => setNotice(error.message)); }, []);
 
@@ -109,5 +113,6 @@ export default function MemoryTimelineView() {
         <button disabled={busy} onClick={() => void remove(item)}>Löschen</button></div></div>)}</div>
       {!items.length && <p>Keine passenden Ereignisse.</p>}
     </section>
+    <PhotoLibraryView events={eventOptions} />
   </div>;
 }

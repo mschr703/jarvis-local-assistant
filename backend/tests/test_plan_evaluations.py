@@ -79,7 +79,7 @@ async def test_plan_usage_evaluation_conflict_case_and_restore(tmp_path, monkeyp
     manager.close()
     engine.close()
     archive = tmp_path / "backup.zip"
-    assert create_backup(data, archive)["schema"] == 59
+    assert create_backup(data, archive)["schema"] == 60
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert Database(restored / "jarvis.db").list_plan_evaluation_cases()[0]["usage_id"] == usage_id
