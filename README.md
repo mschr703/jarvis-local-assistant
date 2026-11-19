@@ -194,12 +194,14 @@ den normalen Werkzeuglauf auf und nutzt das aktuelle Ergebnis für seine Antwort
 Bei allgemeinen Fragen kann das Modell ohne Werkzeug antworten. Unter der Antwort
 zeigt **Lokale Werkzeugbelege** den Werkzeugnamen, Lauf und Erfolg; der Beleg bleibt
 im Chatverlauf und im normalen Backup erhalten. Das Modul selbst muss installiert
-und aktiviert sein. Der [Modulstart](docs/MODULES.md) beschreibt die drei privaten
+und aktiviert sein. Der [Modulstart](docs/MODULES.md) beschreibt die privaten
 Piloten. Bei deaktiviertem oder fehlendem Modul soll Jarvis fehlende aktuelle Daten
 benennen; Modellantworten bitte bei wichtigen Fragen anhand der Belege prüfen.
 
 Dieser erste Gesprächsschritt nutzt höchstens zwei **lesende** Modulwerkzeuge pro
-Frage und läuft nur mit Ollama. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
+Frage und läuft nur mit Ollama. Eine lokale JSON-Wahl nutzt Werkzeugbeschreibungen
+und den Gesprächskontext; die Antwort soll belegte Zeit von freien Fenstern
+unterscheiden. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
 werden nicht automatisch aus dem Chat gestartet. Bei einer Nachricht mit
 Dateianhang entfällt die Modulwerkzeugwahl vorerst; das normale Datei-Chatverfahren
 bleibt erhalten. Für OpenRouter sind lokale Chat-Werkzeuge gesperrt. Konten für

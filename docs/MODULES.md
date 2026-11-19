@@ -3,7 +3,8 @@
 Jarvis kann optionale, lokal installierte Feature-Pakete sofort aktivieren und deaktivieren.
 Ein aktives Paket registriert seine eigene API und eine eigene Oberfläche in der normalen
 Jarvis-Navigation. Ohne Paket startet der Kern weiter. Die privaten Pakete `day_notes`
-(Tagesnotizen), `reading_list` (lokale Leseliste) und `evening_plans` (Abendplanung)
+(Tagesnotizen), `reading_list` (lokale Leseliste), `evening_plans` (Abendplanung)
+und `day_context` (Tageskontext aus lokalen Zeitblöcken und Aufgaben)
 liegen ausschließlich im privaten Modul-Repository. Die Abendplanung ist der erste
 vollständig aus dem öffentlichen Monolithen ausgelagerte bestehende Bereich. Die
 Leseliste prüft auch den gleichzeitigen Betrieb mehrerer Pakete und ein schreibendes
@@ -21,19 +22,21 @@ git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\reading_list
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\evening_plans
+.\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\day_context
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\reading_list
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\evening_plans
+.\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_context
 python scripts\dev.py
 ```
 
 Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“, „Leseliste“
-und „Abendplanung“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
+„Abendplanung“ und „Tageskontext“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
 einen HTTP(S)-Link oder einen Abendplan speichern, die Seite neu laden und den
 Eintrag wiederfinden. Unter **Module** eines
 deaktivieren: Sein Navigationspunkt, seine API und sein ausgelieferter UI-Code sind
-sofort gesperrt; das andere Modul bleibt nutzbar. Beim erneuten Aktivieren sind die
-Daten wieder da. Die drei Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
+sofort gesperrt; die anderen Module bleiben nutzbar. Beim erneuten Aktivieren sind die
+Daten wieder da. Die vier Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
 Die **Übersicht** zeigt Anzahl und Zustand installierter Module sowie Fehler und
 führt mit **Module verwalten** direkt zum Modulmanager.
 
@@ -152,9 +155,13 @@ begonnener Lauf kann abschließen; beim späteren Start wird der Aktivierungssta
 erneut geprüft.
 Bei lokalem Ollama kann der Chat aus aktiven Modulwerkzeugen mit `effect="read"`
 bis zu zwei passende Leseaufrufe für eine Frage wählen. Die Auswahl benutzt
-den Gesprächsverlauf und die aktuellen Werkzeugschemata, keine feste Zuordnung
+den Gesprächsverlauf, die aktuellen Werkzeugschemata und kurze Beschreibungen,
+keine feste Zuordnung
 zu einzelnen Modulen. Ergebnisdaten werden dem Modell als unvertrauenswürdige
 Quelle mitgegeben; Name, Lauf-ID und Status bleiben an der Antwort gespeichert.
+Die Modellwahl wird als JSON angefordert und danach auf angebotene Namen, höchstens
+zwei verschiedene Aufrufe und begrenzte Argumente geprüft. Modulwerkzeuge können
+eine `description` bis 500 Zeichen angeben, damit der Chat ihren Zweck erkennt.
 Fehlende oder deaktivierte Module liefern keine alten Ergebnisse. Schreib-,
 Browser- und Desktopwerkzeuge sind für diesen Chatpfad nicht auswählbar. Weitere
 Schritte zu vorbereiteten Schreibaktionen verfolgen wir separat in

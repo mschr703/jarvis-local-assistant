@@ -21,7 +21,8 @@ def day_start_utc(timezone_name: str) -> str:
 
 
 async def generate_text(db: Database, settings: Settings, purpose: str,
-                        messages: list[dict[str, str]]) -> Completion:
+                        messages: list[dict[str, str]],
+                        ollama_format: dict | str | None = None) -> Completion:
     settings = settings_for(settings, purpose)
     if sum(len(item["content"]) for item in messages) > settings.max_context_chars:
         raise ProviderError("context_limit", "Eingabetext überschreitet das Kontextlimit")
@@ -29,6 +30,10 @@ async def generate_text(db: Database, settings: Settings, purpose: str,
     model = settings.ollama_model if provider_name == "ollama" else settings.openrouter_model
     timezone_name = settings.timezone
     provider = make_provider(settings)
+    if ollama_format is not None:
+        if not isinstance(provider, OllamaAdapter):
+            raise ValueError("Strukturierte lokale Ausgabe erfordert Ollama")
+        provider.response_format = ollama_format
     if isinstance(provider, OllamaAdapter) and not await provider.available():
         raise ProviderError("unavailable", "Ollama starten und Modell installieren")
     reservation = 0.0

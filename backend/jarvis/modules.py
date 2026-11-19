@@ -572,14 +572,17 @@ class ModuleRegistry:
                     ("read", "local_open", "write")
                     or type(definition.timeout_s) is not int
                     or not 1 <= definition.timeout_s <= 300
-                    or type(definition.cancel_aware) is not bool):
+                    or type(definition.cancel_aware) is not bool
+                    or not isinstance(definition.description, str)
+                    or len(definition.description) > 500):
                 raise ValueError("Ungültige Modulwerkzeug-Eigenschaften")
             name = f"{module_id}__{definition.name}"
             if name in planned or len(name) > 80:
                 raise ValueError("Doppelter oder zu langer Modulwerkzeugname")
             planned[name] = definition
         specs = {name: (definition.schema.model_json_schema(), definition.scope,
-                        definition.effect, definition.timeout_s, definition.cancel_aware)
+                        definition.effect, definition.timeout_s, definition.cancel_aware,
+                        definition.description)
                  for name, definition in planned.items()}
         for name, definition in planned.items():
             spec = specs[name]

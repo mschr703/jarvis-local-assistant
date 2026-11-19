@@ -98,6 +98,27 @@ async def test_ollama_stream_usage_and_malformed_response(monkeypatch):
     assert chunks[1].cost_kind == "local_no_api_charge"
 
 
+@pytest.mark.parametrize("response_format", ["json", {"type": "object", "properties": {
+    "tools": {"type": "array"}}}])
+@pytest.mark.asyncio
+async def test_ollama_structured_response_passes_format_and_zero_temperature(
+        monkeypatch, response_format):
+
+    def handler(request):
+        payload = json.loads(request.content)
+        assert payload["format"] == response_format
+        assert payload["options"]["temperature"] == 0
+        return httpx.Response(200, text=json.dumps({
+            "message": {"content": '{"tools":[]}'}, "done": True}) + "\n")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+    provider = OllamaAdapter("http://127.0.0.1:11434", "fixture")
+    provider.response_format = response_format
+    chunks = [item.text async for item in provider.stream([])]
+    assert chunks[0] == '{"tools":[]}'
+
+
 @pytest.mark.asyncio
 async def test_ollama_invalid_token_counts_do_not_become_receipts(monkeypatch):
     client = httpx.AsyncClient(transport=httpx.MockTransport(

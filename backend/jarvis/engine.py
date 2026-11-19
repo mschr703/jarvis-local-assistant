@@ -41,6 +41,7 @@ class ToolDefinition:
     timeout_s: int = 15
     cancel_aware: bool = False
     enabled: Callable[[], bool] | None = None
+    description: str = ""
 
 
 class ToolState(TypedDict, total=False):
@@ -95,7 +96,8 @@ class RunEngine:
 
     def capabilities(self) -> list[dict]:
         return [{"name": item.name, "scope": item.scope, "effect": item.effect,
-                 "schema": item.schema.model_json_schema()}
+                 "schema": item.schema.model_json_schema(),
+                 "description": item.description}
                 for item in list(self.definitions.values())
                 if item.enabled is None or item.enabled()]
 

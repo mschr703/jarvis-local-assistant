@@ -231,8 +231,9 @@ def test_chat_reads_active_module_and_persists_tool_receipt(tmp_path, monkeypatc
             yield Chunk("usage", input_tokens=10, output_tokens=7,
                         cost_usd=0.0, cost_kind="local_no_api_charge")
 
-    async def choose(_db, _settings, _purpose, _messages):
-        return Completion('{"tool":"sample_notes__list_entries","args":{}}',
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        assert ollama_format == "json"
+        return Completion('{"tools":[{"tool":"sample_notes__list_entries","args":{}}]}',
                           8, 8, 0.0, "local_no_api_charge")
 
     monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: AnswerProvider())

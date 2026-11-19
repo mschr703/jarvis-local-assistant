@@ -24,6 +24,7 @@ class FakeEngine:
 
 
 READ_TOOL = {"name": "calendar__list_today", "scope": "local_module", "effect": "read",
+             "description": "Liest die heutigen Termine",
              "schema": {"type": "object", "properties": {}, "required": []}}
 WRITE_TOOL = {"name": "mail__send", "scope": "local_module", "effect": "write",
               "schema": {"type": "object", "properties": {}}}
@@ -33,14 +34,14 @@ BROWSER_TOOL = {"name": "browser_read", "scope": "browser", "effect": "read",
 
 @pytest.mark.asyncio
 async def test_chat_selects_local_module_read_and_keeps_result_as_data(tmp_path, monkeypatch):
-    answers = iter(['{"tool":"calendar__list_today","args":{}}',
-                    '{"tool":"none","args":{}}'])
     prompts = []
 
-    async def choose(_db, settings, purpose, messages):
+    async def choose(_db, settings, purpose, messages, *, ollama_format):
         assert settings.provider == "ollama" and purpose == "chat_tool_select"
+        assert ollama_format == "json"
         prompts.append(messages)
-        return Completion(next(answers), 5, 5, 0.0, "local_no_api_charge")
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}}]}',
+                          5, 5, 0.0, "local_no_api_charge")
 
     monkeypatch.setattr(conversation_tools, "generate_text", choose)
     engine = FakeEngine([READ_TOOL, WRITE_TOOL, BROWSER_TOOL])
@@ -53,13 +54,15 @@ async def test_chat_selects_local_module_read_and_keeps_result_as_data(tmp_path,
     assert "Zahnarzt" in result.prompt and "unvertrauenswürdige" in result.prompt
     assert "mail__send" not in prompts[0][1]["content"]
     assert "browser_read" not in prompts[0][1]["content"]
-    assert "Zahnarzt" in prompts[1][1]["content"]
+    assert "Liest die heutigen Termine" in prompts[0][1]["content"]
+    assert len(prompts) == 1
 
 
 @pytest.mark.asyncio
 async def test_chat_never_executes_unoffered_or_write_tool(tmp_path, monkeypatch):
-    async def choose(_db, _settings, _purpose, _messages):
-        return Completion('{"tool":"mail__send","args":{}}', None, None, 0.0,
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        assert "mail__send" not in str(ollama_format)
+        return Completion('{"tools":[{"tool":"mail__send","args":{}}]}', None, None, 0.0,
                           "local_no_api_charge")
 
     monkeypatch.setattr(conversation_tools, "generate_text", choose)
@@ -68,7 +71,7 @@ async def test_chat_never_executes_unoffered_or_write_tool(tmp_path, monkeypatch
     result = await conversation_tools.gather_tool_context(None, settings, engine,
                                                            "Schick die Mail", [])
     assert engine.calls == [] and result.uses == []
-    assert "Behaupte keine aktuellen Termine" in result.prompt
+    assert "Werkzeugauswahl fehlgeschlagen" in result.prompt
     cloud = settings.model_copy(update={"provider": "openrouter"})
     with pytest.raises(ValueError, match="nur mit Ollama"):
         await conversation_tools.gather_tool_context(None, cloud, engine, "Hallo", [])
@@ -76,15 +79,53 @@ async def test_chat_never_executes_unoffered_or_write_tool(tmp_path, monkeypatch
 
 def test_tool_choice_rejects_invalid_arguments_and_hallucinated_names():
     allowed = {"calendar__list_today"}
-    assert conversation_tools.parse_choice('{"tool":"none","args":{}}', allowed) is None
-    assert conversation_tools.parse_choice(
-        '```json\n{"tool":"calendar__list_today","args":{}}\n```', allowed
-    ) == ("calendar__list_today", {})
-    for value in ('{"tool":"mail__send","args":{}}',
-                  '{"tool":"calendar__list_today","args":[]}',
-                  '{"tool":"none","args":{"force":true}}'):
+    assert conversation_tools.parse_choices('{"tools":[]}', allowed) == []
+    assert conversation_tools.parse_choices(
+        '{"tools":[{"tool":"calendar__list_today","args":{}}]}', allowed
+    ) == [("calendar__list_today", {})]
+    for value in ('{"tools":[{"tool":"mail__send","args":{}}]}',
+                  '{"tools":[{"tool":"calendar__list_today","args":[]}]}',
+                  ('{"tools":[{"tool":"calendar__list_today","args":{}},'
+                   '{"tool":"calendar__list_today","args":{}}]}'),
+                  '{"tools":[{"tool":"none","args":{}}]}'):
         with pytest.raises(ValueError):
-            conversation_tools.parse_choice(value, allowed)
+            conversation_tools.parse_choices(value, allowed)
+
+
+@pytest.mark.asyncio
+async def test_chat_can_read_two_distinct_modules_in_one_selection(tmp_path, monkeypatch):
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        assert ollama_format == "json"
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}},'
+                          '{"tool":"tasks__list_open","args":{}}]}',
+                          10, 10, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    tasks_tool = {**READ_TOOL, "name": "tasks__list_open"}
+    engine = FakeEngine([READ_TOOL, tasks_tool])
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    result = await conversation_tools.gather_tool_context(
+        None, settings, engine, "Termine und Aufgaben heute?", [])
+    assert engine.calls == [("calendar__list_today", {}), ("tasks__list_open", {})]
+    assert len(result.uses) == 2
+
+
+@pytest.mark.asyncio
+async def test_module_failure_does_not_break_chat_or_claim_empty_data(tmp_path, monkeypatch):
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        assert ollama_format == "json"
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}}]}',
+                          5, 5, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    engine = FakeEngine([READ_TOOL])
+    engine.start = lambda _name, _args: (_ for _ in ()).throw(RuntimeError("broken module"))
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    result = await conversation_tools.gather_tool_context(
+        None, settings, engine, "Welche Termine habe ich?", [])
+    assert result.uses == []
+    assert "invalid_or_unavailable" in result.prompt
+    assert "broken module" not in result.prompt
 
 
 def test_chat_local_tools_cannot_be_sent_to_cloud(tmp_path):
