@@ -1218,7 +1218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/search/unified")
     async def unified_search_view(q: str = Query(min_length=2, max_length=160),
-                                  kind: str = Query(default="all", pattern="^(all|document|memory|project)$")):
+                                  kind: str = Query(default="all", pattern="^(all|document|memory|project|life_event)$")):
         try:
             return await run_in_threadpool(unified_search, db, q, kind)
         except ValueError as exc:

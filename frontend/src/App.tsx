@@ -63,6 +63,7 @@ export default function App() {
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
   const [selectedSources, setSelectedSources] = useState<Source[]>([]);
   const [requestedSource, setRequestedSource] = useState<SearchSourceRequest | null>(null);
+  const [requestedLifeEvent, setRequestedLifeEvent] = useState<{ id: string; serial: number } | null>(null);
   const sourceOpenSequence = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [suggestedTaskTitle, setSuggestedTaskTitle] = useState('');
@@ -231,7 +232,7 @@ export default function App() {
         page === 'research' ? null :
         page === 'tasks' ? null :
         page === 'contacts' ? null :
-        page === 'life_events' ? <MemoryTimelineView /> :
+        page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} /> :
         page === 'time_model' ? null :
         page === 'evening_plans' ? null :
         page === 'work_states' ? null :
@@ -239,7 +240,7 @@ export default function App() {
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} requestedSource={requestedSource?.kind === 'document' || requestedSource?.kind === 'memory' ? requestedSource : null} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
-      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id) => { setRequestedSource({ kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(files) => { setRequestedChatSource(null); setRequestedChatAttachments(files); navigate('chat'); }} /></div>}
+      {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id) => { if (kind === 'life_event') { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); } else { setRequestedSource({ kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); } }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(files) => { setRequestedChatSource(null); setRequestedChatAttachments(files); navigate('chat'); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
       {learningOpened && <div hidden={page !== 'learning'}><LearningView visible={page === 'learning'} sources={selectedSources} configured={modelReady} provider={health?.provider || 'ollama'} onDocuments={() => navigate('documents')} /></div>}

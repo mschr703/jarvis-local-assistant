@@ -1,6 +1,7 @@
-"""Bounded read-only search across granted document passages, memories and work states."""
+"""Bounded read-only search across granted passages and confirmed local records."""
 
 import re
+import unicodedata
 from pathlib import Path
 
 from jarvis.db import Database
@@ -9,8 +10,9 @@ from jarvis.documents import DocumentStore
 MAX_CANDIDATES = 100
 MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
+MAX_EVENT_ROWS = 2000
 MAX_PER_KIND = 10
-SOURCE_KINDS = frozenset({"all", "document", "memory", "project"})
+SOURCE_KINDS = frozenset({"all", "document", "memory", "project", "life_event"})
 STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "welches",
                        "ist", "sind", "hat", "haben", "ich", "mir", "mein", "meine", "zu",
                        "zur", "zum", "von", "für", "mit", "über", "und", "oder", "der",
@@ -34,6 +36,11 @@ def _score(query: str, terms: list[str], title: str, body: str) -> int:
     query_fold = query.casefold()
     return (20 * (query_fold in title_fold) + 8 * (query_fold in body_fold)
             + sum(4 * (term in title_fold) + 2 * (term in body_fold) for term in terms))
+
+
+def _fold(value: str) -> str:
+    return "".join(char for char in unicodedata.normalize("NFKD", value).casefold()
+                   if not unicodedata.combining(char))
 
 
 def search(db: Database, query: str, kind: str = "all") -> dict:
@@ -78,9 +85,16 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS + 1,))] if kind in {"all", "project"} else []
+        events = [dict(row) for row in connection.execute("""
+            SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
+                   GROUP_CONCAT(a.name,' | ') AS photo_names
+            FROM memory_events e LEFT JOIN photo_assets a ON a.event_id=e.id
+            GROUP BY e.id ORDER BY e.date_local DESC,e.id DESC LIMIT ?
+        """, (MAX_EVENT_ROWS + 1,))] if kind in {"all", "life_event"} else []
 
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
-               or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS)
+               or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
+               or len(events) > MAX_EVENT_ROWS)
     by_document: dict[str, dict] = {}
     for row in passages[:MAX_CANDIDATES] + paths[:MAX_CANDIDATES]:
         title = Path(row["path"]).name
@@ -157,7 +171,28 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
                                   "source": f"Arbeitsstand v{row['version']}",
                                   "version": row["version"], "score": score})
 
-    groups = [current_documents, memory_items, project_items]
+    event_items = []
+    folded_terms = [_fold(term) for term in terms]
+    for row in events[:MAX_EVENT_ROWS]:
+        photo_names = (row["photo_names"] or "").split(" | ") if row["photo_names"] else []
+        body = " · ".join(part for part in (row["date_local"], row["location"],
+                                                row["description"], row["photo_names"]) if part)
+        score = _score(_fold(cleaned), folded_terms, _fold(row["title"]), _fold(body))
+        if score:
+            matching_photos = [name for name in photo_names if any(term in _fold(name)
+                                                                    for term in folded_terms)][:3]
+            details = [row["description"][:350]] if row["description"] else []
+            if row["location"]:
+                details.append(f"Ort: {row['location']}")
+            if matching_photos:
+                details.append(f"Foto: {', '.join(matching_photos)}")
+            event_items.append({"kind": "life_event", "id": row["id"],
+                                "title": row["title"], "excerpt": " · ".join(details)[:500],
+                                "source": f"{row['date_local']} · manuell bestätigt",
+                                "date_local": row["date_local"], "version": row["version"],
+                                "score": score})
+
+    groups = [current_documents, memory_items, project_items, event_items]
     selected = []
     for group in groups:
         group.sort(key=lambda item: (-item["score"], item["title"].casefold(), item["id"]))
@@ -169,4 +204,4 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
             "stale_sources": stale_sources,
             "preferences": preferred,
             "counts": {kind: sum(item["kind"] == kind for item in selected)
-                       for kind in ("document", "memory", "project")}}
+                       for kind in ("document", "memory", "project", "life_event")}}

@@ -8,9 +8,11 @@ type Event = { id: string; date_local: string; title: string; description: strin
 type Form = Pick<Event, 'date_local' | 'title' | 'description' | 'location'>;
 const emptyForm = (): Form => ({ date_local: '', title: '', description: '', location: '' });
 
-export default function MemoryTimelineView() {
+export default function MemoryTimelineView({ requestedEvent }: {
+  requestedEvent?: { id: string; serial: number } | null }) {
   const [items, setItems] = useState<Event[]>([]);
   const [eventOptions, setEventOptions] = useState<TimelineEventOption[]>([]);
+  const [openedEvent, setOpenedEvent] = useState<Event | null>(null);
   const [query, setQuery] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -34,15 +36,24 @@ export default function MemoryTimelineView() {
     if (request === searchRequest.current) { setItems(results); setEventOptions(options); }
   };
   useEffect(() => { void refresh().catch((error: Error) => setNotice(error.message)); }, []);
+  useEffect(() => {
+    if (!requestedEvent) return;
+    let active = true;
+    void api<Event>(`/memory-events/${encodeURIComponent(requestedEvent.id)}`)
+      .then((event) => { if (active) setOpenedEvent(event); })
+      .catch((error: Error) => { if (active) { setOpenedEvent(null); setNotice(error.message); } });
+    return () => { active = false; };
+  }, [requestedEvent?.serial]);
 
   const save = async () => {
     if (inFlight.current) return;
     inFlight.current = true; setBusy(true); setNotice('');
     try {
-      await api<Event>(editing ? `/memory-events/${encodeURIComponent(editing.id)}` : '/memory-events', {
+      const saved = await api<Event>(editing ? `/memory-events/${encodeURIComponent(editing.id)}` : '/memory-events', {
         method: editing ? 'PUT' : 'POST',
         body: JSON.stringify(editing ? { ...form, expected_version: editing.version } : form),
       });
+      setOpenedEvent((current) => current?.id === saved.id ? saved : current);
       setForm(emptyForm()); setEditing(null);
       await refresh();
       setNotice('Ereignis gespeichert.');
@@ -57,6 +68,7 @@ export default function MemoryTimelineView() {
     try {
       await api(`/memory-events/${encodeURIComponent(item.id)}?expected_version=${item.version}`,
         { method: 'DELETE' });
+      setOpenedEvent((current) => current?.id === item.id ? null : current);
       if (editing?.id === item.id) { setEditing(null); setForm(emptyForm()); }
       await refresh();
       setNotice('Ereignis gelöscht.');
@@ -83,6 +95,16 @@ export default function MemoryTimelineView() {
   return <div className="section-stack"><h2>Lebenschronik</h2>
     <p className="intro">Halte ausgewählte Erlebnisse mit einem Datum selbst fest. Ort und Beschreibung sind optional. Jarvis leitet hier keine Ereignisse aus Fotos oder Gesprächen ab und ruft kein Modell auf.</p>
     {notice && <p className="notice" role="status">{notice}</p>}
+    {openedEvent && <section className="card" aria-label="Geöffnetes Lebensereignis">
+      <h3>{openedEvent.date_local} · {openedEvent.title}</h3>
+      <small>{openedEvent.location || 'Ohne Ort'} · manuell bestätigt · Version {openedEvent.version}</small>
+      {openedEvent.description && <p>{openedEvent.description}</p>}
+      <div className="item-actions"><button disabled={busy} onClick={() => { setEditing(openedEvent);
+        setForm({ date_local: openedEvent.date_local, title: openedEvent.title,
+          description: openedEvent.description, location: openedEvent.location });
+        eventForm.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>Ereignis bearbeiten</button>
+        <button disabled={busy} onClick={() => void remove(openedEvent)}>Ereignis löschen</button></div>
+    </section>}
     <section className="card"><h3>Zeitleiste durchsuchen</h3><div className="memory-form">
       <input aria-label="Erlebnisse durchsuchen" maxLength={200} value={query}
         onChange={(event) => setQuery(event.target.value)} placeholder="Titel, Ort oder Beschreibung" />
@@ -114,7 +136,8 @@ export default function MemoryTimelineView() {
         <button disabled={busy} onClick={() => void remove(item)}>Löschen</button></div></div>)}</div>
       {!items.length && <p>Keine passenden Ereignisse.</p>}
     </section>
-    <PhotoLibraryView events={eventOptions} onSuggestDate={(date) => {
+    <PhotoLibraryView events={openedEvent && !eventOptions.some((item) => item.id === openedEvent.id)
+      ? [openedEvent, ...eventOptions] : eventOptions} onSuggestDate={(date) => {
       if ((editing || form.date_local || form.title || form.description || form.location)
           && !window.confirm('Aktuelle Eingaben im Ereignisformular verwerfen und EXIF-Datum übernehmen?'))
         return false;
