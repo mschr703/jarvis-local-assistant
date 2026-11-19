@@ -4,7 +4,8 @@ Jarvis kann optionale, lokal installierte Feature-Pakete sofort aktivieren und d
 Ein aktives Paket registriert seine eigene API und eine eigene Oberfläche in der normalen
 Jarvis-Navigation. Ohne Paket startet der Kern weiter. Die privaten Pakete `day_notes`
 (Tagesnotizen), `reading_list` (lokale Leseliste), `evening_plans` (Abendplanung)
-und `day_context` (Tageskontext aus lokalen Zeitblöcken und Aufgaben)
+und `day_context` (Tageskontext aus lokalen Zeitblöcken und Aufgaben) sowie
+`context_lookup` (Suche in bestätigten lokalen Quellen)
 liegen ausschließlich im privaten Modul-Repository. Die Abendplanung ist der erste
 vollständig aus dem öffentlichen Monolithen ausgelagerte bestehende Bereich. Die
 Leseliste prüft auch den gleichzeitigen Betrieb mehrerer Pakete und ein schreibendes
@@ -23,20 +24,30 @@ git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\reading_list
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\evening_plans
 .\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\day_context
+.\backend\.venv\Scripts\python.exe scripts\module_package.py verify ..\jarvis-private-modules\context_lookup
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\reading_list
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\evening_plans
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_context
+.\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\context_lookup
 python scripts\dev.py
 ```
 
-Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“, „Leseliste“
-„Abendplanung“ und „Tageskontext“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
+Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“, „Leseliste“,
+„Abendplanung“, „Tageskontext“ und „Kontextsuche“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
 einen HTTP(S)-Link oder einen Abendplan speichern, die Seite neu laden und den
 Eintrag wiederfinden. Unter **Module** eines
 deaktivieren: Sein Navigationspunkt, seine API und sein ausgelieferter UI-Code sind
 sofort gesperrt; die anderen Module bleiben nutzbar. Beim erneuten Aktivieren sind die
-Daten wieder da. Die vier Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
+Daten wieder da. Die fünf Module brauchen weder OpenRouter noch Ollama für ihre Einträge und Suchansichten.
+Für Antworten im Chat mit lokalen Modulwerkzeugen wird Ollama benötigt. Unter **Chat**
+„Aktive Module bei passenden Fragen lokal lesen“ eingeschaltet lassen. Eine Frage nach
+einem gespeicherten Projekt kann dann die Kontextsuche verwenden; eine Anschlussfrage
+wie „Und was muss ich dafür tun?“ bezieht sich auf das vorherige Gesprächsthema.
+Die Kontextsuche sieht nur bestätigte Erinnerungen, freigegebene und aktuell indexierte
+Dokumentpassagen, Arbeitsstände, Lebensereignisse und Kontakte. Externe Kalender- und
+Mailkonten sind dadurch nicht verbunden. Details und Grenzen stehen in der privaten
+`docs/CONTEXT_LOOKUP.md`.
 Die **Übersicht** zeigt Anzahl und Zustand installierter Module sowie Fehler und
 führt mit **Module verwalten** direkt zum Modulmanager.
 

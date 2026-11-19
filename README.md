@@ -191,6 +191,11 @@ standardmäßig eingeschaltet. Frag zum Beispiel „Welche Tagesnotiz habe ich z
 Gartenprojekt?“ oder „Was soll ich laut der Notiz am Samstag tun?“. Jarvis wählt
 aus den aktiven Modulen bei Bedarf ein passendes lesendes Werkzeug, ruft es über
 den normalen Werkzeuglauf auf und nutzt das aktuelle Ergebnis für seine Antwort.
+Mit den optionalen Paketen `day_context` und `context_lookup` sind auch Fragen nach
+lokal gespeicherten Zeitfenstern oder einem bestätigten Projektstand möglich.
+Eine Anschlussfrage wie „Und was muss ich dafür als Nächstes tun?“ kann die
+Projektquelle erneut abrufen. Das ist eine dynamische Werkzeugwahl anhand der
+Frage und des Gesprächs, keine fest eingebaute Projekt- oder Kalenderabfolge.
 Bei allgemeinen Fragen kann das Modell ohne Werkzeug antworten. Unter der Antwort
 zeigt **Lokale Werkzeugbelege** den Werkzeugnamen, Lauf und Erfolg; der Beleg bleibt
 im Chatverlauf und im normalen Backup erhalten. Das Modul selbst muss installiert
@@ -209,6 +214,10 @@ Kalender und E-Mail sind noch nicht angeschlossen; die beiden Fragen sind derzei
 nur mit einem tatsächlich installierten passenden Modul beantwortbar. Der echte
 Ollama-/Edge-Test mit Tagesnotizen liegt im privaten Modul-Repository unter
 `tests/smoke_conversation_ui.py` und wurde bei 390 Pixel geprüft.
+Der zusätzliche echte Projekt-Folgechat liegt unter
+`tests/smoke_context_lookup_chat.py`. Auf dem getesteten CPU-Laptop brauchte die
+lokale Werkzeugwahl mit `qwen3:4b-instruct` etwa 52 Sekunden für die erste und
+95 Sekunden für die zweite Frage; die Antwortgenerierung kommt hinzu.
 
 ### Eigene Dateien an eine Chatnachricht anhängen
 
