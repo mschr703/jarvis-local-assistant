@@ -29,7 +29,7 @@ type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified
 type QuickCapture = { text: string; files: string[]; notice: string };
 type SearchSourceRequest =
   | { kind: 'project'; id: string; serial: number;
-      match?: { kind: 'document' | 'task' | 'alias' | 'person'; id: string } }
+      match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory'; id: string } }
   | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };

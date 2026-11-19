@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
+from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
@@ -50,6 +51,9 @@ def main() -> None:
         alias = aliases.add(
             project["id"], project["version"], person["id"], person["version"],
             "Mími", "Rufname aus eigener Angabe", None)
+        memory_links = ProjectMemoryStore(db, states)
+        memory_link = memory_links.add(project["id"], project["version"],
+                                       memory["id"], "Absprache aus dem Erstgespräch")
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -72,12 +76,13 @@ def main() -> None:
                         expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=30000)
                         expect(results.locator("article").filter(
                             has_text="Dokument · Vertrag_Orion.md")).to_be_visible()
-                        expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
+                        expect(results.locator("article").filter(
+                            has_text="Erinnerung · Erinnerung").get_by_text("Eigene Notiz")).to_be_visible()
                         expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
                         expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()
                         for label, kind, source_id in (
                             ("Dokument · Vertrag_Orion.md", "document", document["id"]),
-                            ("Eigene Notiz", "memory", memory["id"]),
+                            ("Erinnerung · Erinnerung", "memory", memory["id"]),
                             ("Arbeitsstand v1", "project", project["id"]),
                         ):
                             results.locator("article").filter(has_text=label).get_by_role(
@@ -132,6 +137,25 @@ def main() -> None:
                         project_file_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
                         expect(page.locator(f"#project-document-{document['id']}")).to_be_in_viewport()
                         page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Freitag")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        memory_project_hit = results.locator("article").filter(
+                            has_text="Projekterinnerung (gespeichert)")
+                        expect(memory_project_hit).to_contain_text("Absprache aus dem Erstgespräch")
+                        memory_project_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
+                        expect(page.locator(f"#project-memory-{memory_link['id']}")).to_be_in_viewport()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Freitag")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        stale_memory_hit = results.locator("article").filter(
+                            has_text="Projekterinnerung (gespeichert)")
+                        expect(stale_memory_hit).to_be_visible()
+                        memory_links.delete(project["id"], memory_link["id"], project["version"],
+                                            memory_link["version"])
+                        stale_memory_hit.get_by_role("button", name="Passenden Beleg öffnen").click()
+                        expect(page.locator(f"#project-memory-{memory_link['id']}")).to_have_count(0)
+                        expect(page.locator(f"#search-source-project-{project['id']}")).to_be_in_viewport()
+                        page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Gemeinsame Suche").fill("Mimi")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         stale_alias_hit = results.locator("article").filter(
@@ -155,7 +179,7 @@ def main() -> None:
                         expect(page.get_by_text("Arbeitsstand nicht gefunden", exact=False)).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()
                         docs.delete_memory(memory["id"])
-                        results.locator("article").filter(has_text="Eigene Notiz").get_by_role(
+                        results.locator("article").filter(has_text="Erinnerung · Erinnerung").get_by_role(
                             "button", name="Quelle öffnen").click()
                         expect(page.get_by_text("Die gesuchte Quelle ist nicht mehr vorhanden.", exact=False)).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()

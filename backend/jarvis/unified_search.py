@@ -15,6 +15,7 @@ MAX_PROJECT_PERSON_ROWS = 2000
 MAX_PROJECT_ALIAS_ROWS = 2000
 MAX_PROJECT_TASK_ROWS = 2000
 MAX_PROJECT_FILE_ROWS = 2000
+MAX_PROJECT_MEMORY_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -158,6 +159,14 @@ def search(db: Database, query: str, kind: str = "all",
             ORDER BY s.updated_at DESC,s.id DESC,CAST(link.key AS INTEGER) LIMIT ?
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_FILE_ROWS + 1))] if kind in {
             "all", "project"} else []
+        project_memories = [dict(row) for row in connection.execute("""
+            SELECT m.id,m.state_id,m.memory_text,m.memory_source_ref,m.source_note
+            FROM project_memory_links m JOIN
+                (SELECT id FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?) s
+                ON s.id=m.state_id
+            ORDER BY m.updated_at DESC,m.id DESC LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_MEMORY_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -210,6 +219,7 @@ def search(db: Database, query: str, kind: str = "all",
                or len(project_aliases) > MAX_PROJECT_ALIAS_ROWS
                or len(project_tasks) > MAX_PROJECT_TASK_ROWS
                or len(project_files) > MAX_PROJECT_FILE_ROWS
+               or len(project_memories) > MAX_PROJECT_MEMORY_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -294,6 +304,9 @@ def search(db: Database, query: str, kind: str = "all",
         files_by_project.setdefault(file["state_id"], []).append(
             {"id": file["document_id"],
              "name": portable_basename(file["saved_path"])})
+    memories_by_project: dict[str, list[dict]] = {}
+    for memory in project_memories[:MAX_PROJECT_MEMORY_ROWS]:
+        memories_by_project.setdefault(memory["state_id"], []).append(memory)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -341,9 +354,20 @@ def search(db: Database, query: str, kind: str = "all",
                                               item[1]["id"]))
         if matching_files:
             score += matching_files[0][0]
+        matching_memories = []
+        for memory in memories_by_project.get(row["id"], []):
+            memory_score = _score(folded_query, folded_terms,
+                                  _fold(memory["memory_source_ref"]),
+                                  _fold(f"{memory['memory_text']} · {memory['source_note']}"))
+            if memory_score:
+                matching_memories.append((memory_score, memory))
+        matching_memories.sort(key=lambda item: (-item[0], item[1]["id"]))
+        if matching_memories:
+            score += matching_memories[0][0]
         if score:
             relation_matches = (
-                [(value, "document", item["id"]) for value, item in matching_files[:1]]
+                [(value, "memory", item["id"]) for value, item in matching_memories[:1]]
+                + [(value, "document", item["id"]) for value, item in matching_files[:1]]
                 + [(value, "task", item["task_id"]) for value, item in matching_tasks[:1]]
                 + [(value, "alias", item["id"]) for value, item in matching_aliases[:1]]
                 + [(value, "person", item["id"]) for value, item, _ in matching_people[:1]])
@@ -352,6 +376,12 @@ def search(db: Database, query: str, kind: str = "all",
             file_excerpts = [f"Projektdatei: {file['name']} · Original und Freigabe"
                              " im Arbeitsstand prüfen"
                              for _, file in matching_files[:2]]
+            memory_excerpts = ["Projekterinnerung (gespeichert): "
+                               f"{memory['memory_text'][:100]}"
+                               f" · Ursprüngliche Quelle: {memory['memory_source_ref'][:80]}"
+                               f" · Herkunft: {memory['source_note'][:100]}"
+                               " · aktuellen Status im Arbeitsstand prüfen"
+                               for _, memory in matching_memories[:2]]
             task_excerpts = []
             for _, task in matching_tasks[:2]:
                 if task["current_title"] is None:
@@ -374,7 +404,8 @@ def search(db: Database, query: str, kind: str = "all",
                                for _, person, role in matching_people[:2]]
             project_items.append({"kind": "project", "id": row["id"],
                                   "title": row["project"],
-                                  "excerpt": " · ".join([*file_excerpts, *task_excerpts,
+                                  "excerpt": " · ".join([*memory_excerpts, *file_excerpts,
+                                                         *task_excerpts,
                                                          *alias_excerpts,
                                                          *person_excerpts, body])[:500],
                                   "source": f"Arbeitsstand v{row['version']}",

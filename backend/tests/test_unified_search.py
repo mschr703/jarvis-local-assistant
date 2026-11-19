@@ -11,6 +11,7 @@ from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
+from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
 from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
@@ -57,6 +58,46 @@ def test_search_combines_sources_with_exact_references(tmp_path):
     # A filename is findable even when its exact spelling is absent from the passage.
     assert search(db, "Vertrag_Orion")["counts"]["document"] == 1
     assert docs.get_document(document["id"])["status"] == "indexed"
+
+
+def test_explicit_project_memory_search_keeps_saved_provenance(tmp_path):
+    db, docs, states, _, _, memory, project, _ = sample(tmp_path)
+    links = ProjectMemoryStore(db, states)
+    link = links.add(project["id"], project["version"], memory["id"],
+                     "Protokoll aus dem Erstgespräch")
+    result = search(db, "Wohnungsunterlagen", "project")
+    assert result["counts"]["project"] == 1
+    hit = result["results"][0]
+    assert hit["id"] == project["id"]
+    assert hit["match_kind"] == "memory" and hit["match_id"] == link["id"]
+    assert "Projekterinnerung (gespeichert)" in hit["excerpt"]
+    assert "Ursprüngliche Quelle: Gespräch vom 2. Mai" in hit["excerpt"]
+    assert "Herkunft: Protokoll aus dem Erstgespräch" in hit["excerpt"]
+    assert "aktuellen Status im Arbeitsstand prüfen" in hit["excerpt"]
+    assert search(db, "Erstgespräch", "project")["results"][0]["match_id"] == link["id"]
+    assert search(db, "Mai", "project")["results"][0]["match_id"] == link["id"]
+    docs.update_memory(memory["id"], "Jetzt sind die Schlüssel bereit.",
+                       "Korrektur", "local_only")
+    stale = search(db, "Wohnungsunterlagen", "project")["results"][0]
+    assert stale["match_id"] == link["id"]
+    assert "gespeichert" in stale["excerpt"]
+    assert search(db, "Schlüssel bereit", "project")["results"] == []
+    docs.delete_memory(memory["id"])
+    assert search(db, "Wohnungsunterlagen", "project")["results"][0]["match_id"] == link["id"]
+    links.delete(project["id"], link["id"], project["version"], link["version"])
+    assert search(db, "Wohnungsunterlagen", "project")["results"] == []
+
+
+def test_project_memory_search_reports_bounded_candidates(tmp_path, monkeypatch):
+    db, docs, states, _, _, memory, project, _ = sample(tmp_path)
+    second = docs.add_memory("Orion benötigt den Schlüssel.", "Weitere Notiz", "local_only")
+    links = ProjectMemoryStore(db, states)
+    for item in (memory, second):
+        links.add(project["id"], project["version"], item["id"],
+                  "Manuell geprüfter Projektbeleg")
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_MEMORY_ROWS", 1)
+    result = search(db, "Orion", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
 
 
 def test_project_people_are_searchable_through_their_project(tmp_path):

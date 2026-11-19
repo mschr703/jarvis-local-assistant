@@ -146,7 +146,7 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
 export default function WorkStateView({ visible, onTasks, onResearch, requestedSource }: {
   visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void;
   requestedSource: { kind: 'project'; id: string; serial: number;
-    match?: { kind: 'document' | 'task' | 'alias' | 'person'; id: string } } | null }) {
+    match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory'; id: string } } | null }) {
   const [items, setItems] = useState<WorkSummary[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
