@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, verifiedDocumentForLocalChat } from './api';
+import { api, verifiedSearchDocumentForLocalChat } from './api';
 import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project';
@@ -164,12 +164,13 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       onClick={async () => {
         setPreparingChat(key); setError('');
         try {
-          const file = await verifiedDocumentForLocalChat(document.id, document.path, document.sha256);
+          const file = await verifiedSearchDocumentForLocalChat(document.id, document.path, document.sha256);
           setSelectedChatDocuments([]); onLocalChat([file]);
         }
         catch (cause) { setError((cause as Error).message); }
         finally { setPreparingChat(''); }
-      }}>{preparingChat === key ? 'Original wird geprüft…' : 'Im lokalen Chat verwenden'}</button></div>;
+      }}>{preparingChat === key ? 'Quelle wird geprüft…' : /\.pdf$/i.test(hit.source)
+        ? 'PDF-Indextext im lokalen Chat verwenden' : 'Im lokalen Chat verwenden'}</button></div>;
   };
   const prepareSelectedChat = async () => {
     if (!localChatReady || preparingChat || !selectedChatDocuments.length) return;
@@ -177,7 +178,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     try {
       const files: File[] = [];
       for (const item of selectedChatDocuments)
-        files.push(await verifiedDocumentForLocalChat(item.id, item.path, item.sha256));
+        files.push(await verifiedSearchDocumentForLocalChat(item.id, item.path, item.sha256));
       setSelectedChatDocuments([]); onLocalChat(files);
     } catch (cause) { setError((cause as Error).message); }
     finally { setPreparingChat(''); }
@@ -276,11 +277,11 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         <button type="button" onClick={() => setSelectedDraftSources([])}>Auswahl entfernen</button></div>
     </section>}
     {selectedChatDocuments.length > 0 && <section className="card" aria-label="Dokumente für lokalen Chat">
-      <p>{selectedChatDocuments.length} von höchstens drei verschiedenen Dokumenten für den lokalen Chat ausgewählt.</p>
+      <p>{selectedChatDocuments.length} von höchstens drei verschiedenen Dokumenten für den lokalen Chat ausgewählt. Bei PDFs wird der geprüfte Indextext mit Seitenbelegen als TXT angehängt, höchstens 8.000 Zeichen; das PDF-Original bleibt außerhalb des Chats.</p>
       <div className="item-actions"><button type="button" className="primary"
         disabled={!localChatReady || !!preparingChat}
         onClick={() => void prepareSelectedChat()}>
-        {preparingChat === 'selection' ? 'Originale werden geprüft…'
+        {preparingChat === 'selection' ? 'Quellen werden geprüft…'
           : `Mit ${selectedChatDocuments.length} Dokumenten lokalen Chat vorbereiten`}</button>
         <button type="button" disabled={!!preparingChat}
           onClick={() => setSelectedChatDocuments([])}>Auswahl entfernen</button></div>

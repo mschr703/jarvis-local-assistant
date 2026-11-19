@@ -148,3 +148,64 @@ test('PDF-Indextext wird nur bei aktuellem Original als Download angenommen', as
   expect(fetchMock.mock.calls[1][0]).toBe('/api/documents/id%20mit%20leerzeichen/index-text');
   expect((fetchMock.mock.calls[1][1] as RequestInit).cache).toBe('no-store');
 });
+
+test('Aktueller Scan-PDF-Indextext wird mit Seitenbeleg als lokaler TXT-Chatanhang vorbereitet', async () => {
+  const path = 'C:\\Belege\\Scan.pdf';
+  const sha256 = 'a'.repeat(64);
+  const content = `Jarvis Local · geprüfter PDF-Indextext\nOriginaldatei: Scan.pdf\nDokument-ID: scan-1\nOriginal SHA-256: ${sha256}\n\n=== Seite 1 ===\nSaturn Vertrag`;
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      path, sha256, status: 'indexed', excluded: 0,
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(content, { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedSearchDocumentForLocalChat } = await import('./api');
+  const file = await verifiedSearchDocumentForLocalChat('scan-1', path, sha256);
+  expect(file.name).toBe('Scan-indextext.txt');
+  expect(await file.text()).toContain('=== Seite 1 ===\nSaturn Vertrag');
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/session', '/api/documents/scan-1', '/api/documents/scan-1/index-text',
+  ]);
+});
+
+test('Veralteter oder ausgetauschter PDF-Indextext wird nicht in den Chat übernommen', async () => {
+  const path = 'C:\\Belege\\Scan.pdf';
+  const sha256 = 'a'.repeat(64);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      path, sha256: 'neu', status: 'indexed', excluded: 0,
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      path, sha256, status: 'indexed', excluded: 0,
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Originaldatei weicht vom Index ab; zuerst neu indexieren',
+    }), { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedSearchDocumentForLocalChat } = await import('./api');
+  await expect(verifiedSearchDocumentForLocalChat('scan-1', path, sha256))
+    .rejects.toThrow('nicht mehr aktuell');
+  await expect(verifiedSearchDocumentForLocalChat('scan-1', path, sha256))
+    .rejects.toThrow('Originaldatei weicht');
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+});
+
+test('PDF-Indextext mit fremdem Beleg oder mehr als 8.000 Zeichen wird abgelehnt', async () => {
+  const path = 'C:\\Belege\\Scan.pdf';
+  const sha256 = 'a'.repeat(64);
+  const good = `Jarvis Local · geprüfter PDF-Indextext\nOriginaldatei: Scan.pdf\nDokument-ID: scan-1\nOriginal SHA-256: ${sha256}\n`;
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path, sha256, status: 'indexed', excluded: 0 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(good.replace(sha256, 'b'.repeat(64)), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path, sha256, status: 'indexed', excluded: 0 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(good + '\n=== Seite 1 ===\n' + 'x'.repeat(8000), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedSearchDocumentForLocalChat } = await import('./api');
+  await expect(verifiedSearchDocumentForLocalChat('scan-1', path, sha256))
+    .rejects.toThrow('passt nicht mehr');
+  await expect(verifiedSearchDocumentForLocalChat('scan-1', path, sha256))
+    .rejects.toThrow('8.000 Zeichen');
+});

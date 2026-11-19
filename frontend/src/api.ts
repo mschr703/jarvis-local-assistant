@@ -119,6 +119,34 @@ export async function downloadPdfIndexText(documentId: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function verifiedSearchDocumentForLocalChat(documentId: string,
+  expectedPath: string, expectedSha256: string): Promise<File> {
+  if (!/\.pdf$/i.test(expectedPath))
+    return verifiedDocumentForLocalChat(documentId, expectedPath, expectedSha256);
+  const item = await api<{ path: string; sha256: string | null;
+    status: string; excluded: number }>(`/documents/${encodeURIComponent(documentId)}`);
+  if (item.status !== 'indexed' || item.excluded || item.path !== expectedPath
+      || item.sha256 !== expectedSha256)
+    throw new Error('Der PDF-Treffer ist nicht mehr aktuell. Erneut suchen oder das Dokument neu indexieren.');
+  const filename = item.path.split(/[\\/]/).at(-1) || '';
+  if (!filename || filename.length > 120 || /[<>:"|?*\x00-\x1f]/.test(filename))
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang nicht geeignet.');
+  const blob = await downloadPdfIndexText(documentId);
+  if (!blob.size || blob.size > 512 * 1024)
+    throw new Error('Der geprüfte PDF-Indextext ist für einen Chatanhang zu groß.');
+  const content = await blob.text();
+  const header = `Jarvis Local · geprüfter PDF-Indextext\nOriginaldatei: ${filename}\nDokument-ID: ${documentId}\nOriginal SHA-256: ${expectedSha256}\n`;
+  if (!content.startsWith(header) || !/\n=== Seite [1-9]\d* ===\n/.test(content)
+      || content.includes('\0'))
+    throw new Error('Der PDF-Indextext passt nicht mehr zum gewählten Suchtreffer. Erneut suchen.');
+  if (content.trim().length > 8000)
+    throw new Error('Der PDF-Indextext überschreitet 8.000 Zeichen für einen lokalen Chat. Eine einzelne Fundstelle wählen.');
+  const chatFilename = `${filename.replace(/\.pdf$/i, '')}-indextext.txt`;
+  if (chatFilename.length > 120)
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang zu lang.');
+  return new File([content], chatFilename, { type: 'text/plain' });
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {
