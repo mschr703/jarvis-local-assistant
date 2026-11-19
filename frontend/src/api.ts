@@ -119,6 +119,13 @@ export async function downloadPdfIndexText(documentId: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function downloadChatArchive(chatId: string): Promise<Blob> {
+  const response = await requestWithSession(
+    `/chats/${encodeURIComponent(chatId)}/export`, { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
 export async function verifiedSearchDocumentForLocalChat(documentId: string,
   expectedPath: string, expectedSha256: string): Promise<File> {
   if (!/\.pdf$/i.test(expectedPath))

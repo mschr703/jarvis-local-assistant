@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, streamChat, transcribeAudio, uploadChatAttachment, type Chat, type ChatAttachment,
+import { api, downloadChatArchive, streamChat, transcribeAudio, uploadChatAttachment,
+  type Chat, type ChatAttachment,
   type ChatCompaction, type ChatSummary, type Message } from './api';
-import { downloadChatMarkdown } from './chatExport';
+import { chatFilename, downloadChatMarkdown } from './chatExport';
 import type { Skill } from './SkillView';
 
 type Props = {
@@ -86,6 +87,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [focusMessageId, setFocusMessageId] = useState('');
   const [streamed, setStreamed] = useState('');
   const [busy, setBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [imagePreview, setImagePreview] = useState('');
   const selectedImage = selectedFiles.find((file) => isImageFile(file.name));
@@ -327,6 +329,20 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     } catch (cause) { setError((cause as Error).message); }
     finally { navigationRef.current = false; setNavigating(false); }
   };
+  const exportArchive = async () => {
+    if (!active || archiveBusy || busy || navigating) return;
+    setArchiveBusy(true); setError('');
+    try {
+      const blob = await downloadChatArchive(active.id);
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement('a');
+        link.href = url; link.download = chatFilename(active).replace(/\.md$/, '.zip');
+        document.body.append(link); link.click(); link.remove();
+      } finally { window.setTimeout(() => URL.revokeObjectURL(url), 10_000); }
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setArchiveBusy(false); }
+  };
   const changeArchive = async (item: ChatSummary) => {
     if (busy || navigating || managingChat || controller.current || suggestionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id === item.id) stopVoiceSession();
@@ -548,9 +564,12 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     </div>
     <section className="chat-main">
       <h2>Chat</h2>
-      {active && <div className="item-actions"><button type="button" disabled={busy || navigating}
+      {active && <div className="item-actions"><button type="button" disabled={busy || navigating || archiveBusy}
         onClick={() => downloadChatMarkdown(active)}>Gespräch als Markdown herunterladen</button>
-        <small>Mit Nachrichten und Anhangnamen, ohne Anhangdateien.</small></div>}
+        <button type="button" disabled={busy || navigating || archiveBusy}
+          onClick={() => void exportArchive()}>
+          {archiveBusy ? 'Gesprächs-ZIP wird geprüft…' : 'Gespräch mit Anhängen als ZIP herunterladen'}</button>
+        <small>Markdown enthält Nachrichten und Anhangnamen. Das ZIP enthält zusätzlich die geprüften gesendeten Originalanhänge; beides bleibt lokal.</small></div>}
       {active?.archived_at && <p className="notice">Dieses Gespräch ist archiviert. Zum Fortsetzen zuerst in der Archivliste wiederherstellen.</p>}
       {!configured && <div className="notice">{setupMessage}. Der Chat ist bis dahin deaktiviert.</div>}
       <div className="messages" aria-live="polite">

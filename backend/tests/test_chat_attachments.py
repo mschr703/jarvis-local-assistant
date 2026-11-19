@@ -109,6 +109,7 @@ def test_chat_attachment_message_reload_context_backup_and_delete(tmp_path, monk
         download = client.get(f"/chats/{chat}/attachments/{item['id']}")
         assert download.content == original
         assert download.headers["content-disposition"].endswith("Vertrag.txt")
+        assert download.headers["cache-control"] == "no-store"
         assert download.headers["x-content-type-options"] == "nosniff"
         assert client.post(f"/chats/{chat}/stream", headers=headers,
                            json={"content": "Noch einmal", "attachment_id": item["id"]}).status_code == 422

@@ -152,10 +152,19 @@ class ChatAttachmentStore:
         item = self.get(chat_id, attachment_id)
         if item is None:
             raise LookupError("Chatanhang nicht gefunden")
+        root = self._safe_root()
         path = self._path(item["id"], item["suffix"])
-        if path.is_symlink() or path.is_junction():
+        if (path.is_symlink() or path.is_junction()
+                or path.resolve(strict=True).parent != root.resolve(strict=True)):
             raise ValueError("Chatanhang wurde umgeleitet")
-        data = path.read_bytes()
+        if (not isinstance(item["size"], int) or not 0 < item["size"] <= MAX_ATTACHMENT_BYTES
+                or path.stat().st_size != item["size"]):
+            raise ValueError("Chatanhang weicht vom gespeicherten Original ab")
+        with path.open("rb") as source:
+            data = source.read(MAX_ATTACHMENT_BYTES + 1)
+        if (path.is_symlink() or path.is_junction()
+                or path.resolve(strict=True).parent != root.resolve(strict=True)):
+            raise ValueError("Chatanhang wurde während des Lesens umgeleitet")
         if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise ValueError("Chatanhang weicht vom gespeicherten Original ab")
         return item, data

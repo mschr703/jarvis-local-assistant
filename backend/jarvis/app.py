@@ -35,6 +35,7 @@ from jarvis.chat_compaction import (
     parse_state,
 )
 from jarvis.chat_compaction import prompt as compaction_prompt
+from jarvis.chat_export import build_chat_export
 from jarvis.chat_rules import (
     ChatRuleConflict,
     ChatRuleStore,
@@ -1290,6 +1291,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(original, media_type="application/octet-stream",
                         headers={"Content-Disposition":
                                  f"attachment; filename*=UTF-8''{quote(item['filename'])}",
+                                 "Cache-Control": "no-store",
                                  "X-Content-Type-Options": "nosniff"})
 
     @app.get("/chats/{chat_id}/attachments/{attachment_id}/preview")
@@ -1350,6 +1352,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if item is None:
             raise HTTPException(404, "Gespräch nicht gefunden")
         return {**item, "messages": db.list_messages(chat_id)}
+
+    @app.get("/chats/{chat_id}/export")
+    async def download_chat_export(chat_id: str):
+        try:
+            archive = await run_in_threadpool(build_chat_export, db, chat_attachments, chat_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        item = db.get_chat(chat_id)
+        if item is None:
+            raise HTTPException(409, "Gespräch wurde während des Exports entfernt")
+        filename = f"gespraech-{item['created_at'][:10]}-{chat_id.replace('-', '')[:12]}.zip"
+        return Response(archive, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                                 "Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
 
     def answer_for_speech(chat_id: str, message_id: str) -> dict:
         if db.get_chat(chat_id) is None:

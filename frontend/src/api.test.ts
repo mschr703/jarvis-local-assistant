@@ -279,6 +279,20 @@ test('Drei PDF-Fundstellen werden erst nach gemeinsamer Prüfung übergeben', as
   expect(fetchMock).toHaveBeenCalledTimes(4);
 });
 
+test('Gesprächs-ZIP wird sitzungsgebunden geladen und Fehler bleiben sichtbar', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(new Uint8Array([80, 75, 3, 4]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Chatanhang weicht vom Original ab' }),
+      { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { downloadChatArchive } = await import('./api');
+  expect((await downloadChatArchive('chat 1')).size).toBe(4);
+  await expect(downloadChatArchive('chat 1')).rejects.toThrow('Chatanhang weicht');
+  expect(fetchMock.mock.calls[1][0]).toBe('/api/chats/chat%201/export');
+  expect((fetchMock.mock.calls[1][1] as RequestInit).cache).toBe('no-store');
+});
+
 test('Fehler bei zweiter PDF-Fundstelle verhindert eine Teilauswahl', async () => {
   const sha256 = 'a'.repeat(64);
   const path = 'C:\\Belege\\Bericht.pdf';
