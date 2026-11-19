@@ -77,6 +77,14 @@ def test_ocr_rejects_changed_and_excluded_original(tmp_path, monkeypatch):
         documents.ocr_document(item["id"])
 
 
+def test_missing_original_during_ocr_does_not_delete_index(tmp_path):
+    _, documents, item, path = sample(tmp_path)
+    path.unlink()
+    with pytest.raises(SourceChanged, match="fehlt"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
+
+
 def test_ocr_rejects_mutation_during_recognition_without_partial_index(tmp_path, monkeypatch):
     _, documents, item, path = sample(tmp_path)
 
@@ -95,9 +103,9 @@ def test_ocr_page_limit_and_failed_recognition_leave_no_passages(tmp_path, monke
     _, documents, item, _ = sample(tmp_path)
     monkeypatch.setattr(document_module, "scan_pdf", lambda _data: (_ for _ in ())
                         .throw(ValueError("OCR-Zeitlimit für eine PDF-Seite erreicht")))
-    result = documents.ocr_document(item["id"])
-    assert result["outcome"] == "error"
-    assert result["document"]["error"] == "OCR-Zeitlimit für eine PDF-Seite erreicht"
+    with pytest.raises(ValueError, match="OCR-Zeitlimit"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
     assert documents.search("Orion") == []
 
     image = Image.new("RGB", (100, 100), "white")
@@ -113,6 +121,65 @@ def test_ocr_page_limit_and_failed_recognition_leave_no_passages(tmp_path, monke
     large.write(oversized)
     with pytest.raises(ValueError, match="PDF-Seite ist für lokale OCR zu groß"):
         scan_pdf(oversized.getvalue(), binary="unused")
+
+
+def test_long_scan_pdf_can_be_recognized_in_selected_batches(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Langer Scan.pdf"
+    writer = PdfWriter()
+    for _ in range(MAX_OCR_PAGES + 2):
+        writer.add_blank_page(612, 792)
+    with path.open("wb") as stream:
+        writer.write(stream)
+    documents = DocumentStore(Database(tmp_path / "data" / "jarvis.db"))
+    folder = documents.add_folder(str(root), "local_only")
+    assert documents.index_folder(folder["id"])["ocr_pending"] == 1
+    item = documents.documents()[0]
+    preview = documents.ocr_page_preview(item["id"])
+    assert preview["pages_total"] == MAX_OCR_PAGES + 2
+    assert len(preview["pages"]) == MAX_OCR_PAGES + 2
+    assert not any(page["already_indexed"] for page in preview["pages"])
+    selected = []
+
+    def recognize(_data, *, page_numbers):
+        selected.append(page_numbers)
+        return [(number, f"Orion Seite {number}") for number in page_numbers]
+
+    monkeypatch.setattr(document_module, "scan_pdf", recognize)
+    with pytest.raises(ValueError, match="höchstens 10"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
+    with pytest.raises(ValueError, match="zehn verschiedene"):
+        documents.ocr_document(item["id"], page_numbers=[1, 1],
+                               expected_sha256=item["sha256"])
+    assert documents.get_document(item["id"]) == item
+    assert documents.ocr_document(item["id"], page_numbers=list(range(1, 11)),
+                                  expected_sha256=item["sha256"])["outcome"] == "indexed"
+    assert selected == [list(range(1, 11))]
+    assert documents.ocr_page_preview(item["id"])["pages"][0]["already_indexed"]
+    assert not documents.ocr_page_preview(item["id"])["pages"][-1]["already_indexed"]
+    monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: [])
+    assert documents.ocr_document(item["id"], page_numbers=[1],
+                                  expected_sha256=item["sha256"])["outcome"] == "unchanged"
+    assert documents.search("Orion")[0]["page"] in range(1, 11)
+    monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: (_ for _ in ())
+                        .throw(ValueError("OCR-Zeitlimit für eine PDF-Seite erreicht")))
+    with pytest.raises(ValueError, match="OCR-Zeitlimit"):
+        documents.ocr_document(item["id"], page_numbers=[11, 12],
+                               expected_sha256=item["sha256"])
+    assert {hit["page"] for hit in documents.search("Orion")} == set(range(1, 11))
+    monkeypatch.setattr(document_module, "scan_pdf", recognize)
+    assert documents.ocr_document(item["id"], page_numbers=[11, 12],
+                                  expected_sha256=item["sha256"])["outcome"] == "indexed"
+    assert {hit["page"] for hit in documents.search("Orion")} == set(range(1, 13))
+    assert all(page["already_indexed"] for page in documents.ocr_page_preview(item["id"])["pages"])
+    before_missing = documents.get_document(item["id"])
+    path.unlink()
+    with pytest.raises(SourceChanged, match="fehlt"):
+        documents.ocr_document(item["id"], page_numbers=[1],
+                               expected_sha256=item["sha256"])
+    assert documents.get_document(item["id"]) == before_missing
 
 
 def test_ocr_helper_enforces_process_timeout(tmp_path, monkeypatch):
@@ -353,3 +420,29 @@ def test_ocr_preview_route_and_selection_hash_block_stale_pdf(tmp_path, monkeypa
         documents.set_excluded(item["id"], True)
         assert client.get(preview_url).status_code == 404
         assert client.get("/documents/missing/ocr-pages").status_code == 404
+
+
+def test_pending_scan_preview_route_keeps_retryable_state(tmp_path, monkeypatch):
+    db, documents, item, path = sample(tmp_path)
+    with TestClient(create_app(Settings(JARVIS_DATA_DIR=db.path.parent,
+                                        JARVIS_OLLAMA_MODEL="fixture"))) as client:
+        endpoint = f"/documents/{item['id']}/ocr"
+        preview_url = f"/documents/{item['id']}/ocr-pages"
+        token = client.get("/session").json()["csrf"]
+        preview = client.get(preview_url)
+        assert preview.status_code == 200
+        assert preview.json()["pages"] == [{"page": 1, "already_indexed": False}]
+        payload = {"pages": [1], "expected_sha256": preview.json()["sha256"]}
+        assert client.post(endpoint, json=payload).status_code == 403
+        monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: (_ for _ in ())
+                            .throw(ValueError("OCR-Zeitlimit für eine PDF-Seite erreicht")))
+        failed = client.post(endpoint, json=payload, headers={"x-jarvis-csrf": token})
+        assert failed.status_code == 409
+        assert documents.get_document(item["id"]) == item
+        monkeypatch.setattr(document_module, "scan_pdf", lambda _data: [(1, "Orion Beleg")])
+        success = client.post(endpoint, json=payload, headers={"x-jarvis-csrf": token})
+        assert success.status_code == 200
+        assert success.json()["outcome"] == "indexed"
+        assert documents.search("Orion")[0]["page"] == 1
+        path.write_bytes(path.read_bytes() + b"\n")
+        assert client.get(preview_url).status_code == 409

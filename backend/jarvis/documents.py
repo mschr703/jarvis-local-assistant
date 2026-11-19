@@ -140,9 +140,10 @@ class DocumentStore:
         return current
 
     @staticmethod
-    def _current_source_bytes(document: dict) -> bytes | None:
+    def _current_source_bytes(document: dict, *, allow_ocr_pending: bool = False) -> bytes | None:
         """Return the exact indexed bytes only while the granted original still matches."""
-        if (document["excluded"] or document["status"] != "indexed"
+        allowed_statuses = {"indexed", "ocr_pending"} if allow_ocr_pending else {"indexed"}
+        if (document["excluded"] or document["status"] not in allowed_statuses
                 or not document["sha256"] or not isinstance(document["size"], int)
                 or not 0 < document["size"] <= MAX_FILE_BYTES):
             return None
@@ -231,16 +232,18 @@ class DocumentStore:
                 "current": len(checked) - len(stale), "stale": len(stale),
                 "limited": limited, "stale_sources": stale}
 
-    def original_bytes(self, document_id: str) -> tuple[dict, bytes]:
+    def original_bytes(self, document_id: str, *, allow_ocr_pending: bool = False) -> tuple[dict, bytes]:
         """Serve a verified snapshot, never a later unverified filesystem read."""
         with self.db.connect() as db:
             row = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
                               JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
                              (document_id,)).fetchone()
-        if row is None or row["excluded"] or row["status"] != "indexed":
+        allowed_statuses = {"indexed", "ocr_pending"} if allow_ocr_pending else {"indexed"}
+        if row is None or row["excluded"] or row["status"] not in allowed_statuses:
             raise LookupError("Indexiertes Dokument nicht gefunden")
         item = dict(row)
-        contents = self._current_source_bytes(item)
+        contents = (self._current_source_bytes(item, allow_ocr_pending=True)
+                    if allow_ocr_pending else self._current_source_bytes(item))
         if contents is None:
             raise ValueError("Originaldatei weicht vom Index ab; zuerst neu indexieren")
         with self.db.connect() as db:
@@ -296,8 +299,8 @@ class DocumentStore:
         return item, "\n".join(lines)
 
     def ocr_page_preview(self, document_id: str) -> dict:
-        """Show textless pages of a current indexed PDF before explicit OCR."""
-        item, contents = self.original_bytes(document_id)
+        """Show textless pages of a verified indexed or OCR-pending PDF."""
+        item, contents = self.original_bytes(document_id, allow_ocr_pending=True)
         if Path(item["path"]).suffix.lower() != ".pdf":
             raise ValueError("OCR-Seitenvorschau ist nur für PDF verfügbar")
         try:
@@ -326,7 +329,7 @@ class DocumentStore:
                 raise ValueError("PDF-Index hat sich während der Vorschau geändert")
             indexed_pages = {row["page"] for row in db.execute(
                 "SELECT DISTINCT page FROM passages WHERE document_id=?", (document_id,))}
-        if not self.source_is_current(item):
+        if self._current_source_bytes(item, allow_ocr_pending=True) is None:
             raise ValueError("Originaldatei weicht vom Index ab; zuerst neu indexieren")
         return {"document_id": document_id, "sha256": item["sha256"],
                 "pages_total": len(reader.pages),
@@ -391,6 +394,8 @@ class DocumentStore:
             if parent != path.parent or not parent.is_relative_to(root):
                 raise ValueError("Dokumentordner wurde umgeleitet")
             if not path.exists():
+                if ocr:
+                    raise SourceChanged("Originaldatei fehlt; zuerst neu indexieren")
                 with self.db.connect() as db:
                     db.execute("DELETE FROM documents WHERE id=? AND path=?",
                                (document_id, str(path)))
@@ -408,7 +413,7 @@ class DocumentStore:
             except (SourceChanged, OcrUnavailable):
                 raise
             except (OSError, ValueError, PdfReadError) as exc:
-                if ocr and item["status"] == "indexed":
+                if ocr:
                     raise ValueError(str(exc)) from exc
                 reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
                           or (ocr and isinstance(exc, ValueError))
@@ -558,20 +563,28 @@ class DocumentStore:
                                    for number in page_numbers)):
                         raise ValueError("Nur bis zu zehn verschiedene PDF-Seiten ohne Textschicht auswählen")
                     selected_pages = page_numbers
-                    if prior:
-                        with self.db.connect() as db:
-                            old_passages = db.execute(
-                                "SELECT page,text FROM passages WHERE document_id=? ORDER BY ordinal",
-                                (prior["id"],)).fetchall()
-                        segments.extend((row["page"], row["text"]) for row in old_passages
-                                        if row["page"] in blank_pages
-                                        and row["page"] not in selected_pages)
                 else:
                     selected_pages = blank_pages
+                    if len(selected_pages) > MAX_OCR_PAGES:
+                        raise ValueError("OCR verarbeitet höchstens 10 PDF-Seiten pro Aktion; Seiten auswählen")
+                old_passages = []
+                if prior:
+                    with self.db.connect() as db:
+                        old_passages = db.execute(
+                            "SELECT page,text FROM passages WHERE document_id=? ORDER BY ordinal",
+                            (prior["id"],)).fetchall()
                 recognized = (scan_pdf(data) if len(selected_pages) == len(reader.pages)
                               else scan_pdf(data, page_numbers=selected_pages))
+                recognized_pages = set()
                 for number, content in recognized:
-                    segments.extend((number, piece) for piece in chunks(content))
+                    pieces = chunks(content)
+                    if pieces:
+                        recognized_pages.add(number)
+                        segments.extend((number, piece) for piece in pieces)
+                segments.extend((row["page"], row["text"]) for row in old_passages
+                                if row["page"] in blank_pages
+                                and (row["page"] not in selected_pages
+                                     or row["page"] not in recognized_pages))
                 segments.sort(key=lambda segment: segment[0] or 0)
             elif ocr and page_numbers is not None:
                 raise ValueError("PDF hat keine ausgewählten Seiten ohne Textschicht")

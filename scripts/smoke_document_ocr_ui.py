@@ -78,11 +78,17 @@ def main() -> None:
         write_scan(extra_page, "Neptun")
         mixed = allowed / "Gemischt.pdf"
         write_mixed(mixed, scanned_page, extra_page)
+        long_scan = allowed / "LangerScan.pdf"
+        writer = PdfWriter()
+        for _ in range(12):
+            writer.append(str(scanned_page))
+        with long_scan.open("wb") as stream:
+            writer.write(stream)
         db = Database(root / "data" / "jarvis.db")
         documents = DocumentStore(db)
         folder = documents.add_folder(str(allowed), "local_only")
         counts = documents.index_folder(folder["id"])
-        assert counts["ocr_pending"] == 1 and counts["indexed"] == 1
+        assert counts["ocr_pending"] == 2 and counts["indexed"] == 1
         item = next(document for document in documents.documents()
                     if Path(document["path"]).name == "Vertrag.pdf")
         original_id = item["id"]
@@ -110,6 +116,33 @@ def main() -> None:
                             .to_be_visible()
                         assert not overflow_nodes(page), overflow_nodes(page)
 
+                        long_row = page.locator(".document-row").filter(has_text="LangerScan.pdf")
+                        expect(long_row).to_contain_text("OCR ausstehend")
+                        long_row.get_by_role("button", name="Scan-PDF-Seiten auswählen").click()
+                        long_preview = page.get_by_role("region", name="PDF-Seiten für OCR auswählen")
+                        expect(long_preview).to_contain_text("12 Seiten insgesamt")
+                        long_preview.get_by_role("checkbox", name="PDF-Seite 1 für OCR auswählen")\
+                            .check()
+                        long_preview.get_by_role("checkbox", name="PDF-Seite 12 für OCR auswählen")\
+                            .check()
+                        long_preview.get_by_role("button", name="Ausgewählte 2 Seiten per OCR lesen")\
+                            .click()
+                        expect(page.get_by_role("status").filter(has_text="Scan-PDF lokal erkannt"))\
+                            .to_be_visible(timeout=120000)
+                        long_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
+                            .click()
+                        expect(long_preview).to_contain_text("Seite 1 · OCR-Text bereits im Index")
+                        expect(long_preview).to_contain_text("Seite 12 · OCR-Text bereits im Index")
+                        expect(long_preview).to_contain_text("Seite 2 · noch kein OCR-Text")
+                        with page.expect_download() as long_download:
+                            long_row.get_by_role(
+                                "button", name="Geprüften PDF-Indextext herunterladen").click()
+                        long_text = Path(long_download.value.path()).read_text(encoding="utf-8")
+                        assert "=== Seite 1 ===" in long_text
+                        assert "=== Seite 12 ===" in long_text
+                        assert "=== Seite 2 ===" not in long_text
+                        assert not overflow_nodes(page), overflow_nodes(page)
+
                         mixed_row = page.locator(".document-row").filter(has_text="Gemischt.pdf")
                         expect(mixed_row).to_contain_text("Indexstand:")
                         mixed_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
@@ -133,7 +166,8 @@ def main() -> None:
                         assert "Projekt Saturn Vertrag 2026" in mixed_text
                         assert "=== Seite 3 ===" not in mixed_text
                         assert str(allowed) not in mixed_text
-                        assert documents.search("Saturn")[0]["document_id"] == mixed_id
+                        assert any(hit["document_id"] == mixed_id
+                                   for hit in documents.search("Saturn"))
                         mixed_row.get_by_role("button", name="PDF-Bildseiten für OCR auswählen")\
                             .click()
                         expect(preview).to_contain_text("Seite 2 · OCR-Text bereits im Index")
@@ -217,6 +251,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"ocr": "real_tesseract", "page": 1,
+                                          "long_scan": "12_pages_two_selected",
                                           "mixed_pdf": "text_and_two_selected_image_pages",
                                           "semantic_search": "local_ollama",
                                           "stale_original": "refused", "index_text": "verified_download",
