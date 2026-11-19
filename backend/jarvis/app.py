@@ -48,6 +48,7 @@ from jarvis.chat_suggestions import parse_suggestions
 from jarvis.chat_suggestions import prompt as suggestion_prompt
 from jarvis.code_projects import CodeProjectStore
 from jarvis.config import Settings, load_settings, valid_personal_style_label
+from jarvis.contact_search import search as contact_semantic_search
 from jarvis.contacts import ContactConflict, ContactStore
 from jarvis.db import Database
 from jarvis.desktop import register_desktop_tools
@@ -3508,6 +3509,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await run_in_threadpool(contacts.list, q)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/contacts/semantic")
+    async def contact_semantic_view(q: str = Query(min_length=2, max_length=160)):
+        try:
+            return await run_in_threadpool(contact_semantic_search, db, q,
+                                           config.ollama_url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except SemanticSearchError as exc:
+            raise HTTPException(503, str(exc)) from exc
 
     @app.get("/contacts/{contact_id}")
     async def contact_get(contact_id: str):

@@ -15,6 +15,9 @@ type TaskOption = { id: string; title: string; status: 'open' | 'done';
   due_utc: string | null; due_local: string | null; timezone: string | null };
 type LinkedEvent = { id: string; date_local: string; title: string; location: string;
   version: number; source_kind: 'manual'; linked_at: string };
+type SemanticResult = { query: string; model: string; checked_contacts: number;
+  limited: boolean; changed_contacts: string[]; results: { id: string; name: string;
+    context: string; excerpt: string; source: string; similarity: number }[] };
 type Contact = { id: string; name: string; context: string; relationship: string;
   version: number; created_at: string; updated_at: string; note_count?: number;
   plan_count?: number; event_count?: number; notes?: Note[]; plans?: Plan[];
@@ -28,6 +31,7 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
 }) {
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [chosenTasks, setChosenTasks] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Contact | null>(null);
@@ -88,6 +92,14 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
       setForm(emptyForm());
     } catch (error) { setNotice((error as Error).message); }
   };
+  const runSemantic = async () => {
+    if (inFlight.current || query.trim().length < 2 || query.trim().length > 160) return;
+    inFlight.current = true; setBusy(true); setNotice(''); setSemantic(null);
+    try {
+      setSemantic(await api<SemanticResult>(`/contacts/semantic?q=${encodeURIComponent(query.trim())}`));
+    } catch (error) { setNotice((error as Error).message); }
+    finally { inFlight.current = false; setBusy(false); }
+  };
   const saveContact = async () => {
     if (!editing || !selected) {
       const created = await api<Contact>('/contacts', { method: 'POST', body: JSON.stringify(form) });
@@ -106,13 +118,29 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
     {notice && <p className="notice" role="status">{notice}</p>}
     <section className="card"><h3>Kontakt suchen</h3>
       <div className="memory-form"><input aria-label="Kontakte durchsuchen" maxLength={200} value={query}
-        onChange={(event) => setQuery(event.target.value)} placeholder="Name, Kontext, Beziehung oder Notiz" />
-      <button disabled={busy} onClick={() => void reload().catch((error: Error) => setNotice(error.message))}>Suchen</button></div>
+        onChange={(event) => { setQuery(event.target.value); setSemantic(null); }} placeholder="Name, Kontext, Beziehung oder Notiz" />
+      <div className="item-actions"><button disabled={busy} onClick={() => void reload().catch((error: Error) => setNotice(error.message))}>Suchen</button>
+        <button disabled={busy || query.trim().length < 2 || query.trim().length > 160}
+          onClick={() => void runSemantic()}>
+          {busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button></div>
+      <small>Die sinngemäße Frage braucht 2–160 Zeichen und lokal Ollama mit embeddinggemma:300m. Sie prüft höchstens 30 zuletzt geänderte Kontakte mit bis zu drei Notizen und Vorhaben je Person.</small></div>
       <div className="item-list">{contacts.map((person) => <div className="item-row" key={person.id}>
         <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen · {person.plan_count} Vorhaben · {person.event_count} Lebensereignisse</small></div>
         <button onClick={() => void open(person.id)}>Öffnen</button></div>)}</div>
       {!contacts.length && <p>Keine passenden Kontakte.</p>}
     </section>
+    {semantic && <section className="card" aria-label="Sinngemäße Kontakttreffer">
+      <h3>Sinngemäße Kontakte für „{semantic.query}“</h3>
+      <small>{semantic.checked_contacts} Kontakte geprüft · Modell {semantic.model}. Ähnlichkeit ist eine Ranghilfe, kein Beweis.</small>
+      {semantic.limited && <p className="notice">Höchstens 30 zuletzt geänderte Kontakte und zehn Treffer werden berücksichtigt. Stichwortsuche für weitere Kontakte verwenden.</p>}
+      {semantic.changed_contacts.length > 0 && <p className="notice">{semantic.changed_contacts.length} Kontakte oder ihre Angaben wurden während der Suche geändert oder entfernt. Erneut suchen.</p>}
+      {!semantic.results.length && <p>Keine aktuellen Kontakte gefunden.</p>}
+      <div className="item-list">{semantic.results.map((hit) => <div className="item-row" key={hit.id}>
+        <div><strong>{hit.name} · {hit.context}</strong>
+          <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{hit.excerpt}</p>
+          <small>{hit.source} · Ähnlichkeit {hit.similarity.toFixed(2)}</small></div>
+        <button onClick={() => void open(hit.id)}>Kontakt öffnen</button></div>)}</div>
+    </section>}
     <section className="card"><h3>{editing && selected ? 'Kontakt bearbeiten' : 'Kontakt anlegen'}</h3>
       <div className="memory-form">
         <input aria-label="Kontaktname" maxLength={120} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Name" />
