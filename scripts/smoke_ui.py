@@ -96,10 +96,12 @@ def main() -> None:
                         except Exception as exc:
                             raise AssertionError(f"Startoberfläche blieb unbereit: {page.locator('main').inner_text()[:1000]}") from exc
 
+                        settings_timezone = page.locator(
+                            ".settings > .form-grid").first.get_by_label("Zeitzone (IANA)")
                         page.get_by_label("Max. Eingabezeichen").fill("4000")
                         page.get_by_role("button", name="Einstellungen speichern").click()
                         page.get_by_text("Gespeichert.", exact=True).wait_for()
-                        page.get_by_label("Zeitzone (IANA)").fill("Europe/Paris")
+                        settings_timezone.fill("Europe/Paris")
                         page.evaluate("""() => {
                           const original = window.fetch.bind(window);
                           window.__settingsOriginalFetch = original;
@@ -121,18 +123,18 @@ def main() -> None:
                         page.get_by_role("button", name="Chat", exact=True).click()
                         page.get_by_role("button", name="Übersicht", exact=True).click()
                         expect(page.get_by_role("button", name="Speichere…")).to_be_disabled()
-                        page.get_by_label("Zeitzone (IANA)").fill("Europe/Berlin")
+                        settings_timezone.fill("Europe/Berlin")
                         page.get_by_role("button", name="Speichere…").evaluate(
                             "button => { button.click(); button.click(); }")
                         assert page.evaluate("window.__delayedSettingsPatch.calls") == 1
                         page.evaluate("window.__delayedSettingsPatch.release()")
                         page.get_by_text("Vorherige Werte gespeichert; neuere Eingaben sind noch ungespeichert.").wait_for()
-                        expect(page.get_by_label("Zeitzone (IANA)")).to_have_value("Europe/Berlin")
+                        expect(settings_timezone).to_have_value("Europe/Berlin")
                         page.get_by_role("button", name="Einstellungen speichern").click()
                         page.get_by_text("Gespeichert.", exact=True).wait_for()
                         assert page.evaluate("window.__delayedSettingsPatch.calls") == 2
                         page.evaluate("window.fetch = window.__settingsOriginalFetch")
-                        page.get_by_label("Zeitzone (IANA)").fill("Europe/Paris")
+                        settings_timezone.fill("Europe/Paris")
                         page.route("**/api/health", lambda route: route.fulfill(
                             status=200, content_type="application/json", body=json.dumps({
                                 "status": "degraded", "provider": "ollama",
@@ -141,7 +143,7 @@ def main() -> None:
                             })))
                         page.get_by_role("button", name="Status prüfen").click()
                         page.get_by_role("heading", name="Ein Dienst ist ausgefallen.").wait_for(timeout=20_000)
-                        expect(page.get_by_label("Zeitzone (IANA)")).to_have_value("Europe/Paris")
+                        expect(settings_timezone).to_have_value("Europe/Paris")
                         page.unroute("**/api/health")
                         page.get_by_role("button", name="Status prüfen").click()
                         page.get_by_role("heading", name="Jarvis ist bereit.").wait_for(timeout=20_000)
@@ -149,15 +151,15 @@ def main() -> None:
                         page.get_by_role("button", name="Status prüfen").click()
                         page.get_by_role("heading", name="Ein Dienst ist ausgefallen.").wait_for()
                         page.get_by_text("Offline", exact=True).wait_for()
-                        expect(page.get_by_label("Zeitzone (IANA)")).to_have_value("Europe/Paris")
+                        expect(settings_timezone).to_have_value("Europe/Paris")
                         page.get_by_role("button", name="Chat", exact=True).click()
                         expect(page.get_by_label("Nachricht")).to_be_disabled()
                         page.get_by_role("button", name="Übersicht", exact=True).click()
-                        expect(page.get_by_label("Zeitzone (IANA)")).to_have_value("Europe/Paris")
+                        expect(settings_timezone).to_have_value("Europe/Paris")
                         page.unroute("**/api/health")
                         page.get_by_role("button", name="Status prüfen").click()
                         page.get_by_role("heading", name="Jarvis ist bereit.").wait_for()
-                        page.get_by_label("Zeitzone (IANA)").fill("Europe/Berlin")
+                        settings_timezone.fill("Europe/Berlin")
                         page.get_by_role("button", name="Chat", exact=True).click()
                         page.get_by_role("button", name="Neues Gespräch").evaluate(
                             "button => { button.click(); button.click(); }")
