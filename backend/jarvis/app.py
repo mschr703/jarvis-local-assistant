@@ -193,6 +193,18 @@ class ContactNoteUpdateInput(ContactNoteInput):
     expected_version: int = Field(ge=1)
 
 
+class ContactPlanInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=160)
+    details: str = Field(default="", max_length=4000)
+
+
+class ContactPlanUpdateInput(ContactPlanInput):
+    expected_version: int = Field(ge=1)
+    status: Literal["open", "completed"]
+
+
 class ChatSuggestionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -3300,6 +3312,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                   expected_version: int = Query(ge=1)):
         try:
             await run_in_threadpool(contacts.delete_note, contact_id, note_id,
+                                    expected_version)
+            return {"deleted": True}
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/contacts/{contact_id}/plans", status_code=201)
+    async def contact_plan_create(contact_id: str, data: ContactPlanInput):
+        try:
+            return await run_in_threadpool(contacts.add_plan, contact_id, data.title,
+                                           data.details)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.put("/contacts/{contact_id}/plans/{plan_id}")
+    async def contact_plan_update(contact_id: str, plan_id: str,
+                                  data: ContactPlanUpdateInput):
+        try:
+            return await run_in_threadpool(contacts.update_plan, contact_id, plan_id,
+                                           data.expected_version, data.title,
+                                           data.details, data.status)
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/contacts/{contact_id}/plans/{plan_id}")
+    async def contact_plan_delete(contact_id: str, plan_id: str,
+                                  expected_version: int = Query(ge=1)):
+        try:
+            await run_in_threadpool(contacts.delete_plan, contact_id, plan_id,
                                     expected_version)
             return {"deleted": True}
         except ContactConflict as exc:

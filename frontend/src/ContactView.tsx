@@ -3,8 +3,11 @@ import { api } from './api';
 
 type Note = { id: string; contact_id: string; content: string; source_kind: 'manual';
   version: number; created_at: string; updated_at: string };
+type Plan = { id: string; contact_id: string; title: string; details: string;
+  status: 'open' | 'completed'; version: number; created_at: string; updated_at: string };
 type Contact = { id: string; name: string; context: string; relationship: string;
-  version: number; created_at: string; updated_at: string; note_count?: number; notes?: Note[] };
+  version: number; created_at: string; updated_at: string; note_count?: number;
+  plan_count?: number; notes?: Note[]; plans?: Plan[] };
 type ContactForm = { name: string; context: string; relationship: string };
 const emptyForm = (): ContactForm => ({ name: '', context: '', relationship: '' });
 
@@ -16,6 +19,9 @@ export default function ContactView({ visible }: { visible: boolean }) {
   const [editing, setEditing] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [planTitle, setPlanTitle] = useState('');
+  const [planDetails, setPlanDetails] = useState('');
+  const [editingPlan, setEditingPlan] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -46,6 +52,7 @@ export default function ContactView({ visible }: { visible: boolean }) {
   };
   const open = async (id: string) => {
     setNotice(''); setEditing(false); setEditingNote(null); setNoteDraft('');
+    setEditingPlan(null); setPlanTitle(''); setPlanDetails('');
     try {
       const person = await api<Contact>(`/contacts/${encodeURIComponent(id)}`);
       setSelected(person);
@@ -71,7 +78,7 @@ export default function ContactView({ visible }: { visible: boolean }) {
         onChange={(event) => setQuery(event.target.value)} placeholder="Name, Kontext, Beziehung oder Notiz" />
       <button disabled={busy} onClick={() => void reload().catch((error: Error) => setNotice(error.message))}>Suchen</button></div>
       <div className="item-list">{contacts.map((person) => <div className="item-row" key={person.id}>
-        <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen</small></div>
+        <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen · {person.plan_count} Vorhaben</small></div>
         <button onClick={() => void open(person.id)}>Öffnen</button></div>)}</div>
       {!contacts.length && <p>Keine passenden Kontakte.</p>}
     </section>
@@ -97,6 +104,32 @@ export default function ContactView({ visible }: { visible: boolean }) {
           const done = await change(() => api(`/contacts/${encodeURIComponent(selected.id)}?expected_version=${selected.version}`, { method: 'DELETE' }), 'Kontakt gelöscht.', undefined);
           if (done) { setSelected(null); setForm(emptyForm()); await reload(query, undefined); }
         })()}>Kontakt löschen</button></div>
+      <h4>Gemeinsame Vorhaben</h4>
+      <p>Diese Pläne werden von dir eingetragen. „Erledigt“ ist eine bewusste Bestätigung; es wird keine Nachricht gesendet.</p>
+      <div className="memory-form"><input aria-label={editingPlan ? 'Vorhaben-Titel bearbeiten' : 'Neues Vorhaben'} maxLength={160}
+        value={planTitle} onChange={(event) => setPlanTitle(event.target.value)} placeholder="z. B. Museum besuchen" />
+        <textarea aria-label="Vorhaben-Details" maxLength={4000} value={planDetails}
+          onChange={(event) => setPlanDetails(event.target.value)} placeholder="Absprachen und Kontext" />
+        <div className="item-actions"><button className="primary" disabled={busy || !planTitle.trim()} onClick={() => void (async () => {
+          const plan = selected.plans?.find((item) => item.id === editingPlan);
+          const done = await change(() => api(plan ? `/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}` : `/contacts/${encodeURIComponent(selected.id)}/plans`,
+            { method: plan ? 'PUT' : 'POST', body: JSON.stringify(plan ? { title: planTitle, details: planDetails, status: plan.status, expected_version: plan.version } : { title: planTitle, details: planDetails }) }),
+          plan ? 'Vorhaben aktualisiert.' : 'Vorhaben gespeichert.');
+          if (done) { setEditingPlan(null); setPlanTitle(''); setPlanDetails(''); }
+        })()}>{editingPlan ? 'Vorhaben speichern' : 'Vorhaben hinzufügen'}</button>
+        {editingPlan && <button disabled={busy} onClick={() => { setEditingPlan(null); setPlanTitle(''); setPlanDetails(''); }}>Abbrechen</button>}</div></div>
+      <div className="item-list">{selected.plans?.map((plan) => <div className="item-row" key={plan.id}><div>
+        <strong>{plan.title}</strong><small>{plan.status === 'open' ? 'Offen' : 'Erledigt'} · Manuell bestätigt · {new Date(plan.updated_at).toLocaleString('de-DE')}</small>
+        {plan.details && <p>{plan.details}</p>}
+      </div><div className="item-actions"><button disabled={busy} onClick={() => { setEditingPlan(plan.id); setPlanTitle(plan.title); setPlanDetails(plan.details); }}>Bearbeiten</button>
+        <button disabled={busy} onClick={() => void change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}`,
+          { method: 'PUT', body: JSON.stringify({ title: plan.title, details: plan.details, status: plan.status === 'open' ? 'completed' : 'open', expected_version: plan.version }) }),
+        plan.status === 'open' ? 'Vorhaben als erledigt markiert.' : 'Vorhaben wieder geöffnet.')}>{plan.status === 'open' ? 'Erledigt' : 'Wieder öffnen'}</button>
+        <button disabled={busy} onClick={() => void (async () => {
+          if (!window.confirm(`Vorhaben „${plan.title}“ löschen?`)) return;
+          const done = await change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}?expected_version=${plan.version}`, { method: 'DELETE' }), 'Vorhaben gelöscht.');
+          if (done && editingPlan === plan.id) { setEditingPlan(null); setPlanTitle(''); setPlanDetails(''); }
+        })()}>Löschen</button></div></div>)}</div>
       <h4>Bestätigte Notizen</h4><p>Quelle: manuell von dir eingetragen. Änderungen bleiben mit Zeitstempel nachvollziehbar.</p>
       <div className="memory-form"><textarea aria-label={editingNote ? 'Notiz bearbeiten' : 'Neue Kontaktnotiz'} maxLength={4000}
         value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="Was soll Jarvis über diese Person wissen?" />

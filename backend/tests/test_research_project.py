@@ -71,7 +71,7 @@ def test_project_snapshot_only_with_ollama_and_public_quotes(tmp_path, monkeypat
                               json={**payload, "project_id": "00000000-0000-0000-0000-000000000000"})
         assert missing.status_code == 404
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 55
+    assert create_backup(root, archive)["schema"] == 56
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert ResearchStore(Database(restored / "jarvis.db")).get(report["id"]) == report

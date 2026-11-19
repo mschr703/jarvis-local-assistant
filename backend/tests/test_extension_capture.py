@@ -117,7 +117,7 @@ def test_parallel_capture_and_backup_restore(tmp_path):
     assert sorted(item["created"] for item in answers) == [False, True]
     assert answers[0]["task_id"] == answers[1]["task_id"]
     archive = tmp_path / "backup.zip"
-    assert create_backup(source, archive)["schema"] == 55
+    assert create_backup(source, archive)["schema"] == 56
     target = tmp_path / "restored"
     restore_backup(archive, target)
     restored = TaskStore(Database(target / "jarvis.db")).list_tasks()

@@ -65,14 +65,32 @@ def main() -> None:
                         page.get_by_role("button", name="Änderungen speichern").click()
                         expect(page.get_by_role("heading", name="Alex · München privat"))\
                             .to_be_visible()
+                        page.get_by_label("Neues Vorhaben").fill("Museum besuchen")
+                        page.get_by_label("Vorhaben-Details").fill("Im Dezember")
+                        page.get_by_role("button", name="Vorhaben hinzufügen").click()
+                        plan_row = page.locator(".item-row").filter(has_text="Museum besuchen")
+                        expect(plan_row).to_contain_text("Offen")
+                        plan_row.get_by_role("button", name="Erledigt").click()
+                        expect(plan_row).to_contain_text("Erledigt")
+                        plan_row.get_by_role("button", name="Bearbeiten").click()
+                        page.get_by_label("Vorhaben-Titel bearbeiten").fill("Kunstmuseum besuchen")
+                        page.get_by_role("button", name="Vorhaben speichern").click()
+                        expect(page.get_by_text("Kunstmuseum besuchen", exact=True))\
+                            .to_be_visible()
+                        page.get_by_label("Kontakte durchsuchen").fill("Kunstmuseum")
+                        page.get_by_role("button", name="Suchen").click()
+                        expect(page.locator(".item-list .item-row").filter(has_text="Alex"))\
+                            .to_have_count(1)
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM contacts").fetchone()[0] == 2
+                            assert connection.execute("SELECT status FROM contact_plans").fetchone()[0] == "completed"
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"same_name": "distinct_contexts",
                                           "note": "created_and_corrected",
-                                          "search": "note_content",
+                                          "plan": "created_completed_and_corrected",
+                                          "search": "notes_and_plans",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:
                         browser.close()

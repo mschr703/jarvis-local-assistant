@@ -74,9 +74,9 @@ def test_selected_memory_snapshot_is_used_once_and_restored(tmp_path, monkeypatc
         assert "Bitte antworte mir ausführlich." not in seen[-1][0]["content"]
         assert client.get(f"/chats/{chat['id']}").json()["messages"][-1]["memory_context"] == []
     archive = tmp_path / "memory-context.zip"
-    assert create_backup(data, archive)["schema"] == 55
+    assert create_backup(data, archive)["schema"] == 56
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 55
+    assert restore_backup(archive, restored)["schema"] == 56
     restored_db = Database(restored / "jarvis.db")
     restored_answer = next(item for item in restored_db.list_messages(chat["id"])
                            if item["id"] == answer["id"])
@@ -96,7 +96,7 @@ def test_memory_context_cloud_rejected_and_schema_50_migrates(tmp_path):
         connection.execute("PRAGMA user_version=50")
     Database(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
         assert connection.execute("SELECT COUNT(*) FROM memory_context_uses").fetchone()[0] == 0
     cloud = Settings(JARVIS_DATA_DIR=tmp_path / "cloud", JARVIS_PROVIDER="openrouter",
                      JARVIS_OPENROUTER_API_KEY="fixture",

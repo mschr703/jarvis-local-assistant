@@ -56,9 +56,9 @@ def test_alias_sources_duplicates_and_person_cascade(tmp_path):
                              "confirmed", None, None)
     assert revised["version"] == 2 and revised["source_status"] == "eigene_angabe"
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 55
+    assert create_backup(root, archive)["schema"] == 56
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 55
+    assert restore_backup(archive, restored)["schema"] == 56
     with Database(restored / "jarvis.db").connect() as connection:
         assert connection.execute("SELECT alias FROM project_person_aliases WHERE id=?",
                                   (alias["id"],)).fetchone()[0] == "Miriam"
@@ -160,5 +160,5 @@ def test_schema44_migrates_alias_table_without_changing_people(tmp_path):
         migrated, DocumentStore(migrated), TaskStore(migrated))).list_for_state(state["id"])[0][
             "id"] == person["id"]
     with sqlite3.connect(migrated.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
         assert connection.execute("SELECT count(*) FROM project_person_aliases").fetchone()[0] == 0

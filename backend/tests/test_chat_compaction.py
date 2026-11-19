@@ -105,15 +105,15 @@ def test_compaction_api_versions_stale_and_restore(tmp_path, monkeypatch):
         assert client.post(url, headers=headers, json={"expected_version": 2,
                            "last_message_id": db.list_messages(chat_id)[-1]["id"]}).status_code == 409
     archive = tmp_path / "backup.jarvis"
-    assert create_backup(root, archive)["schema"] == 55
+    assert create_backup(root, archive)["schema"] == 56
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 55
+    assert restore_backup(archive, restored_root)["schema"] == 56
     restored = Database(restored_root / "jarvis.db")
     assert restored.latest_chat_compaction(chat_id)["version"] == 2
     assert restored.latest_chat_compaction(chat_id)["entries"] == second.json()["entries"]
     assert restored.latest_chat_compaction(chat_id)["created_by"] == "ollama"
     with sqlite3.connect(restored.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
     assert restored.delete_chat(chat_id)
     assert restored.list_chat_compactions(chat_id) == []
 
@@ -286,9 +286,9 @@ def test_revise_remove_reset_and_recompact_are_versioned(tmp_path, monkeypatch):
         assert client.post(url, headers=headers, json={**reset,
             "expected_version": 4}).status_code == 409
     archive = tmp_path / "backup.jarvis"
-    assert create_backup(root, archive)["schema"] == 55
+    assert create_backup(root, archive)["schema"] == 56
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 55
+    assert restore_backup(archive, restored_root)["schema"] == 56
     assert Database(restored_root / "jarvis.db").latest_chat_compaction(chat_id)["version"] == 4
 
 
@@ -326,7 +326,7 @@ def test_schema39_migration_adds_answer_snapshot_reference(tmp_path):
     assert migrated.latest_chat_compaction(chat_id)["created_by"] == "ollama"
     assert migrated.latest_chat_compaction(chat_id)["entries"][0]["text"] == "Altentscheidung"
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
 
 
 def test_revision_waits_for_running_answer_and_rechecks_last_message(tmp_path, monkeypatch):

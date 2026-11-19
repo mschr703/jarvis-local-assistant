@@ -48,7 +48,7 @@ def test_backup_restore_into_new_profile_without_secrets(tmp_path):
     (profile / "Cookies").write_text("secret-cookie", encoding="utf-8")
     archive = tmp_path / "backup.zip"
     info = create_backup(source, archive)
-    assert info["schema"] == 55
+    assert info["schema"] == 56
     with zipfile.ZipFile(archive) as package:
         assert ".env" not in package.namelist()
         assert not any("browser-profile" in name for name in package.namelist())
@@ -351,7 +351,7 @@ def test_restore_creates_missing_target_parent(tmp_path):
     create_backup(source, archive)
     nested = tmp_path / "nested" / "restored"
     restore_backup(archive, nested)
-    assert sqlite3.connect(nested / "jarvis.db").execute("PRAGMA user_version").fetchone()[0] == 55
+    assert sqlite3.connect(nested / "jarvis.db").execute("PRAGMA user_version").fetchone()[0] == 56
 
 
 def test_restore_rejects_corrupt_checkpoint_even_with_matching_hash(tmp_path):
@@ -467,7 +467,7 @@ def test_restored_older_schema_migrates_on_start(tmp_path):
     assert restore_backup(archive, restored)["schema"] == 9
     migrated = Database(restored / "jarvis.db")
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 56
         assert db.execute("SELECT 1 FROM sqlite_master WHERE name='plans'").fetchone()
 
 

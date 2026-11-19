@@ -25,9 +25,9 @@ def test_two_people_same_name_notes_search_and_backup(tmp_path):
     assert contacts.get(colleague["id"])["notes"] == []
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 55
+    assert create_backup(root, archive)["schema"] == 56
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 55
+    assert restore_backup(archive, restored_root)["schema"] == 56
     restored = ContactStore(Database(restored_root / "jarvis.db"))
     assert restored.get(friend["id"])["notes"][0]["content"] == "Wir wollen ins Museum."
     assert restored.get(colleague["id"])["notes"] == []
@@ -107,6 +107,85 @@ def test_schema_54_migrates_without_dropping_existing_data(tmp_path):
         connection.execute("PRAGMA user_version=54")
     migrated = Database(path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 55
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
         assert connection.execute("SELECT detail FROM activity WHERE id='old'").fetchone()[0] == "kept"
     assert ContactStore(migrated).create("Alt", "Migration")["name"] == "Alt"
+
+
+def test_shared_plans_search_versions_backup_and_cascade(tmp_path):
+    root = tmp_path / "data"
+    store = ContactStore(Database(root / "jarvis.db"))
+    alex = store.create("Alex", "München")
+    other = store.create("Alex", "Arbeit")
+    plan = store.add_plan(alex["id"], "Museum besuchen", "Im Dezember")
+    assert plan["status"] == "open" and plan["version"] == 1
+    assert plan["source_kind"] == "manual"
+    assert [item["id"] for item in store.list("Dezember")] == [alex["id"]]
+    assert store.get(other["id"])["plans"] == []
+    with pytest.raises(ContactConflict):
+        store.delete(alex["id"], alex["version"])
+    revised = store.update_plan(alex["id"], plan["id"], 1,
+                                "Kunstmuseum", "Samstag", "completed")
+    assert revised["status"] == "completed" and revised["version"] == 2
+    assert store.list("Museum")[0]["id"] == alex["id"]
+    with pytest.raises(ContactConflict):
+        store.update_plan(alex["id"], plan["id"], 1, "Alter Titel", "", "open")
+    with pytest.raises(ValueError):
+        store.update_plan(alex["id"], plan["id"], 2, "X", "", "maybe")
+
+    archive = tmp_path / "backup.zip"
+    assert create_backup(root, archive)["schema"] == 56
+    restored_root = tmp_path / "restored"
+    assert restore_backup(archive, restored_root)["schema"] == 56
+    restored = ContactStore(Database(restored_root / "jarvis.db"))
+    assert restored.get(alex["id"])["plans"][0]["title"] == "Kunstmuseum"
+    restored.delete_plan(alex["id"], plan["id"], 2)
+    assert restored.get(alex["id"])["plans"] == []
+    another = restored.add_plan(alex["id"], "Kino")
+    current_version = restored.get(alex["id"])["version"]
+    restored.delete(alex["id"], current_version)
+    with restored.db.connect() as db:
+        assert db.execute("SELECT count(*) FROM contact_plans WHERE id=?",
+                          (another["id"],)).fetchone()[0] == 0
+
+
+def test_shared_plan_api_session_and_stale_update(tmp_path):
+    settings = Settings(JARVIS_DATA_DIR=tmp_path / "data", JARVIS_OLLAMA_MODEL="fixture")
+    with TestClient(create_app(settings)) as client:
+        csrf = client.get("/session").json()["csrf"]
+        headers = {"x-jarvis-csrf": csrf}
+        contact = client.post("/contacts", json={"name": "Mira", "context": "Verein"},
+                              headers=headers).json()
+        endpoint = f"/contacts/{contact['id']}/plans"
+        assert client.post(endpoint, json={"title": "Wandern"}).status_code == 403
+        created = client.post(endpoint, json={"title": "Wandern", "details": "Am See"},
+                              headers=headers)
+        assert created.status_code == 201
+        plan = created.json()
+        assert client.get(f"/contacts/{contact['id']}").json()["plans"][0]["id"] == plan["id"]
+        update = {"title": "Wandern", "details": "Sonntag", "status": "completed",
+                  "expected_version": 1}
+        assert client.put(f"{endpoint}/{plan['id']}", json=update,
+                          headers=headers).status_code == 200
+        assert client.put(f"{endpoint}/{plan['id']}", json=update,
+                          headers=headers).status_code == 409
+        assert client.delete(f"{endpoint}/{plan['id']}?expected_version=1",
+                             headers=headers).status_code == 409
+        assert client.delete(f"{endpoint}/{plan['id']}?expected_version=2",
+                             headers=headers).status_code == 200
+        assert client.get(f"/contacts/{contact['id']}").json()["plans"] == []
+
+
+def test_schema_55_contacts_and_notes_survive_plan_migration(tmp_path):
+    path = tmp_path / "jarvis.db"
+    db = Database(path)
+    store = ContactStore(db)
+    person = store.create("Alex", "Familie")
+    note = store.add_note(person["id"], "Bevorzugt Spaziergänge")
+    with db.connect() as connection:
+        connection.execute("DROP TABLE contact_plans")
+        connection.execute("PRAGMA user_version=55")
+    migrated = ContactStore(Database(path))
+    assert migrated.get(person["id"])["notes"][0]["id"] == note["id"]
+    assert migrated.get(person["id"])["plans"] == []
+    assert migrated.add_plan(person["id"], "Spaziergang")["status"] == "open"

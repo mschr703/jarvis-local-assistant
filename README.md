@@ -342,11 +342,13 @@ Eine bestehende Erinnerung wird unter „Dokumente“ bewusst mit Text, Quelle u
 
 „Projektfristen“ zeigt die Fälligkeiten der beim Anlegen ausdrücklich ausgewählten Projektaufgaben chronologisch. Zu jeder Aufgabe stehen die beim Zuordnen gespeicherte lokale Zeit, IANA-Zeitzone, UTC-Offset und gegebenenfalls das erste oder zweite Vorkommen der doppelt vorkommenden Winterzeitstunde neben dem aktuellen Stand. „Status neu prüfen“ kennzeichnet hinzugefügte, geänderte oder entfernte Fristen; ein älterer Arbeitsstand ohne Fristbeleg wird nicht nachträglich als unverändert ausgegeben. „Projektbeziehungen lokal abfragen“ zeigt dieselben Angaben, und „Belegte Projektpfade“ bietet den Typ **Aufgabe → Frist**. Eine Fälligkeit wird weiterhin unter „Aufgaben“ bearbeitet; im Projekt entsteht keine zusätzliche Erinnerung oder externe Kalendersynchronisierung. Nur bereits ausgewählte Aufgaben erscheinen.
 
-## Persönliche Kontakte (N6a)
+## Persönliche Kontakte und gemeinsame Vorhaben (N6a–N6b)
 
 Unter „Kontakte“ legst du eine Person mit Namen und unterscheidendem Kontext an, etwa „Alex · München“. So bleiben gleichnamige Menschen getrennt. Optional trägst du die Beziehung ein. Die Suche berücksichtigt Name, Kontext, Beziehung und selbst eingetragene Notizen. Öffne einen Kontakt, um Notizen hinzuzufügen, zu korrigieren oder zu löschen; Änderungen nutzen Versionsschutz. Beim Löschen eines Kontakts werden seine Notizen nach einer Bestätigung ebenfalls gelöscht.
 
 Alle Angaben bleiben in der lokalen Datenbank und sind im normalen Jarvis-Backup enthalten. Die Quelle jeder Notiz ist „manuell von dir eingetragen“. Kontakte und Notizen werden derzeit nicht automatisch aus Gesprächen übernommen oder in Modellanfragen eingefügt. Die API bietet `GET/POST /contacts`, `GET/PUT/DELETE /contacts/{id}` und `POST/PUT/DELETE /contacts/{id}/notes` beziehungsweise `.../notes/{note_id}`. Ein kurzer Browsercheck läuft mit `python scripts/smoke_contacts_ui.py` bei gestopptem Jarvis.
+
+Im geöffneten Kontakt kannst du ein gemeinsames Vorhaben mit Titel und optionalen Details speichern. Du kannst es korrigieren, als erledigt markieren, wieder öffnen oder nach Bestätigung löschen. Die Kontaktsuche findet auch Text aus Vorhaben. Jedes Vorhaben hat eine eigene Version; eine zwischenzeitliche Änderung führt beim Speichern zu einem Konflikt statt zu stillem Überschreiben. Die Daten liegen lokal und gehen ins Jarvis-Backup. Für die API: `POST /contacts/{id}/plans`, `PUT/DELETE /contacts/{id}/plans/{plan_id}`. Diese Teilstufe erstellt noch keine Erinnerung; dafür folgt die Verknüpfung mit lokalen Aufgaben.
 
 ## Globaler Hotkey auf Windows (S5a)
 
