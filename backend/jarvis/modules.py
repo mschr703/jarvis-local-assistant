@@ -95,6 +95,29 @@ def package_digest(source: Path) -> str:
     return digest.hexdigest()
 
 
+def checked_installed_directory(target: Path, root: Path) -> None:
+    if (root.is_symlink() or root.is_junction() or not _safe_directory(target, root)):
+        raise ValueError("Modul ist nicht installiert")
+    required = {"jarvis-module.json", "module.py", "ui.js"}
+    found = set()
+    for child in target.iterdir():
+        if child.name == "__pycache__":
+            if not _safe_directory(child, target):
+                raise ValueError("Modulcache ist kein sicherer Ordner")
+            for cached in child.iterdir():
+                if (not cached.is_file() or cached.suffix != ".pyc"
+                        or cached.is_symlink() or cached.is_junction()):
+                    raise ValueError("Modulcache enthält zusätzliche Dateien")
+            continue
+        if child.name not in required or not child.is_file():
+            raise ValueError("Modulordner enthält zusätzliche Dateien; manuell prüfen")
+        if child.is_symlink() or child.is_junction():
+            raise ValueError("Modulordner enthält einen Link")
+        found.add(child.name)
+    if found != required:
+        raise ValueError("Modulordner ist unvollständig")
+
+
 def install_package(source: Path, data_dir: Path, db: Database | None = None) -> str:
     manifest = checked_package(source)
     source_digest = package_digest(source)
@@ -127,8 +150,7 @@ def upgrade_package(source: Path, data_dir: Path, db: Database,
         raise ValueError("Paketordner gehört zu einem anderen Modul")
     root = Path(data_dir) / "modules"
     target = root / manifest.id
-    if root.is_symlink() or root.is_junction() or not _safe_directory(target, root):
-        raise ValueError("Modul ist nicht installiert")
+    checked_installed_directory(target, root)
     if target.resolve() == Path(source).resolve():
         raise ValueError("Installierter Ordner kann nicht seine eigene Updatequelle sein")
     if db.get_settings().get(f"module.{manifest.id}.enabled") == "1":
@@ -176,26 +198,9 @@ def remove_package(module_id: str, data_dir: Path, db: Database) -> str:
         raise ValueError("Ungültige Modul-ID")
     root = Path(data_dir) / "modules"
     target = root / module_id
-    if (root.is_symlink() or root.is_junction() or not _safe_directory(target, root)):
-        raise ValueError("Modul ist nicht installiert")
+    checked_installed_directory(target, root)
     if db.get_settings().get(f"module.{module_id}.enabled") == "1":
         raise ValueError("Modul zuerst in Jarvis deaktivieren")
-    required = {"jarvis-module.json", "module.py", "ui.js"}
-    for child in target.iterdir():
-        if child.name == "__pycache__":
-            if not _safe_directory(child, target):
-                raise ValueError("Modulcache ist kein sicherer Ordner")
-            for cached in child.iterdir():
-                if (not cached.is_file() or cached.suffix != ".pyc"
-                        or cached.is_symlink() or cached.is_junction()):
-                    raise ValueError("Modulcache enthält zusätzliche Dateien")
-            continue
-        if child.name not in required or not child.is_file():
-            raise ValueError("Modulordner enthält zusätzliche Dateien; manuell prüfen")
-        if child.is_symlink() or child.is_junction():
-            raise ValueError("Modulordner enthält einen Link")
-    if not required.issubset({child.name for child in target.iterdir()}):
-        raise ValueError("Modulordner ist unvollständig")
     shutil.rmtree(target)
     return module_id
 

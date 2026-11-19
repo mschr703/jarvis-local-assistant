@@ -455,6 +455,13 @@ def test_module_upgrade_failure_restores_previous_package(tmp_path, monkeypatch)
         assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
         target = data_dir / "modules" / "sample_notes"
         previous_digest = package_digest(target)
+        unexpected = target / "personal.txt"
+        unexpected.write_text("nicht löschen", encoding="utf-8")
+        refused = client.post("/modules/sample_notes/upgrade", headers=headers,
+                              json={"path": str(source)})
+        assert refused.status_code == 422
+        assert unexpected.read_text(encoding="utf-8") == "nicht löschen"
+        unexpected.unlink()
         manifest = source / "jarvis-module.json"
         changed = json.loads(manifest.read_text(encoding="utf-8"))
         changed["version"] = "0.2.0"
