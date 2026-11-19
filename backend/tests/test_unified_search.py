@@ -8,6 +8,7 @@ from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.project_aliases import ProjectAliasStore
 from jarvis.project_people import ProjectPeopleStore
 from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
@@ -87,6 +88,41 @@ def test_project_people_search_respects_candidate_limit(tmp_path, monkeypatch):
     assert result["limited"]
     assert result["counts"]["project"] == 1
     assert result["results"][0]["id"] == project["id"]
+
+
+def test_project_aliases_find_the_canonical_person_and_refresh(tmp_path):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber", "reviewer",
+                        "Eigene Projektangabe", None)
+    aliases = ProjectAliasStore(db, states, people)
+    alias = aliases.add(project["id"], project["version"], person["id"],
+                        person["version"], "Mími", "Rufname aus eigener Angabe", None)
+    result = search(db, "Mimi", "project")
+    assert result["counts"]["project"] == 1
+    assert result["results"][0]["id"] == project["id"]
+    assert "Personenalias: Mími → Mira Weber" in result["results"][0]["excerpt"]
+    assert search(db, "Mimi", "contact")["results"] == []
+    changed = aliases.update(project["id"], alias["id"], project["version"],
+                             person["id"], person["version"], alias["version"],
+                             "Mimi neu", "Rufname erneut bestätigt", None)
+    assert search(db, "Rufname erneut", "project")["counts"]["project"] == 1
+    aliases.delete(project["id"], alias["id"], project["version"], changed["version"])
+    assert search(db, "Mimi", "project")["results"] == []
+
+
+def test_project_alias_search_reports_truncation(tmp_path, monkeypatch):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber", "reviewer",
+                        "Eigene Projektangabe", None)
+    aliases = ProjectAliasStore(db, states, people)
+    for index in range(3):
+        aliases.add(project["id"], project["version"], person["id"],
+                    person["version"], f"Mimi {index}", "Eigener Rufname", None)
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_ALIAS_ROWS", 2)
+    result = search(db, "Mimi", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
 
 
 def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monkeypatch):

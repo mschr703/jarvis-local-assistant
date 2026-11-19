@@ -16,6 +16,7 @@ from smoke_ui import ROOT, port_free, stop_test_server
 sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.project_aliases import ProjectAliasStore
 from jarvis.project_people import ProjectPeopleStore
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
@@ -39,9 +40,12 @@ def main() -> None:
         states = WorkStateStore(db, docs, TaskStore(db))
         project = states.create("Projekt Orion", "Vertrag liegt vor",
                                 "", "Unterlagen sammeln", [], [], [])
-        ProjectPeopleStore(db, states).add(project["id"], project["version"],
-                                           "Míra Weber", "reviewer",
-                                           "Prüft die Heizkosten", None)
+        people = ProjectPeopleStore(db, states)
+        person = people.add(project["id"], project["version"], "Míra Weber",
+                            "reviewer", "Prüft die Heizkosten", None)
+        ProjectAliasStore(db, states, people).add(
+            project["id"], project["version"], person["id"], person["version"],
+            "Mími", "Rufname aus eigener Angabe", None)
         document = docs.documents()[0]
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
@@ -87,6 +91,13 @@ def main() -> None:
                         person_hit = results.locator("article").filter(has_text="Projektperson: Míra Weber")
                         expect(person_hit).to_contain_text("Prüft die Heizkosten")
                         person_hit.get_by_role("button", name="Quelle öffnen").click()
+                        expect(page.locator(f"#search-source-project-{project['id']}")).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Mimi")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        alias_hit = results.locator("article").filter(has_text="Personenalias: Mími → Míra Weber")
+                        expect(alias_hit).to_contain_text("Rufname aus eigener Angabe")
+                        alias_hit.get_by_role("button", name="Quelle öffnen").click()
                         expect(page.locator(f"#search-source-project-{project['id']}")).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")

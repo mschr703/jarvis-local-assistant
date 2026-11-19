@@ -12,6 +12,7 @@ MAX_CANDIDATES = 100
 MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
 MAX_PROJECT_PERSON_ROWS = 2000
+MAX_PROJECT_ALIAS_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -120,6 +121,16 @@ def search(db: Database, query: str, kind: str = "all",
             ORDER BY p.updated_at DESC,p.id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_PERSON_ROWS + 1))] if kind in {
             "all", "project"} else []
+        project_aliases = [dict(row) for row in connection.execute("""
+            SELECT a.id,a.state_id,a.alias,a.source_note,a.source_document_id,
+                   p.name AS person_name
+            FROM project_person_aliases a
+            JOIN project_people p ON p.id=a.person_id AND p.state_id=a.state_id
+            JOIN (SELECT id FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?) s
+                ON s.id=a.state_id
+            ORDER BY a.updated_at DESC,a.id DESC LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_ALIAS_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -169,6 +180,7 @@ def search(db: Database, query: str, kind: str = "all",
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
                or len(project_people) > MAX_PROJECT_PERSON_ROWS
+               or len(project_aliases) > MAX_PROJECT_ALIAS_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -242,6 +254,9 @@ def search(db: Database, query: str, kind: str = "all",
     people_by_project: dict[str, list[dict]] = {}
     for person in project_people[:MAX_PROJECT_PERSON_ROWS]:
         people_by_project.setdefault(person["state_id"], []).append(person)
+    aliases_by_project: dict[str, list[dict]] = {}
+    for alias in project_aliases[:MAX_PROJECT_ALIAS_ROWS]:
+        aliases_by_project.setdefault(alias["state_id"], []).append(alias)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -257,14 +272,29 @@ def search(db: Database, query: str, kind: str = "all",
         matching_people.sort(key=lambda item: (-item[0], item[1]["name"].casefold(), item[1]["id"]))
         if matching_people:
             score += matching_people[0][0]
+        matching_aliases = []
+        for alias in aliases_by_project.get(row["id"], []):
+            alias_score = _score(folded_query, folded_terms,
+                                 _fold(alias["alias"]), _fold(alias["source_note"]))
+            if alias_score:
+                matching_aliases.append((alias_score, alias))
+        matching_aliases.sort(key=lambda item: (-item[0], item[1]["alias"].casefold(),
+                                               item[1]["id"]))
+        if matching_aliases:
+            score += matching_aliases[0][0]
         if score:
+            alias_excerpts = [f"Personenalias: {alias['alias']} → {alias['person_name']}"
+                              f" · {alias['source_note']}"
+                              + (" · Dateibeleg im Arbeitsstand prüfen"
+                                 if alias["source_document_id"] else " · eigene Angabe")
+                              for _, alias in matching_aliases[:2]]
             person_excerpts = [f"Projektperson: {person['name']} · {role} · {person['source_note']}"
                                + (" · Dateibeleg im Arbeitsstand prüfen"
                                   if person["source_document_id"] else " · eigene Angabe")
                                for _, person, role in matching_people[:2]]
             project_items.append({"kind": "project", "id": row["id"],
                                   "title": row["project"],
-                                  "excerpt": " · ".join([*person_excerpts, body])[:500],
+                                  "excerpt": " · ".join([*alias_excerpts, *person_excerpts, body])[:500],
                                   "source": f"Arbeitsstand v{row['version']}",
                                   "version": row["version"], "score": score})
 
