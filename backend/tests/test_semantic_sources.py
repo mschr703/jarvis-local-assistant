@@ -12,6 +12,7 @@ from jarvis.documents import DocumentStore
 from jarvis.project_aliases import ProjectAliasStore
 from jarvis.project_memories import ProjectMemoryStore
 from jarvis.project_people import ProjectPeopleStore
+from jarvis.project_person_tasks import ProjectPersonTaskStore
 from jarvis.semantic_search import search
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
@@ -32,6 +33,25 @@ def sample(tmp_path):
     project = states.create("Umzug", "Zusagen liegen vor", "Kaution offen",
                             "Mietunterlagen sortieren", [], [], [])
     return db, docs, folder, memory, project, source
+
+
+def linked_person_task_sample(tmp_path, with_document=False):
+    db, docs, _, _, project, source = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    states = WorkStateStore(db, docs, tasks)
+    document_id = docs.documents()[0]["id"] if with_document else None
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [document_id] if document_id else [],
+                            [task["id"]], [])
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber",
+                        "reviewer", "Prüft die Heizkosten", None)
+    links = ProjectPersonTaskStore(db, states, people)
+    link = links.add(project["id"], project["version"], person["id"], task["id"],
+                     "responsible", "Kontrolliert die Nebenkostenaufstellung", document_id)
+    return db, tasks, states, people, links, project, person, task, link, source
 
 
 def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch):
@@ -217,6 +237,74 @@ def test_linked_project_task_reaches_local_semantic_corpus(tmp_path, monkeypatch
     assert "Projektaufgabe: Kostenprüfung (damals: Budgetplanung) · offen" in observed[1]
     assert "Kostenprüfung (damals: Budgetplanung) · offen" in found["results"][0]["excerpt"]
     assert found["results"][0]["id"] == project["id"]
+
+
+def test_explicit_person_task_link_reaches_local_semantic_corpus(tmp_path, monkeypatch):
+    db, tasks, _, _, _, project, _, task, link, source = linked_person_task_sample(
+        tmp_path, with_document=True)
+    tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+    observed = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        observed.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    found = search(db, "Wer prüft die Abrechnung?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    label = ("Person-Aufgabe-Beleg: Mira Weber → Kostenprüfung "
+             "(damals: Budgetplanung) · Verantwortlich · offen")
+    assert label in observed[1]
+    assert "Herkunft: Kontrolliert die Nebenkostenaufstellung" in observed[1]
+    assert "Dateibeleg im Arbeitsstand prüfen" in observed[1]
+    assert str(source.parent) not in observed[1]
+    assert "roten Ordner" not in observed[1]
+    assert found["results"][0]["id"] == project["id"]
+    assert label in found["results"][0]["excerpt"]
+    assert link["id"] not in observed[1]
+
+
+@pytest.mark.parametrize("change", ["link_removed", "link_updated", "task_renamed",
+                                    "task_completed", "task_deleted", "person_renamed"])
+def test_person_task_link_change_during_embedding_is_rejected(tmp_path, monkeypatch, change):
+    db, tasks, _, _, links, project, person, task, link, _ = linked_person_task_sample(tmp_path)
+
+    def mutate(_url, texts, _cache_path=None):
+        if change == "link_removed":
+            links.delete(project["id"], link["id"], project["version"], link["version"])
+        elif change == "link_updated":
+            with db.connect() as connection:
+                connection.execute("UPDATE project_person_tasks SET source_note=? WHERE id=?",
+                                   ("Neue Herkunftsnotiz", link["id"]))
+        elif change == "task_renamed":
+            tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+        elif change == "task_completed":
+            tasks.complete(task["id"])
+        elif change == "task_deleted":
+            tasks.delete(task["id"])
+        else:
+            with db.connect() as connection:
+                connection.execute("UPDATE project_people SET name=? WHERE id=?",
+                                   ("Nora Weber", person["id"]))
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", mutate)
+    found = search(db, "Wer prüft die Abrechnung?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 0
+    assert found["changed_sources"] == [{"kind": "project", "id": project["id"]}]
+
+
+def test_project_semantic_person_task_limit_is_reported(tmp_path, monkeypatch):
+    db, _tasks, _, _, links, project, person, task, _, _ = linked_person_task_sample(tmp_path)
+    links.add(project["id"], project["version"], person["id"], task["id"],
+              "reviewer", "Kontrolliert die zweite Abrechnung", None)
+    monkeypatch.setattr("jarvis.semantic_search.MAX_PROJECT_RELATIONS_PER_KIND", 1)
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts",
+                        lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
+    found = search(db, "Wer prüft die Abrechnung?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["limited"] and found["counts"]["project"] == 1
 
 
 @pytest.mark.parametrize("change", ["rename", "complete", "delete"])

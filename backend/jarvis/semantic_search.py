@@ -14,6 +14,7 @@ from jarvis.documents import DocumentStore
 from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
 from jarvis.semantic_cache import PersistentEmbeddingCache
 from jarvis.unified_search import (
+    PERSON_TASK_RELATIONS,
     PROJECT_RELATIONS,
     SOURCE_KINDS,
     portable_basename,
@@ -219,7 +220,7 @@ def _project_body(row: dict) -> str:
 def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict]:
     """Read bounded project links in stable order for corpus and post-model recheck."""
     result = {project_id: {"people": [], "aliases": [], "tasks": [], "files": [],
-                           "memories": []}
+                           "memories": [], "person_tasks": []}
               for project_id in project_ids}
     if not project_ids:
         return result
@@ -271,6 +272,20 @@ def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict
         ORDER BY link.state_id,link.updated_at DESC,link.id DESC""", project_ids)
     for memory in memories:
         result[memory["state_id"]]["memories"].append(dict(memory))
+    person_tasks = connection.execute(f"""SELECT link.id,link.state_id,link.person_id,
+        link.task_id,link.task_title,link.relation_type,link.source_note,
+        link.source_document_id,link.source_path,link.source_sha256,
+        link.confidence,link.valid_from,link.valid_until,link.version,
+        link.updated_at,p.name AS person_name,p.version AS person_version,
+        p.updated_at AS person_updated_at,t.title AS current_task_title,
+        t.status AS current_task_status,t.updated_at AS task_updated_at
+        FROM project_person_tasks link
+        JOIN project_people p ON p.id=link.person_id AND p.state_id=link.state_id
+        LEFT JOIN tasks t ON t.id=link.task_id
+        WHERE link.state_id IN ({placeholders})
+        ORDER BY link.state_id,link.updated_at DESC,link.id DESC""", project_ids)
+    for link in person_tasks:
+        result[link["state_id"]]["person_tasks"].append(dict(link))
     return result
 
 
@@ -303,11 +318,27 @@ def _project_relationship_text(row: dict) -> str:
                 f" · Herkunft: {memory['source_note'][:80]}"
                 " · aktuellen Status im Arbeitsstand prüfen"
                 for memory in links["memories"][:MAX_PROJECT_RELATIONS_PER_KIND]]
+    person_tasks = []
+    for link in links["person_tasks"][:MAX_PROJECT_RELATIONS_PER_KIND]:
+        current = link["current_task_title"]
+        saved = link["task_title"]
+        title = current or saved
+        renamed = f" (damals: {saved})" if current and current != saved else ""
+        status = ("gelöscht" if current is None else
+                  "erledigt" if link["current_task_status"] == "done" else "offen")
+        person_tasks.append(
+            f"Person-Aufgabe-Beleg: {link['person_name']} → {title}{renamed}"
+            f" · {PERSON_TASK_RELATIONS[link['relation_type']]} · {status}"
+            f" · Herkunft: {link['source_note'][:100]}"
+            + (" · Dateibeleg im Arbeitsstand prüfen"
+               if link["source_document_id"] else " · eigene Angabe"))
     parts = []
     for index in range(max(len(people), len(aliases), len(tasks), len(files),
-                           len(memories))):
+                           len(memories), len(person_tasks))):
         if index < len(people):
             parts.append(people[index])
+        if index < len(person_tasks):
+            parts.append(person_tasks[index])
         if index < len(aliases):
             parts.append(aliases[index])
         if index < len(memories):
@@ -452,7 +483,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS
                or any(len(row["relationships"][kind]) > MAX_PROJECT_RELATIONS_PER_KIND
                       for row in projects[:MAX_PROJECTS]
-                      for kind in ("people", "aliases", "tasks", "files", "memories"))
+                      for kind in ("people", "aliases", "tasks", "files", "memories",
+                                   "person_tasks"))
                or any(len(_project_embedding_body(row)) > 1200
                       for row in projects[:MAX_PROJECTS]))
     freshness: dict[str, bool] = {}
