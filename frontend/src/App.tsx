@@ -234,7 +234,7 @@ export default function App() {
         page === 'research' ? null :
         page === 'tasks' ? null :
         page === 'contacts' ? null :
-        page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} onOpenContact={(id) => { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); }} /> :
+        page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} onOpenContact={(id) => { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); }} onPrepareDraft={(contactId, eventId, version, title) => { setSelectedSources([]); setDraftComposer((current) => ({ ...current, kind: 'text', brief: `Schreibe eine persönliche Nachricht über „${title}“.`, inputText: '', selectedSamples: [], allowCloud: false, recipientContactId: contactId, recipientExpectedVersion: null, recipientNoteIds: [], recipientEvents: [{ event_id: eventId, expected_version: version }] })); navigate('drafts'); }} /> :
         page === 'time_model' ? null :
         page === 'evening_plans' ? null :
         page === 'work_states' ? null :

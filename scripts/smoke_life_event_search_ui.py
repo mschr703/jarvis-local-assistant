@@ -61,6 +61,17 @@ def main() -> None:
                         event_row.get_by_role("button", name="Kontakt zuordnen").click()
                         expect(event_row).to_contain_text("Alex · Lyon privat · manuell bestätigt")
                         expect(event_row).not_to_contain_text("Alex · Arbeit · manuell bestätigt")
+                        event_row.get_by_role("button", name="Entwurf an Alex (Lyon privat) zu Café in Lyon vorbereiten").click()
+                        expect(page.get_by_label("Entwurfstyp")).to_have_value("text")
+                        expect(page.get_by_label("Empfänger auswählen").locator("option:checked"))\
+                            .to_have_text("Alex · Lyon privat")
+                        expect(page.get_by_label(
+                            "Ereignis 2024-08-12 · Café in Lyon für Entwurf auswählen"))\
+                            .to_be_checked()
+                        expect(page.get_by_label("Schreibauftrag")).to_have_value(
+                            "Schreibe eine persönliche Nachricht über „Café in Lyon“.")
+                        page.get_by_role("button", name="Lebenschronik", exact=True).click()
+                        event_row = page.locator(".item-row").filter(has_text="Café in Lyon")
                         page.get_by_label("Absoluter Fotoordnerpfad").fill(str(folder))
                         page.get_by_role("button", name="Fotoordner freigeben").click()
                         page.get_by_role("button", name="Fotos einlesen").click()
@@ -147,7 +158,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"text": "accent_insensitive", "photo_name": "found",
-                                          "contact": "linked_opened_searched_unlinked",
+                                          "contact": "linked_draft_prepared_opened_searched_unlinked",
                                           "source": "opened", "model_usage": 0,
                                           "mobile_width": "fits"}))
                     finally:
