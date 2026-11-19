@@ -37,9 +37,11 @@ def main() -> None:
         folder = docs.add_folder(str(allowed), "local_only")
         assert docs.index_folder(folder["id"])["indexed"] == 1
         memory = docs.add_memory("Orion braucht den Vertrag am Freitag.", "Eigene Notiz", "local_only")
-        states = WorkStateStore(db, docs, TaskStore(db))
+        tasks = TaskStore(db)
+        task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+        states = WorkStateStore(db, docs, tasks)
         project = states.create("Projekt Orion", "Vertrag liegt vor",
-                                "", "Unterlagen sammeln", [], [], [])
+                                "", "Unterlagen sammeln", [], [task["id"]], [])
         people = ProjectPeopleStore(db, states)
         person = people.add(project["id"], project["version"], "Míra Weber",
                             "reviewer", "Prüft die Heizkosten", None)
@@ -98,6 +100,13 @@ def main() -> None:
                         alias_hit = results.locator("article").filter(has_text="Personenalias: Mími → Míra Weber")
                         expect(alias_hit).to_contain_text("Rufname aus eigener Angabe")
                         alias_hit.get_by_role("button", name="Quelle öffnen").click()
+                        expect(page.locator(f"#search-source-project-{project['id']}")).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Budgetplanung")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        task_hit = results.locator("article").filter(has_text="Projektaufgabe: Budgetplanung")
+                        expect(task_hit).to_contain_text("offen")
+                        task_hit.get_by_role("button", name="Quelle öffnen").click()
                         expect(page.locator(f"#search-source-project-{project['id']}")).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")

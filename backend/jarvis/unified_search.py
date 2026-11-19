@@ -13,6 +13,7 @@ MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
 MAX_PROJECT_PERSON_ROWS = 2000
 MAX_PROJECT_ALIAS_ROWS = 2000
+MAX_PROJECT_TASK_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -131,6 +132,17 @@ def search(db: Database, query: str, kind: str = "all",
             ORDER BY a.updated_at DESC,a.id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_ALIAS_ROWS + 1))] if kind in {
             "all", "project"} else []
+        project_tasks = [dict(row) for row in connection.execute("""
+            SELECT s.id AS state_id,json_extract(link.value,'$.id') AS task_id,
+                   json_extract(link.value,'$.title') AS saved_title,
+                   t.title AS current_title,t.status AS current_status
+            FROM (SELECT id,tasks_json,updated_at FROM work_states
+                  ORDER BY updated_at DESC,id DESC LIMIT ?) s
+            JOIN json_each(s.tasks_json) link
+            LEFT JOIN tasks t ON t.id=json_extract(link.value,'$.id')
+            ORDER BY s.updated_at DESC,s.id DESC,CAST(link.key AS INTEGER) LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_TASK_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -181,6 +193,7 @@ def search(db: Database, query: str, kind: str = "all",
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
                or len(project_people) > MAX_PROJECT_PERSON_ROWS
                or len(project_aliases) > MAX_PROJECT_ALIAS_ROWS
+               or len(project_tasks) > MAX_PROJECT_TASK_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -257,6 +270,9 @@ def search(db: Database, query: str, kind: str = "all",
     aliases_by_project: dict[str, list[dict]] = {}
     for alias in project_aliases[:MAX_PROJECT_ALIAS_ROWS]:
         aliases_by_project.setdefault(alias["state_id"], []).append(alias)
+    tasks_by_project: dict[str, list[dict]] = {}
+    for task in project_tasks[:MAX_PROJECT_TASK_ROWS]:
+        tasks_by_project.setdefault(task["state_id"], []).append(task)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -282,7 +298,31 @@ def search(db: Database, query: str, kind: str = "all",
                                                item[1]["id"]))
         if matching_aliases:
             score += matching_aliases[0][0]
+        matching_tasks = []
+        for task in tasks_by_project.get(row["id"], []):
+            task_title = task["current_title"] or task["saved_title"] or ""
+            task_score = _score(folded_query, folded_terms, _fold(task_title),
+                                _fold(task["saved_title"] or ""))
+            if task_score:
+                matching_tasks.append((task_score, task))
+        matching_tasks.sort(key=lambda item: (-item[0],
+                                              (item[1]["current_title"] or
+                                               item[1]["saved_title"] or "").casefold(),
+                                              item[1]["task_id"]))
+        if matching_tasks:
+            score += matching_tasks[0][0]
         if score:
+            task_excerpts = []
+            for _, task in matching_tasks[:2]:
+                if task["current_title"] is None:
+                    task_excerpts.append(f"Projektaufgabe: {task['saved_title']} · gelöscht")
+                elif task["current_title"] != task["saved_title"]:
+                    task_excerpts.append(f"Projektaufgabe: {task['current_title']}"
+                                         f" (damals: {task['saved_title']})"
+                                         f" · {'erledigt' if task['current_status'] == 'done' else 'offen'}")
+                else:
+                    task_excerpts.append(f"Projektaufgabe: {task['current_title']}"
+                                         f" · {'erledigt' if task['current_status'] == 'done' else 'offen'}")
             alias_excerpts = [f"Personenalias: {alias['alias']} → {alias['person_name']}"
                               f" · {alias['source_note']}"
                               + (" · Dateibeleg im Arbeitsstand prüfen"
@@ -294,7 +334,8 @@ def search(db: Database, query: str, kind: str = "all",
                                for _, person, role in matching_people[:2]]
             project_items.append({"kind": "project", "id": row["id"],
                                   "title": row["project"],
-                                  "excerpt": " · ".join([*alias_excerpts, *person_excerpts, body])[:500],
+                                  "excerpt": " · ".join([*task_excerpts, *alias_excerpts,
+                                                         *person_excerpts, body])[:500],
                                   "source": f"Arbeitsstand v{row['version']}",
                                   "version": row["version"], "score": score})
 

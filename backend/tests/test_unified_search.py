@@ -125,6 +125,47 @@ def test_project_alias_search_reports_truncation(tmp_path, monkeypatch):
     assert result["limited"] and result["counts"]["project"] == 1
 
 
+def test_explicit_project_task_search_tracks_renames_completion_and_deletion(tmp_path):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [], [task["id"]], [])
+    initial = search(db, "Budgetplanung", "project")
+    assert initial["results"][0]["id"] == project["id"]
+    assert "Projektaufgabe: Budgetplanung · offen" in initial["results"][0]["excerpt"]
+    assert search(db, "Budgetplanung", "contact")["results"] == []
+    tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
+    current = search(db, "Kostenprüfung", "project")["results"][0]
+    assert current["id"] == project["id"]
+    assert "Kostenprüfung (damals: Budgetplanung) · offen" in current["excerpt"]
+    assert search(db, "Budgetplanung", "project")["results"][0]["id"] == project["id"]
+    tasks.complete(task["id"])
+    assert "· erledigt" in search(db, "Kostenprüfung", "project")["results"][0]["excerpt"]
+    tasks.delete(task["id"])
+    deleted = search(db, "Budgetplanung", "project")["results"][0]
+    assert "Projektaufgabe: Budgetplanung · gelöscht" in deleted["excerpt"]
+    assert search(db, "Kostenprüfung", "project")["results"] == []
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], [], [], [])
+    assert search(db, "Budgetplanung", "project")["results"] == []
+
+
+def test_project_task_search_reports_bounded_candidates(tmp_path, monkeypatch):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    tasks = TaskStore(db)
+    ids = [tasks.create(f"Budgetaufgabe {index}", "", None, "Europe/Paris")["id"]
+           for index in range(3)]
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], [], ids, [])
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_TASK_ROWS", 2)
+    result = search(db, "Budgetaufgabe", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
+
+
 def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monkeypatch):
     db, _, _, _, _, memory, project, _ = sample(tmp_path)
     with monkeypatch.context() as patch:
