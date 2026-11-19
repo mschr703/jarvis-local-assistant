@@ -53,7 +53,8 @@ SHA-256-Beleg und stellt das bisherige Paket wieder her, wenn der Austausch oder
 die Belegspeicherung scheitert. Eine niedrigere Datenversion als die bereits
 gespeicherte wird abgewiesen. Die Datenmigration läuft erst bei der anschließenden
 Aktivierung; scheitert sie, wird ihre Datenbanktransaktion zurückgenommen und das
-Modul bleibt inaktiv. Nach einem UI-Code-Update den Browser neu laden.
+Modul bleibt inaktiv. Nach dem Update zeigt der Modulmanager **Jarvis neu laden**,
+damit die neue Oberfläche statt der zuvor im Browser registrierten Version erscheint.
 Ändert ein Update die Eingaben oder Eigenschaften bereits registrierter
 Modulwerkzeuge, Jarvis vor der erneuten Aktivierung neu starten; die alte
 Werkzeugdefinition des laufenden Prozesses wird bewusst nicht umgedeutet.
@@ -161,6 +162,7 @@ Der zweite Befehl startet einen isolierten Edge-Klicktest mit temporärem
 Datenprofil und benötigt freie Ports 8765/5173. Er prüft Installation,
 Aktivierung, privates UI-Bundle, Speichern, Reload, Deaktivierung, gesperrte
 API/UI-Routen und Werkzeuge, Reaktivierung, direkten Paketwechsel,
-Entfernen/Wiederinstallieren mit erhaltenen Daten und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
+Entfernen/Wiederinstallieren mit erhaltenen Daten, die Neulade-Aufforderung nach dem
+Update und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
 Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
 beide Module gleichzeitig im echten Edge-Browser.
