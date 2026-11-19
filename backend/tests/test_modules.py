@@ -182,6 +182,13 @@ def test_package_syntax_is_checked_without_running_code_and_upgrade_keeps_data(t
     assert not (data_dir / "jarvis.db").exists()
     with client_for(data_dir) as client:
         headers = csrf(client)
+        extra = source / "helper.py"
+        extra.write_text("VALUE = 1\n", encoding="utf-8")
+        response = client.post("/modules/install", headers=headers,
+                               json={"path": str(source)})
+        assert response.status_code == 422 and "zusätzliche Dateien" in response.text
+        assert client.get("/modules").json() == []
+        extra.unlink()
         entry.write_text("def broken(:\n", encoding="utf-8")
         response = client.post("/modules/install", headers=headers,
                                json={"path": str(source)})

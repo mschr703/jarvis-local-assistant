@@ -112,6 +112,9 @@ weiterhin nicht automatisch gelöscht; diese bitte selbst prüfen.
 ## Paketvertrag (Modul-API 1)
 
 Ein Paketordner enthält genau `jarvis-module.json`, `module.py` und `ui.js`.
+Weitere Quelldateien oder Unterordner werden bei `verify`, Installation und
+Update abgewiesen, weil Jarvis nur diese drei Paketdateien kopiert. Ein gewöhnlicher
+Python-`__pycache__` mit `.pyc`-Dateien wird ignoriert; er gehört nicht zum Paket.
 Das Manifest nennt `id`, `name`, Semver-`version`, `api: 1`, `data_version`,
 `dependencies`, `permissions`, `navigation`, `view: "web_component_v1"` und
 `element` (einen `jarvis-…`-Custom-Element-Namen). Die ID muss zum Ordner passen.

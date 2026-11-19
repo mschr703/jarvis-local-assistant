@@ -94,6 +94,9 @@ def checked_package(source: Path) -> ModuleManifest:
     for path in (manifest, entry, ui):
         if not path.is_file() or path.is_symlink() or path.is_junction():
             raise ValueError("Manifest, module.py und ui.js müssen gewöhnliche Dateien sein")
+    # The loader copies only these three files. Extra source files could silently
+    # disappear during installation and make an otherwise valid package unusable.
+    checked_installed_directory(source, source.parent)
     if (manifest.stat().st_size > 16_384 or entry.stat().st_size > 2_000_000
             or ui.stat().st_size > 200_000):
         raise ValueError("Modulpaket ist zu groß")
