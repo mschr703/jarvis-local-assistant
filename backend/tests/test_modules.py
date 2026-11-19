@@ -52,15 +52,16 @@ def tool_definitions(db):
 def install_fixture(data_dir, module_id="sample_notes", dependencies=None):
     folder = data_dir / "modules" / module_id
     folder.mkdir(parents=True)
+    element = f"jarvis-{module_id.replace('__', '-x-').replace('_', '-')}"
     (folder / "jarvis-module.json").write_text(json.dumps({
         "id": module_id, "name": "Sample", "version": "0.1.0", "api": 1,
         "data_version": 1,
-        "navigation": "Sample", "view": "web_component_v1", "element": "jarvis-sample",
+        "navigation": "Sample", "view": "web_component_v1", "element": element,
         "permissions": ["local_data"],
         "dependencies": dependencies or [],
     }), encoding="utf-8")
     (folder / "module.py").write_text(SAMPLE_MODULE, encoding="utf-8")
-    (folder / "ui.js").write_text("customElements.define('jarvis-sample', class extends HTMLElement {})",
+    (folder / "ui.js").write_text(f"customElements.define('{element}', class extends HTMLElement {{}})",
                                   encoding="utf-8")
 
 
@@ -230,6 +231,28 @@ def test_cyclic_saved_dependencies_leave_core_available(tmp_path):
         items = client.get("/modules").json()
         assert all(not item["enabled"] and "Zyklische" in item["error"] for item in items)
         assert client.get("/chats").status_code == 200
+
+
+def test_modules_cannot_claim_the_same_browser_element(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir, "first_mod")
+    install_fixture(data_dir, "second_mod")
+    second_manifest = data_dir / "modules" / "second_mod" / "jarvis-module.json"
+    parsed = json.loads(second_manifest.read_text(encoding="utf-8"))
+    parsed["element"] = "jarvis-first-mod"
+    second_manifest.write_text(json.dumps(parsed), encoding="utf-8")
+    Database(data_dir / "jarvis.db").set_settings({
+        "module.first_mod.enabled": "1", "module.second_mod.enabled": "1"})
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        response = client.get("/modules")
+        assert response.status_code == 200, response.text
+        items = {item["id"]: item for item in response.json()}
+        assert items["first_mod"]["enabled"] is True
+        assert items["second_mod"]["enabled"] is False
+        assert "first_mod" in items["second_mod"]["error"]
+        assert client.get("/chats").status_code == 200
+        assert client.post("/modules/second_mod/enable", headers=headers).status_code == 422
 
 
 def test_module_tool_names_with_double_underscore_stay_separate(tmp_path):

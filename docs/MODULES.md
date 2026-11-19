@@ -78,6 +78,8 @@ Bei einem Neustart aktiviert Jarvis gespeicherte Module in Abhängigkeitsreihenf
 Zyklen und fehlende Abhängigkeiten bleiben inaktiv mit sichtbarem Fehler; der Kern
 startet weiter. Wird ein benötigtes Paket während des Betriebs entfernt, werden
 seine aktiven abhängigen Pakete ebenfalls gesperrt, ohne deren Daten zu löschen.
+Zwei aktive Module dürfen nicht denselben Custom-Element-Namen im Manifest belegen;
+das zweite bleibt mit sichtbarem Fehler inaktiv.
 
 Optional stellt `module.py` `tool_definitions(db)` bereit und liefert höchstens
 16 `ToolDefinition`-Einträge. Jarvis stellt den Modulnamen voran

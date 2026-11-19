@@ -292,6 +292,9 @@ class ModuleRegistry:
                 return self._summary(module_id)
             if any(dependency not in self._apps for dependency in manifest.dependencies):
                 raise ValueError("Benötigtes Modul ist nicht aktiv")
+            for active_id in self._apps:
+                if self._manifests[active_id].element == manifest.element:
+                    raise ValueError(f"Moduloberfläche wird bereits von {active_id} verwendet")
             package = self.directory / module_id
             if not _safe_directory(package, self.directory):
                 raise ValueError("Modulordner ist nicht verfügbar")
