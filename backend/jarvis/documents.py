@@ -320,7 +320,7 @@ class DocumentStore:
         return self._index_document(document_id)
 
     def ocr_document(self, document_id: str) -> dict:
-        """Read one pending scanned PDF with local OCR after explicit selection."""
+        """Read blank image pages in one selected PDF with local OCR."""
         return self._index_document(document_id, ocr=True)
 
     def _index_document(self, document_id: str, *, ocr: bool = False) -> dict:
@@ -331,8 +331,9 @@ class DocumentStore:
             if item["excluded"]:
                 raise ValueError("Ausgeschlossenes Dokument zuerst wieder einbeziehen")
             if ocr and (Path(item["path"]).suffix.lower() != ".pdf"
-                        or item["status"] != "ocr_pending" or not item["sha256"]):
-                raise ValueError("OCR ist nur für ein PDF mit ausstehender Texterkennung möglich")
+                        or item["status"] not in {"indexed", "ocr_pending"}
+                        or not item["sha256"]):
+                raise ValueError("OCR ist nur für ein indexiertes PDF möglich")
             folder = self.get_folder(item["folder_id"])
             if folder is None:
                 raise LookupError("Freigabeordner nicht mehr vorhanden")
@@ -362,6 +363,8 @@ class DocumentStore:
             except (SourceChanged, OcrUnavailable):
                 raise
             except (OSError, ValueError, PdfReadError) as exc:
+                if ocr and item["status"] == "indexed":
+                    raise ValueError(str(exc)) from exc
                 reason = (str(exc) if str(exc) == "Datei wurde während der Indexierung geändert"
                           or (ocr and isinstance(exc, ValueError))
                           or (path.suffix.lower() == ".docx" and isinstance(exc, ValueError))
@@ -491,15 +494,22 @@ class DocumentStore:
             if len(reader.pages) > MAX_PDF_PAGES:
                 raise ValueError("PDF hat zu viele Seiten")
             extracted = 0
+            blank_pages: list[int] = []
             for number, page in enumerate(reader.pages, start=1):
                 content = page.extract_text() or ""
                 extracted += len(content)
                 if extracted > MAX_EXTRACTED_CHARS:
                     raise ValueError("PDF-Text ist zu lang")
-                segments.extend((number, piece) for piece in chunks(content))
-            if ocr and not segments:
-                for number, content in scan_pdf(data):
+                pieces = chunks(content)
+                if not pieces:
+                    blank_pages.append(number)
+                segments.extend((number, piece) for piece in pieces)
+            if ocr and blank_pages:
+                recognized = (scan_pdf(data) if len(blank_pages) == len(reader.pages)
+                              else scan_pdf(data, page_numbers=blank_pages))
+                for number, content in recognized:
                     segments.extend((number, piece) for piece in chunks(content))
+                segments.sort(key=lambda segment: segment[0] or 0)
         elif path.suffix.lower() == ".docx":
             segments.extend((None, piece) for piece in chunks(extract_docx(data)))
         else:
@@ -519,6 +529,14 @@ class DocumentStore:
             with path.open("rb") as stream:
                 if hashlib.sha256(stream.read(MAX_FILE_BYTES + 1)).hexdigest() != digest:
                     raise SourceChanged("Original wurde während der OCR geändert")
+            if (prior and prior["sha256"] == digest
+                    and prior["policy"] == folder["policy"]):
+                with self.db.connect() as db:
+                    old_segments = [(row["page"], row["text"]) for row in db.execute(
+                        "SELECT page,text FROM passages WHERE document_id=? ORDER BY ordinal",
+                        (prior["id"],))]
+                if old_segments == segments and prior["status"] == status:
+                    return False
         now = utcnow()
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")

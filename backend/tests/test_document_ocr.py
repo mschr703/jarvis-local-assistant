@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 from pypdf import PdfWriter
+from test_document_index_text import text_pdf
 
 from jarvis import documents as document_module
 from jarvis import ocr as ocr_module
@@ -60,8 +61,7 @@ def test_explicit_ocr_indexes_page_and_preserves_original(tmp_path, monkeypatch)
     assert hits[0]["source_status"] == "current"
     assert documents.index_folder(item["folder_id"])["unchanged"] == 1
     assert documents.search("unterschrieben")[0]["page"] == 1
-    with pytest.raises(ValueError, match="ausstehender"):
-        documents.ocr_document(item["id"])
+    assert documents.ocr_document(item["id"])["outcome"] == "unchanged"
 
 
 def test_ocr_rejects_changed_and_excluded_original(tmp_path, monkeypatch):
@@ -147,4 +147,108 @@ def test_ocr_route_requires_csrf_and_returns_page_status(tmp_path, monkeypatch):
         response = client.post(endpoint, headers={"x-jarvis-csrf": token})
         assert response.status_code == 200
         assert response.json()["outcome"] == "indexed"
-        assert client.post(endpoint, headers={"x-jarvis-csrf": token}).status_code == 409
+        repeated = client.post(endpoint, headers={"x-jarvis-csrf": token})
+        assert repeated.status_code == 200
+        assert repeated.json()["outcome"] == "unchanged"
+
+
+def mixed_pdf(path):
+    image = Image.new("RGB", (900, 220), "white")
+    ImageDraw.Draw(image).text((40, 80), "Saturn Bildbeleg", fill="black")
+    scan = io.BytesIO()
+    image.save(scan, format="PDF")
+    writer = PdfWriter()
+    writer.append(io.BytesIO(text_pdf("Orion Textbeleg")))
+    writer.append(io.BytesIO(scan.getvalue()))
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def test_mixed_pdf_ocr_adds_only_image_page_and_keeps_text_page(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Gemischt.pdf"
+    mixed_pdf(path)
+    db = Database(tmp_path / "data" / "jarvis.db")
+    documents = DocumentStore(db)
+    folder = documents.add_folder(str(root), "local_only")
+    assert documents.index_folder(folder["id"])["indexed"] == 1
+    item = documents.documents()[0]
+    assert documents.search("Orion")[0]["page"] == 1
+    assert documents.search("Saturn") == []
+    selected = []
+
+    def recognize(_data, *, page_numbers):
+        selected.append(page_numbers)
+        return [(2, "Saturn Bildbeleg")]
+
+    monkeypatch.setattr(document_module, "scan_pdf", recognize)
+    assert documents.ocr_document(item["id"])["outcome"] == "indexed"
+    assert selected == [[2]]
+    assert documents.search("Orion")[0]["page"] == 1
+    assert documents.search("Saturn")[0]["page"] == 2
+    _, exported = documents.indexed_pdf_text(item["id"])
+    assert "=== Seite 1 ===\nOrion Textbeleg" in exported
+    assert "=== Seite 2 ===\nSaturn Bildbeleg" in exported
+    assert documents.ocr_document(item["id"])["outcome"] == "unchanged"
+
+
+def test_mixed_pdf_ocr_error_and_source_change_preserve_text_index(tmp_path, monkeypatch):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Gemischt.pdf"
+    mixed_pdf(path)
+    db = Database(tmp_path / "data" / "jarvis.db")
+    documents = DocumentStore(db)
+    folder = documents.add_folder(str(root), "local_only")
+    documents.index_folder(folder["id"])
+    item = documents.documents()[0]
+    monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: (_ for _ in ())
+                        .throw(ValueError("OCR-Zeitlimit für eine PDF-Seite erreicht")))
+    with pytest.raises(ValueError, match="OCR-Zeitlimit"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
+    assert documents.search("Orion")[0]["page"] == 1
+    monkeypatch.setattr(document_module, "scan_pdf", lambda *_args, **_kwargs: (_ for _ in ())
+                        .throw(OcrUnavailable("Tesseract fehlt")))
+    with pytest.raises(OcrUnavailable, match="Tesseract fehlt"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
+
+    def change_during_ocr(_data, *, page_numbers):
+        assert page_numbers == [2]
+        path.write_bytes(path.read_bytes() + b"\n")
+        return [(2, "Saturn Bildbeleg")]
+
+    monkeypatch.setattr(document_module, "scan_pdf", change_during_ocr)
+    with pytest.raises(SourceChanged, match="während der OCR geändert"):
+        documents.ocr_document(item["id"])
+    assert documents.get_document(item["id"]) == item
+    assert documents.search("Orion")[0]["source_status"] == "needs_reindex"
+    path.write_bytes(path.read_bytes() + b"\n")
+    with pytest.raises(SourceChanged, match="zuerst neu indexieren"):
+        documents.ocr_document(item["id"])
+    assert documents.search("Saturn") == []
+
+
+def test_text_pdf_ocr_is_noop_and_selected_page_limit_is_bounded(tmp_path):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    path = root / "Text.pdf"
+    path.write_bytes(text_pdf("Orion Textbeleg"))
+    documents = DocumentStore(Database(tmp_path / "data" / "jarvis.db"))
+    folder = documents.add_folder(str(root), "local_only")
+    documents.index_folder(folder["id"])
+    item = documents.documents()[0]
+    assert documents.ocr_document(item["id"])["outcome"] == "unchanged"
+    assert documents.get_document(item["id"]) == item
+
+    writer = PdfWriter()
+    for _ in range(MAX_OCR_PAGES + 2):
+        writer.add_blank_page(612, 792)
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(ValueError, match="höchstens 10 PDF-Seiten"):
+        scan_pdf(output.getvalue(), binary="unused", page_numbers=list(range(1, 12)))
+    with pytest.raises(ValueError, match="Ungültige PDF-Seitenauswahl"):
+        scan_pdf(output.getvalue(), binary="unused", page_numbers=[1, 1])

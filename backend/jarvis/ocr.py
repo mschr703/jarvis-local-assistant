@@ -29,7 +29,8 @@ def tesseract_binary() -> str:
     raise OcrUnavailable("Lokales Tesseract fehlt. OCR-Installation in README.md prüfen.")
 
 
-def scan_pdf(data: bytes, *, binary: str | None = None) -> list[tuple[int, str]]:
+def scan_pdf(data: bytes, *, binary: str | None = None,
+             page_numbers: list[int] | None = None) -> list[tuple[int, str]]:
     """Return page-numbered OCR text; never send a source path to the OCR process."""
     executable = binary or tesseract_binary()
     try:
@@ -37,11 +38,17 @@ def scan_pdf(data: bytes, *, binary: str | None = None) -> list[tuple[int, str]]
     except Exception as exc:
         raise ValueError("PDF kann für OCR nicht geöffnet werden") from exc
     try:
-        if len(document) == 0 or len(document) > MAX_OCR_PAGES:
+        selected = (list(range(1, len(document) + 1)) if page_numbers is None
+                    else page_numbers)
+        if (len(document) == 0 or not selected or len(selected) > MAX_OCR_PAGES):
             raise ValueError(f"OCR unterstützt höchstens {MAX_OCR_PAGES} PDF-Seiten")
+        if (len(set(selected)) != len(selected)
+                or any(not isinstance(number, int) or number < 1
+                       or number > len(document) for number in selected)):
+            raise ValueError("Ungültige PDF-Seitenauswahl für OCR")
         page_sizes = []
-        for number in range(len(document)):
-            page = document[number]
+        for number in selected:
+            page = document[number - 1]
             try:
                 width, height = page.get_size()
                 if not math.isfinite(width) or not math.isfinite(height):
@@ -49,13 +56,13 @@ def scan_pdf(data: bytes, *, binary: str | None = None) -> list[tuple[int, str]]
                 pixels = math.ceil(width * OCR_SCALE) * math.ceil(height * OCR_SCALE)
                 if pixels <= 0 or pixels > MAX_OCR_PIXELS_PER_PAGE:
                     raise ValueError("PDF-Seite ist für lokale OCR zu groß")
-                page_sizes.append((width, height))
+                page_sizes.append((number, width, height))
             finally:
                 page.close()
         recognized: list[tuple[int, str]] = []
         total = 0
-        for number in range(len(page_sizes)):
-            page = document[number]
+        for number, _, _ in page_sizes:
+            page = document[number - 1]
             try:
                 bitmap = page.render(scale=OCR_SCALE)
                 try:
@@ -81,7 +88,7 @@ def scan_pdf(data: bytes, *, binary: str | None = None) -> list[tuple[int, str]]
             total += len(text)
             if total > MAX_OCR_CHARS:
                 raise ValueError("OCR-Text überschreitet die Längengrenze")
-            recognized.append((number + 1, text))
+            recognized.append((number, text))
         return recognized
     except ValueError:
         raise
