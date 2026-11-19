@@ -1,6 +1,7 @@
 """Real Edge/Tesseract/Ollama path from indexed scan PDF to local chat."""
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -10,8 +11,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
+from pypdf import PdfWriter
 from smoke_code_project_ui import wait_ui
-from smoke_document_ocr_ui import write_scan
+from smoke_document_ocr_ui import text_pdf, write_scan
 from smoke_research_ui import overflow_nodes
 from smoke_ui import ROOT, port_free, stop_test_server
 
@@ -128,8 +130,77 @@ def main() -> None:
                             assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 4
                             assert connection.execute("SELECT COUNT(*) FROM model_usage WHERE provider='openrouter'").fetchone()[0] == 0
                         assert not overflow_nodes(page), overflow_nodes(page)
+
+                        long_pdf = allowed / "Langer Bericht.pdf"
+                        writer = PdfWriter()
+                        for number in range(1, 5):
+                            writer.append(io.BytesIO(text_pdf(
+                                f"Galaxia Seite {number} " + "Alpha " * 600)))
+                        with long_pdf.open("wb") as stream:
+                            writer.write(stream)
+                        long_original = long_pdf.read_bytes()
+                        assert documents.index_folder(folder["id"])["indexed"] == 1
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Galaxia")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        long_hit = results.locator("article.item-row").filter(
+                            has_text="Langer Bericht.pdf").first
+                        expect(long_hit).to_be_visible()
+                        long_hit.get_by_role(
+                            "button", name="PDF-Indextext im lokalen Chat verwenden").click()
+                        expect(page.get_by_role("alert")).to_contain_text(
+                            "überschreitet 8.000 Zeichen")
+                        long_pdf.write_bytes(long_original + b"\n")
+                        long_hit.get_by_role(
+                            "button", name="Diese PDF-Fundstelle im lokalen Chat verwenden").click()
+                        expect(page.get_by_role("alert")).to_contain_text(
+                            "Originaldatei weicht vom Index ab")
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM chats").fetchone()[0] == 2
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 2
+                        long_pdf.write_bytes(long_original)
+                        long_hit.get_by_role(
+                            "button", name="Diese PDF-Fundstelle im lokalen Chat verwenden").click()
+                        expect(page.get_by_role("heading", name="Chat", exact=True)).to_be_visible()
+                        expect(selected_files).to_contain_text("Langer Bericht-fundstelle-")
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 2
+                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 4
+                        page.get_by_label("Nachricht").fill(
+                            "Was steht in der Galaxia-Fundstelle? Nenne die Seite.")
+                        page.get_by_role("button", name="Senden", exact=True).click()
+                        expect(page.locator(".message.assistant .usage")).to_contain_text(
+                            "keine API-Gebühr", timeout=180000)
+                        with db.connect() as connection:
+                            saved = connection.execute(
+                                "SELECT text FROM chat_attachments "
+                                "WHERE filename LIKE 'Langer Bericht-fundstelle-%'"
+                            ).fetchone()[0]
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 3
+                        assert "=== Seite " in saved and "Galaxia Seite" in saved
+                        assert saved.count("Alpha") >= 100
+                        assert "Original SHA-256: " + hashlib.sha256(long_original).hexdigest() in saved
+                        assert str(allowed) not in saved
+                        assert not overflow_nodes(page), overflow_nodes(page)
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Gemeinsame Suche").fill("Galaxia")
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        semantic = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
+                        semantic_hit = semantic.locator("article.item-row").filter(
+                            has_text="Langer Bericht.pdf").first
+                        expect(semantic_hit).to_be_visible(timeout=120000)
+                        semantic_hit.get_by_role(
+                            "button", name="Diese PDF-Fundstelle im lokalen Chat verwenden").click()
+                        expect(page.get_by_role("heading", name="Chat", exact=True)).to_be_visible()
+                        expect(selected_files).to_contain_text("Langer Bericht-fundstelle-")
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 3
+                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 5
+                        assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"scan_pdf_chat": "verified_index_text",
                                           "three_sources": "atomic_stale_then_sent",
+                                          "long_pdf_passage": "verified_and_sent",
+                                          "semantic_passage": "prepared_without_chat",
                                           "pre_send_model_calls": 0, "page_evidence": 1,
                                           "provider": "ollama", "mobile_width": "fits"}))
                     finally:

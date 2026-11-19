@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, verifiedSearchDocumentForLocalChat } from './api';
+import { api, verifiedPdfPassageForLocalChat, verifiedSearchDocumentForLocalChat } from './api';
 import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project';
@@ -150,6 +150,10 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     if (hit.kind !== 'document' || !hit.document_id || !hit.sha256
         || !['current', 'updated'].includes(hit.source_status || '')) return null;
     const key = `${hit.document_id}:${hit.sha256}`;
+    const passageId = hit.passage_id;
+    const passageKey = `${key}:${passageId}`;
+    const canUsePassage = /\.pdf$/i.test(hit.source)
+      && typeof passageId === 'number' && Number.isSafeInteger(passageId) && passageId > 0;
     const document = { id: hit.document_id, path: hit.source, sha256: hit.sha256 };
     const selected = selectedChatDocuments.some((item) => item.id === document.id);
     return <div className="item-actions">{firstForDocument && <label><input type="checkbox"
@@ -170,7 +174,19 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         catch (cause) { setError((cause as Error).message); }
         finally { setPreparingChat(''); }
       }}>{preparingChat === key ? 'Quelle wird geprüft…' : /\.pdf$/i.test(hit.source)
-        ? 'PDF-Indextext im lokalen Chat verwenden' : 'Im lokalen Chat verwenden'}</button></div>;
+        ? 'PDF-Indextext im lokalen Chat verwenden' : 'Im lokalen Chat verwenden'}</button>
+    {canUsePassage && <button type="button" disabled={!localChatReady || !!preparingChat}
+      title={!localChatReady ? 'Nur mit lokalem Ollama verfügbar' : undefined}
+      onClick={async () => {
+        setPreparingChat(passageKey); setError('');
+        try {
+          const file = await verifiedPdfPassageForLocalChat(
+            document.id, passageId, document.path, document.sha256);
+          setSelectedChatDocuments([]); onLocalChat([file]);
+        } catch (cause) { setError((cause as Error).message); }
+        finally { setPreparingChat(''); }
+      }}>{preparingChat === passageKey ? 'Fundstelle wird geprüft…'
+        : 'Diese PDF-Fundstelle im lokalen Chat verwenden'}</button>}</div>;
   };
   const prepareSelectedChat = async () => {
     if (!localChatReady || preparingChat || !selectedChatDocuments.length) return;

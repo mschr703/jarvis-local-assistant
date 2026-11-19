@@ -298,6 +298,45 @@ class DocumentStore:
             lines.extend((f"=== Seite {page} ===", reconstructed, ""))
         return item, "\n".join(lines)
 
+    def verified_pdf_passage(self, document_id: str, passage_id: int,
+                             expected_sha256: str) -> dict:
+        """Return one current, page-numbered PDF passage without a local path."""
+        item, _ = self.original_bytes(document_id)
+        if Path(item["path"]).suffix.lower() != ".pdf":
+            raise ValueError("Fundstellen-Chat ist nur für PDF verfügbar")
+        if item["sha256"] != expected_sha256:
+            raise ValueError("PDF-Treffer ist nicht mehr aktuell; erneut suchen")
+        with self.db.connect() as db:
+            db.execute("BEGIN")
+            current = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                                    JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                                 (document_id,)).fetchone()
+            if current is None or any(current[key] != item[key] for key in
+                                      ("folder_id", "folder_path", "path", "sha256",
+                                       "size", "status", "excluded", "policy", "indexed_at")):
+                raise ValueError("PDF-Index hat sich während der Fundstellenprüfung geändert")
+            passage = db.execute("""SELECT page,text FROM passages
+                                    WHERE id=? AND document_id=?""",
+                                 (passage_id, document_id)).fetchone()
+        if passage is None:
+            raise LookupError("PDF-Fundstelle nicht gefunden")
+        if (not isinstance(passage["page"], int) or passage["page"] < 1
+                or not passage["text"] or len(passage["text"]) > 8000):
+            raise ValueError("PDF-Fundstelle hat keinen gültigen Seitenbeleg oder ist zu lang")
+        if not self.source_is_current(item):
+            raise ValueError("Originaldatei weicht vom Index ab; zuerst neu indexieren")
+        with self.db.connect() as db:
+            latest = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                                   JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                                (document_id,)).fetchone()
+        if latest is None or any(latest[key] != item[key] for key in
+                                 ("folder_id", "folder_path", "path", "sha256",
+                                  "size", "status", "excluded", "policy", "indexed_at")):
+            raise ValueError("PDF-Index hat sich während der Fundstellenprüfung geändert")
+        return {"document_id": document_id, "passage_id": passage_id,
+                "filename": Path(item["path"]).name, "sha256": item["sha256"],
+                "page": passage["page"], "text": passage["text"]}
+
     def ocr_page_preview(self, document_id: str) -> dict:
         """Show textless pages of a verified indexed or OCR-pending PDF."""
         item, contents = self.original_bytes(document_id, allow_ocr_pending=True)

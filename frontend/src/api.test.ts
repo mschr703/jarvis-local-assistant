@@ -209,3 +209,44 @@ test('PDF-Indextext mit fremdem Beleg oder mehr als 8.000 Zeichen wird abgelehnt
   await expect(verifiedSearchDocumentForLocalChat('scan-1', path, sha256))
     .rejects.toThrow('8.000 Zeichen');
 });
+
+test('Geprüfte PDF-Fundstelle wird als einzelner lokaler Chatanhang mit Seite vorbereitet', async () => {
+  const path = 'C:\\Belege\\Langer Bericht.pdf';
+  const sha256 = 'a'.repeat(64);
+  const payload = { document_id: 'doc-1', passage_id: 42,
+    filename: 'Langer Bericht.pdf', sha256, page: 7, text: 'Orion Vertrag' };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedPdfPassageForLocalChat } = await import('./api');
+  const file = await verifiedPdfPassageForLocalChat('doc-1', 42, path, sha256);
+  expect(file.name).toBe('Langer Bericht-fundstelle-42.txt');
+  expect(await file.text()).toContain('=== Seite 7 ===\nOrion Vertrag');
+  expect(await file.text()).not.toContain('C:\\Belege');
+  expect(fetchMock.mock.calls[1][0]).toBe(
+    `/api/documents/doc-1/passages/42/chat-text?expected_sha256=${sha256}`);
+  expect((fetchMock.mock.calls[1][1] as RequestInit).cache).toBe('no-store');
+});
+
+test('Fremde oder veraltete PDF-Fundstelle wird vor dem Chat abgewiesen', async () => {
+  const path = 'C:\\Belege\\Scan.pdf';
+  const sha256 = 'a'.repeat(64);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ document_id: 'doc-1',
+      passage_id: 3, filename: 'Scan.pdf', sha256: 'b'.repeat(64),
+      page: 1, text: 'Orion' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Originaldatei weicht vom Index ab; zuerst neu indexieren',
+    }), { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedPdfPassageForLocalChat } = await import('./api');
+  await expect(verifiedPdfPassageForLocalChat('doc-1', 3, path, sha256))
+    .rejects.toThrow('passt nicht mehr');
+  await expect(verifiedPdfPassageForLocalChat('doc-1', 3, path, sha256))
+    .rejects.toThrow('Originaldatei weicht');
+  await expect(verifiedPdfPassageForLocalChat('doc-1', 0, path, sha256))
+    .rejects.toThrow('nicht geeignet');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});

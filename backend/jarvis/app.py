@@ -1971,6 +1971,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                  "Cache-Control": "no-store",
                                  "X-Content-Type-Options": "nosniff"})
 
+    @app.get("/documents/{document_id}/passages/{passage_id}/chat-text")
+    async def document_passage_chat_text(document_id: str, passage_id: int,
+                                         expected_sha256: str = Query(
+                                             min_length=64, max_length=64,
+                                             pattern="^[0-9a-f]{64}$")):
+        try:
+            payload = await run_in_threadpool(documents.verified_pdf_passage,
+                                              document_id, passage_id, expected_sha256)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return JSONResponse(payload, headers={"Cache-Control": "no-store",
+                                              "X-Content-Type-Options": "nosniff"})
+
     @app.get("/documents/{document_id}/markdown")
     async def markdown_read(document_id: str):
         try:

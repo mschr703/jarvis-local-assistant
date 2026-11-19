@@ -147,6 +147,34 @@ export async function verifiedSearchDocumentForLocalChat(documentId: string,
   return new File([content], chatFilename, { type: 'text/plain' });
 }
 
+export async function verifiedPdfPassageForLocalChat(documentId: string,
+  passageId: number, expectedPath: string, expectedSha256: string): Promise<File> {
+  const filename = expectedPath.split(/[\\/]/).at(-1) || '';
+  if (!/\.pdf$/i.test(filename) || filename.length > 120
+      || /[<>:"|?*\x00-\x1f]/.test(filename)
+      || !Number.isSafeInteger(passageId) || passageId <= 0
+      || !/^[0-9a-f]{64}$/.test(expectedSha256))
+    throw new Error('Der PDF-Treffer ist für einen lokalen Chatanhang nicht geeignet.');
+  const params = new URLSearchParams({ expected_sha256: expectedSha256 });
+  const item = await api<{ document_id: string; passage_id: number; filename: string;
+    sha256: string; page: number; text: string }>(
+    `/documents/${encodeURIComponent(documentId)}/passages/${passageId}/chat-text?${params}`,
+    { cache: 'no-store' });
+  if (item.document_id !== documentId || item.passage_id !== passageId
+      || item.filename !== filename || item.sha256 !== expectedSha256
+      || !Number.isSafeInteger(item.page) || item.page < 1
+      || typeof item.text !== 'string' || !item.text.trim()
+      || item.text.length > 8000 || item.text.includes('\0'))
+    throw new Error('Die PDF-Fundstelle passt nicht mehr zum Suchtreffer. Erneut suchen.');
+  const content = `Jarvis Local · geprüfte PDF-Fundstelle\nOriginaldatei: ${filename}\nDokument-ID: ${documentId}\nOriginal SHA-256: ${expectedSha256}\nFundstellen-ID: ${passageId}\n\n=== Seite ${item.page} ===\n${item.text}`;
+  if (new TextEncoder().encode(content).length > 512 * 1024)
+    throw new Error('Die PDF-Fundstelle ist für einen Chatanhang zu groß.');
+  const chatFilename = `${filename.replace(/\.pdf$/i, '')}-fundstelle-${passageId}.txt`;
+  if (chatFilename.length > 120)
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang zu lang.');
+  return new File([content], chatFilename, { type: 'text/plain' });
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {
