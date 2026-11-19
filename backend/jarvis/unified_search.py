@@ -150,7 +150,8 @@ def search(db: Database, query: str, kind: str = "all",
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_TASK_ROWS + 1))] if kind in {
             "all", "project"} else []
         project_files = [dict(row) for row in connection.execute("""
-            SELECT s.id AS state_id,json_extract(link.value,'$.path') AS saved_path
+            SELECT s.id AS state_id,json_extract(link.value,'$.id') AS document_id,
+                   json_extract(link.value,'$.path') AS saved_path
             FROM (SELECT id,documents_json,updated_at FROM work_states
                   ORDER BY updated_at DESC,id DESC LIMIT ?) s
             JOIN json_each(s.documents_json) link
@@ -288,10 +289,11 @@ def search(db: Database, query: str, kind: str = "all",
     tasks_by_project: dict[str, list[dict]] = {}
     for task in project_tasks[:MAX_PROJECT_TASK_ROWS]:
         tasks_by_project.setdefault(task["state_id"], []).append(task)
-    files_by_project: dict[str, list[str]] = {}
+    files_by_project: dict[str, list[dict]] = {}
     for file in project_files[:MAX_PROJECT_FILE_ROWS]:
         files_by_project.setdefault(file["state_id"], []).append(
-            portable_basename(file["saved_path"]))
+            {"id": file["document_id"],
+             "name": portable_basename(file["saved_path"])})
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -331,17 +333,25 @@ def search(db: Database, query: str, kind: str = "all",
         if matching_tasks:
             score += matching_tasks[0][0]
         matching_files = []
-        for filename in files_by_project.get(row["id"], []):
-            file_score = _score(folded_query, folded_terms, _fold(filename), "")
+        for file in files_by_project.get(row["id"], []):
+            file_score = _score(folded_query, folded_terms, _fold(file["name"]), "")
             if file_score:
-                matching_files.append((file_score, filename))
-        matching_files.sort(key=lambda item: (-item[0], item[1].casefold()))
+                matching_files.append((file_score, file))
+        matching_files.sort(key=lambda item: (-item[0], item[1]["name"].casefold(),
+                                              item[1]["id"]))
         if matching_files:
             score += matching_files[0][0]
         if score:
-            file_excerpts = [f"Projektdatei: {filename} · Original und Freigabe"
+            relation_matches = (
+                [(value, "document", item["id"]) for value, item in matching_files[:1]]
+                + [(value, "task", item["task_id"]) for value, item in matching_tasks[:1]]
+                + [(value, "alias", item["id"]) for value, item in matching_aliases[:1]]
+                + [(value, "person", item["id"]) for value, item, _ in matching_people[:1]])
+            relation_matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+            match = relation_matches[0] if relation_matches else None
+            file_excerpts = [f"Projektdatei: {file['name']} · Original und Freigabe"
                              " im Arbeitsstand prüfen"
-                             for _, filename in matching_files[:2]]
+                             for _, file in matching_files[:2]]
             task_excerpts = []
             for _, task in matching_tasks[:2]:
                 if task["current_title"] is None:
@@ -368,7 +378,9 @@ def search(db: Database, query: str, kind: str = "all",
                                                          *alias_excerpts,
                                                          *person_excerpts, body])[:500],
                                   "source": f"Arbeitsstand v{row['version']}",
-                                  "version": row["version"], "score": score})
+                                  "version": row["version"], "score": score,
+                                  "match_kind": match[1] if match else None,
+                                  "match_id": match[2] if match else None})
 
     event_items = []
     for row in events[:MAX_EVENT_ROWS]:

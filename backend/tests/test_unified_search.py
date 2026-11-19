@@ -52,6 +52,8 @@ def test_search_combines_sources_with_exact_references(tmp_path):
     assert by_kind["memory"]["source"] == "Gespräch vom 2. Mai"
     assert by_kind["project"]["id"] == project["id"]
     assert by_kind["project"]["version"] == 1
+    assert by_kind["project"]["match_kind"] is None
+    assert by_kind["project"]["match_id"] is None
     # A filename is findable even when its exact spelling is absent from the passage.
     assert search(db, "Vertrag_Orion")["counts"]["document"] == 1
     assert docs.get_document(document["id"])["status"] == "indexed"
@@ -67,6 +69,7 @@ def test_project_people_are_searchable_through_their_project(tmp_path):
         assert result["counts"]["project"] == 1
         hit = result["results"][0]
         assert hit["id"] == project["id"] and hit["kind"] == "project"
+        assert hit["match_kind"] == "person" and hit["match_id"] == person["id"]
         assert "Projektperson: Míra Weber" in hit["excerpt"]
         assert "eigene Angabe" in hit["excerpt"]
     assert search(db, "Energieabrechnung", "contact")["results"] == []
@@ -103,6 +106,8 @@ def test_project_aliases_find_the_canonical_person_and_refresh(tmp_path):
     result = search(db, "Mimi", "project")
     assert result["counts"]["project"] == 1
     assert result["results"][0]["id"] == project["id"]
+    assert result["results"][0]["match_kind"] == "alias"
+    assert result["results"][0]["match_id"] == alias["id"]
     assert "Personenalias: Mími → Mira Weber" in result["results"][0]["excerpt"]
     assert search(db, "Mimi", "contact")["results"] == []
     changed = aliases.update(project["id"], alias["id"], project["version"],
@@ -136,6 +141,8 @@ def test_explicit_project_task_search_tracks_renames_completion_and_deletion(tmp
                             project["next_step"], [], [task["id"]], [])
     initial = search(db, "Budgetplanung", "project")
     assert initial["results"][0]["id"] == project["id"]
+    assert initial["results"][0]["match_kind"] == "task"
+    assert initial["results"][0]["match_id"] == task["id"]
     assert "Projektaufgabe: Budgetplanung · offen" in initial["results"][0]["excerpt"]
     assert search(db, "Budgetplanung", "contact")["results"] == []
     tasks.update(task["id"], "Kostenprüfung", "", None, "Europe/Paris")
@@ -177,6 +184,7 @@ def test_explicit_project_file_name_search_hides_path_and_tracks_unlink(tmp_path
     assert result["counts"]["project"] == 1
     hit = result["results"][0]
     assert hit["id"] == project["id"]
+    assert hit["match_kind"] == "document" and hit["match_id"] == document["id"]
     assert "Projektdatei: Vertrag_Orion.md" in hit["excerpt"]
     assert "Original und Freigabe im Arbeitsstand prüfen" in hit["excerpt"]
     assert str(file.parent) not in hit["excerpt"]

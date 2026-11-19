@@ -6,10 +6,12 @@ import type { Source } from './DocumentView';
 type Kind = 'document' | 'memory' | 'project' | 'life_event' | 'contact';
 type SemanticKind = Exclude<Kind, 'contact'>;
 type SourceKind = 'all' | Kind;
+type ProjectMatch = { kind: 'document' | 'task' | 'alias' | 'person'; id: string };
 type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: string;
   score: number; policy?: string; document_id?: string; passage_id?: number | null;
   page?: number | null; sha256?: string; version?: number; preferred?: boolean;
-  source_status?: 'current' | 'updated' };
+  source_status?: 'current' | 'updated'; match_kind?: ProjectMatch['kind'] | null;
+  match_id?: string | null };
 type Preference = { document_id: string; path: string; saved_sha256: string;
   current_sha256: string | null; status: 'current' | 'updated' | 'needs_reindex' | 'unavailable' };
 type Document = { id: string; path: string; folder_id: string; status: string; excluded: number };
@@ -48,7 +50,8 @@ function draftSource(hit: Hit | SemanticHit): Source | null {
 }
 
 export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, localChatReady }: {
-  onDraft: (sources: Source[]) => void; onOpenSource: (kind: Kind, id: string) => void;
+  onDraft: (sources: Source[]) => void;
+  onOpenSource: (kind: Kind, id: string, match?: ProjectMatch) => void;
   onLocalChat: (files: File[]) => void; localChatReady: boolean }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
@@ -462,6 +465,9 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
             <a href={`/api/documents/${encodeURIComponent(hit.document_id)}/original`}
               download={hit.title}>Geprüftes Original herunterladen</a>}
           <button type="button" onClick={() => onOpenSource(hit.kind, hit.id)}>Quelle öffnen</button>
+          {hit.kind === 'project' && hit.match_kind && hit.match_id &&
+            <button type="button" onClick={() => onOpenSource(hit.kind, hit.id,
+              { kind: hit.match_kind!, id: hit.match_id! })}>Passenden Beleg öffnen</button>}
           {localChatAction(hit, result.results.findIndex((item) => item.kind === 'document'
             && item.document_id === hit.document_id) === index)}
           {draftActions(hit)}

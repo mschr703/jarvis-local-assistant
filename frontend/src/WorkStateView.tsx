@@ -145,7 +145,8 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
 
 export default function WorkStateView({ visible, onTasks, onResearch, requestedSource }: {
   visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void;
-  requestedSource: { kind: 'project'; id: string; serial: number } | null }) {
+  requestedSource: { kind: 'project'; id: string; serial: number;
+    match?: { kind: 'document' | 'task' | 'alias' | 'person'; id: string } } | null }) {
   const [items, setItems] = useState<WorkSummary[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -195,6 +196,8 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
   const [notice, setNotice] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const request = useRef(0);
+  const lastSourceScroll = useRef<number | null>(null);
+  const [loadedSourceSerial, setLoadedSourceSerial] = useState<number | null>(null);
 
   const loadReviews = async (id: string) => {
     const [schedule, reports, research] = await Promise.all([
@@ -263,20 +266,25 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
       .then(() => {
         if (current && requestedSource) {
           setActive(null); setProjectCheck(null); setEditingId(null); setNotice('');
-          select(requestedSource.id);
+          select(requestedSource.id, requestedSource.serial);
         }
       })
       .catch((error: Error) => { if (current) setNotice(error.message); });
     return () => { current = false; ++request.current; };
   }, [visible, requestedSource?.serial]);
   useEffect(() => {
-    if (!visible || !requestedSource || active?.id !== requestedSource.id) return;
+    if (!visible || !requestedSource || active?.id !== requestedSource.id || busy
+        || loadedSourceSerial !== requestedSource.serial
+        || lastSourceScroll.current === requestedSource.serial) return;
     const frame = window.requestAnimationFrame(() => {
-      window.document.getElementById(`search-source-project-${requestedSource.id}`)
+      const match = requestedSource.match;
+      const target = match ? window.document.getElementById(`project-${match.kind}-${match.id}`) : null;
+      (target || window.document.getElementById(`search-source-project-${requestedSource.id}`))
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      lastSourceScroll.current = requestedSource.serial;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [visible, requestedSource?.serial, active?.id]);
+  }, [visible, requestedSource?.serial, active?.id, busy, loadedSourceSerial]);
 
   const withBusy = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -285,7 +293,7 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
     catch (error) { setNotice((error as Error).message); }
     finally { busyRef.current = false; setBusy(false); }
   };
-  const select = (id: string) => void withBusy(async () => {
+  const select = (id: string, sourceSerial?: number) => void withBusy(async () => {
     setConnections(null); setGraph(null); setGraphNeighbors(null); setGraphPaths(null);
     setGraphSource(''); setGraphTarget('');
     const check = await api<ProjectCheck>(`/work-states/${id}/check`);
@@ -297,6 +305,7 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
     setMemoryForm(emptyMemoryForm()); setEditingMemoryLinkId(null); setMemoryDeleteCandidate(null);
     setMemorySearch(''); setMemoryCandidates([]);
     await Promise.all([loadReviews(id), loadPeople(id), loadPersonTasks(id), loadAliases(id), loadPersonMerges(id), loadMemoryLinks(id)]);
+    if (sourceSerial != null) setLoadedSourceSerial(sourceSerial);
   });
   const edit = () => {
     if (!active) return;
