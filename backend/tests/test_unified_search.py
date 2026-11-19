@@ -8,6 +8,7 @@ from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.project_people import ProjectPeopleStore
 from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
 from jarvis.unified_search import search
@@ -51,6 +52,41 @@ def test_search_combines_sources_with_exact_references(tmp_path):
     # A filename is findable even when its exact spelling is absent from the passage.
     assert search(db, "Vertrag_Orion")["counts"]["document"] == 1
     assert docs.get_document(document["id"])["status"] == "indexed"
+
+
+def test_project_people_are_searchable_through_their_project(tmp_path):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Míra Weber", "reviewer",
+                        "Prüft die Energieabrechnung", None)
+    for term in ("Mira", "Energieabrechnung", "Prüfung"):
+        result = search(db, term, "project")
+        assert result["counts"]["project"] == 1
+        hit = result["results"][0]
+        assert hit["id"] == project["id"] and hit["kind"] == "project"
+        assert "Projektperson: Míra Weber" in hit["excerpt"]
+        assert "eigene Angabe" in hit["excerpt"]
+    assert search(db, "Energieabrechnung", "contact")["results"] == []
+    changed = people.update(project["id"], person["id"], project["version"],
+                            person["version"], "Míra Weber", "reviewer",
+                            "Prüft die Heizkosten", None)
+    assert search(db, "Energieabrechnung", "project")["results"] == []
+    assert search(db, "Heizkosten", "project")["results"][0]["id"] == project["id"]
+    people.delete(project["id"], person["id"], project["version"], changed["version"])
+    assert search(db, "Heizkosten", "project")["results"] == []
+
+
+def test_project_people_search_respects_candidate_limit(tmp_path, monkeypatch):
+    db, _, states, _, _, _, project, _ = sample(tmp_path)
+    people = ProjectPeopleStore(db, states)
+    for index in range(3):
+        people.add(project["id"], project["version"], f"Nora {index}", "contact",
+                   "Eigene Projektangabe", None)
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_PERSON_ROWS", 2)
+    result = search(db, "Nora", "project")
+    assert result["limited"]
+    assert result["counts"]["project"] == 1
+    assert result["results"][0]["id"] == project["id"]
 
 
 def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monkeypatch):

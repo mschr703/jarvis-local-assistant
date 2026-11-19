@@ -11,6 +11,7 @@ from jarvis.documents import DocumentStore
 MAX_CANDIDATES = 100
 MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
+MAX_PROJECT_PERSON_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -21,6 +22,8 @@ STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "
                        "zur", "zum", "von", "für", "mit", "über", "und", "oder", "der",
                        "die", "das", "den", "dem", "des", "ein", "eine", "einen", "im", "in",
                        "am", "an", "aus", "bei", "nach", "bekannt"})
+PROJECT_RELATIONS = {"lead": "Leitung", "contributor": "Mitwirkung",
+                     "contact": "Kontakt", "reviewer": "Prüfung", "other": "Andere Beziehung"}
 
 
 def query_terms(query: str) -> tuple[str, list[str]]:
@@ -108,6 +111,15 @@ def search(db: Database, query: str, kind: str = "all",
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS + 1,))] if kind in {"all", "project"} else []
+        project_people = [dict(row) for row in connection.execute("""
+            SELECT p.id,p.state_id,p.name,p.relation_type,p.source_note,
+                   p.source_document_id
+            FROM project_people p JOIN
+                (SELECT id FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?) s
+                ON s.id=p.state_id
+            ORDER BY p.updated_at DESC,p.id DESC LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_PERSON_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -156,6 +168,7 @@ def search(db: Database, query: str, kind: str = "all",
 
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
+               or len(project_people) > MAX_PROJECT_PERSON_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -223,25 +236,45 @@ def search(db: Database, query: str, kind: str = "all",
                      "policy": row["policy"],
                      "score": _score(cleaned, terms, row["source_ref"], row["text"])}
                     for row in memories[:MAX_CANDIDATES]]
+    folded_query = _fold(cleaned)
+    folded_terms = [_fold(term) for term in terms]
     project_items = []
+    people_by_project: dict[str, list[dict]] = {}
+    for person in project_people[:MAX_PROJECT_PERSON_ROWS]:
+        people_by_project.setdefault(person["state_id"], []).append(person)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
-        score = _score(cleaned, terms, row["project"], body)
+        score = _score(folded_query, folded_terms, _fold(row["project"]), _fold(body))
+        matching_people = []
+        for person in people_by_project.get(row["id"], []):
+            role = PROJECT_RELATIONS[person["relation_type"]]
+            person_body = f"{role} · {person['source_note']}"
+            person_score = _score(folded_query, folded_terms,
+                                  _fold(person["name"]), _fold(person_body))
+            if person_score:
+                matching_people.append((person_score, person, role))
+        matching_people.sort(key=lambda item: (-item[0], item[1]["name"].casefold(), item[1]["id"]))
+        if matching_people:
+            score += matching_people[0][0]
         if score:
+            person_excerpts = [f"Projektperson: {person['name']} · {role} · {person['source_note']}"
+                               + (" · Dateibeleg im Arbeitsstand prüfen"
+                                  if person["source_document_id"] else " · eigene Angabe")
+                               for _, person, role in matching_people[:2]]
             project_items.append({"kind": "project", "id": row["id"],
-                                  "title": row["project"], "excerpt": body[:500],
+                                  "title": row["project"],
+                                  "excerpt": " · ".join([*person_excerpts, body])[:500],
                                   "source": f"Arbeitsstand v{row['version']}",
                                   "version": row["version"], "score": score})
 
     event_items = []
-    folded_terms = [_fold(term) for term in terms]
     for row in events[:MAX_EVENT_ROWS]:
         photo_names = (row["photo_names"] or "").split(" | ") if row["photo_names"] else []
         body = " · ".join(part for part in (row["date_local"], row["location"],
                                                 row["description"], row["photo_names"],
                                                 row["contact_names"]) if part)
-        score = _score(_fold(cleaned), folded_terms, _fold(row["title"]), _fold(body))
+        score = _score(folded_query, folded_terms, _fold(row["title"]), _fold(body))
         if score:
             matching_photos = [name for name in photo_names if any(term in _fold(name)
                                                                     for term in folded_terms)][:3]
@@ -266,7 +299,7 @@ def search(db: Database, query: str, kind: str = "all",
         details = contact_details.get(row["id"], [])
         title = f"{row['name']} · {row['context']}"
         body = " · ".join([row["relationship"], *(detail for _, detail in details)])
-        score = _score(_fold(cleaned), folded_terms, _fold(title), _fold(body))
+        score = _score(folded_query, folded_terms, _fold(title), _fold(body))
         if score:
             matching = [f"{label}: {detail}" for label, detail in details
                         if any(term in _fold(detail) for term in folded_terms)][:2]
