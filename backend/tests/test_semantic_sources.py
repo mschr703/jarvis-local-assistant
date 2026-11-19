@@ -7,6 +7,8 @@ from jarvis.app import create_app
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.project_aliases import ProjectAliasStore
+from jarvis.project_people import ProjectPeopleStore
 from jarvis.semantic_search import search
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
@@ -52,6 +54,75 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
     assert by_kind["project"]["id"] == project["id"]
     assert by_kind["project"]["version"] == 1
     assert not found["limited"] and not found["changed_sources"]
+
+
+def test_project_people_and_aliases_reach_local_semantic_corpus(tmp_path, monkeypatch):
+    db, _, _, _, project, _ = sample(tmp_path)
+    states = WorkStateStore(db, DocumentStore(db), TaskStore(db))
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber", "reviewer",
+                        "Prüft Heizkosten", None)
+    ProjectAliasStore(db, states, people).add(
+        project["id"], project["version"], person["id"], person["version"],
+        "Mimi", "Rufname im Team", None)
+    observed = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        observed.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    found = search(db, "Wer prüft Nebenkosten?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert len(observed) == 2 and "Mira Weber" in observed[1]
+    assert "Mimi → Mira Weber" in observed[1]
+    assert "Prüft Heizkosten" in observed[1]
+    assert found["counts"]["project"] == 1
+    assert "Projektperson: Mira Weber" in found["results"][0]["excerpt"]
+    assert "Personenalias: Mimi → Mira Weber" in found["results"][0]["excerpt"]
+
+
+@pytest.mark.parametrize("changed_table", ["project_people", "project_person_aliases"])
+def test_project_relationship_changed_during_embedding_is_rejected(
+        tmp_path, monkeypatch, changed_table):
+    db, _, _, _, project, _ = sample(tmp_path)
+    states = WorkStateStore(db, DocumentStore(db), TaskStore(db))
+    people = ProjectPeopleStore(db, states)
+    person = people.add(project["id"], project["version"], "Mira Weber", "reviewer",
+                        "Prüft Heizkosten", None)
+    alias = ProjectAliasStore(db, states, people).add(
+        project["id"], project["version"], person["id"], person["version"],
+        "Mimi", "Rufname im Team", None)
+
+    def mutate(_url, texts, _cache_path=None):
+        with db.connect() as connection:
+            if changed_table == "project_people":
+                connection.execute("UPDATE project_people SET name=? WHERE id=?",
+                                   ("Nora Weber", person["id"]))
+            else:
+                connection.execute("UPDATE project_person_aliases SET alias=? WHERE id=?",
+                                   ("Nini", alias["id"]))
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", mutate)
+    found = search(db, "Wer prüft Nebenkosten?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 0
+    assert found["changed_sources"] == [{"kind": "project", "id": project["id"]}]
+
+
+def test_project_semantic_relationship_limit_is_reported(tmp_path, monkeypatch):
+    db, _, _, _, project, _ = sample(tmp_path)
+    states = WorkStateStore(db, DocumentStore(db), TaskStore(db))
+    people = ProjectPeopleStore(db, states)
+    for index in range(3):
+        people.add(project["id"], project["version"], f"Mira {index}", "contact",
+                   "Eigene Projektangabe", None)
+    monkeypatch.setattr("jarvis.semantic_search.MAX_PROJECT_RELATIONS_PER_KIND", 2)
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts",
+                        lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
+    found = search(db, "Mira", "http://127.0.0.1:11434", source_kind="project")
+    assert found["limited"] and found["counts"]["project"] == 1
 
 
 def test_semantic_source_kind_filters_corpus_before_local_embedding(tmp_path, monkeypatch):

@@ -13,13 +13,14 @@ from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
 from jarvis.semantic_cache import PersistentEmbeddingCache
-from jarvis.unified_search import SOURCE_KINDS, validate_event_range
+from jarvis.unified_search import PROJECT_RELATIONS, SOURCE_KINDS, validate_event_range
 
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
 MAX_DOCUMENTS = 30
 MAX_MEMORIES = 30
 MAX_PROJECTS = 20
+MAX_PROJECT_RELATIONS_PER_KIND = 5
 MAX_EVENTS = 30
 MAX_RESULTS = 10
 MAX_DEEP_RESULTS = 5
@@ -210,6 +211,52 @@ def _project_body(row: dict) -> str:
                       (row["confirmed"], row["open_questions"], row["next_step"]) if part)
 
 
+def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict]:
+    """Read bounded project links in stable order for corpus and post-model recheck."""
+    result = {project_id: {"people": [], "aliases": []} for project_id in project_ids}
+    if not project_ids:
+        return result
+    placeholders = ",".join("?" for _ in project_ids)
+    people = connection.execute(f"""SELECT id,state_id,name,relation_type,source_note,
+        source_document_id,source_sha256,confidence,valid_from,valid_until,version,updated_at
+        FROM project_people WHERE state_id IN ({placeholders})
+        ORDER BY state_id,updated_at DESC,id DESC""",
+                                project_ids)
+    for person in people:
+        result[person["state_id"]]["people"].append(dict(person))
+    aliases = connection.execute(f"""SELECT a.id,a.state_id,a.person_id,a.alias,a.source_note,
+        a.source_document_id,a.source_sha256,a.confidence,a.valid_from,a.valid_until,
+        a.version,a.updated_at,p.name AS person_name,p.version AS person_version
+        FROM project_person_aliases a JOIN project_people p
+            ON p.id=a.person_id AND p.state_id=a.state_id
+        WHERE a.state_id IN ({placeholders})
+        ORDER BY a.state_id,a.updated_at DESC,a.id DESC""", project_ids)
+    for alias in aliases:
+        result[alias["state_id"]]["aliases"].append(dict(alias))
+    return result
+
+
+def _project_relationship_text(row: dict) -> str:
+    links = row["relationships"]
+    people = [f"Projektperson: {person['name']} · {PROJECT_RELATIONS[person['relation_type']]}"
+              f" · {person['source_note'][:120]}"
+              for person in links["people"][:MAX_PROJECT_RELATIONS_PER_KIND]]
+    aliases = [f"Personenalias: {alias['alias']} → {alias['person_name']}"
+               f" · {alias['source_note'][:120]}"
+               for alias in links["aliases"][:MAX_PROJECT_RELATIONS_PER_KIND]]
+    parts = []
+    for index in range(max(len(people), len(aliases))):
+        if index < len(people):
+            parts.append(people[index])
+        if index < len(aliases):
+            parts.append(aliases[index])
+    return " · ".join(parts)
+
+
+def _project_embedding_body(row: dict) -> str:
+    return f"{row['project']}\n{_project_relationship_text(row)}\n{_project_body(row)}"
+
+
 EVENT_SELECT = """SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
     e.updated_at,
     (SELECT GROUP_CONCAT(name||' ('||context||')',' | ') FROM
@@ -247,7 +294,12 @@ def _record_is_current(db: Database, kind: str, row: dict) -> bool:
         current = connection.execute(
             f"SELECT {','.join(fields)} FROM {table} WHERE id=?", (row["id"],)
         ).fetchone()
-    return current is not None and all(current[field] == row[field] for field in fields)
+        if current is None or any(current[field] != row[field] for field in fields):
+            return False
+        if kind == "project":
+            return (_project_relationships(connection, [row["id"]])[row["id"]]
+                    == row["relationships"])
+    return True
 
 
 def _preferences(db: Database, query: str) -> list[dict]:
@@ -318,6 +370,11 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECTS + 1,))]
+        if projects:
+            relationships = _project_relationships(
+                connection, [row["id"] for row in projects[:MAX_PROJECTS]])
+            for row in projects[:MAX_PROJECTS]:
+                row["relationships"] = relationships[row["id"]]
         events = [] if document_id or source_kind not in {"all", "life_event"} else [
             dict(row) for row in connection.execute(
                 EVENT_SELECT + " WHERE (? IS NULL OR e.date_local>=?) "
@@ -326,7 +383,11 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                    else "ORDER BY e.updated_at DESC,e.id DESC LIMIT ?"),
                 (from_date, from_date, to_date, to_date, MAX_EVENTS + 1))]
     limited = (len(rows) > MAX_PASSAGES or len(memories) > MAX_MEMORIES
-               or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS)
+               or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS
+               or any(len(row["relationships"][kind]) > MAX_PROJECT_RELATIONS_PER_KIND
+                      for row in projects[:MAX_PROJECTS] for kind in ("people", "aliases"))
+               or any(len(_project_embedding_body(row)) > 1200
+                      for row in projects[:MAX_PROJECTS]))
     freshness: dict[str, bool] = {}
     fresh = []
     stale = []
@@ -352,7 +413,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     events = events[:MAX_EVENTS]
     corpus = ([('document', row, row["text"]) for row in fresh]
               + [('memory', row, f'{row["source_ref"]}\n{row["text"]}') for row in memories]
-              + [('project', row, f'{row["project"]}\n{_project_body(row)}') for row in projects]
+              + [('project', row, _project_embedding_body(row)) for row in projects]
               + [('life_event', row, _event_body(row)) for row in events])
     if not corpus:
         if stale:
@@ -425,9 +486,12 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                                  "source": row["source_ref"], "excerpt": row["text"][:500],
                                  "policy": row["policy"], "similarity": round(score, 3)})
             elif kind == "project":
+                relationship_excerpt = _project_relationship_text(row)
                 selected.append({"kind": kind, "id": row["id"], "title": row["project"],
                                  "source": f'Arbeitsstand v{row["version"]}',
-                                 "excerpt": _project_body(row)[:500],
+                                 "excerpt": " · ".join(part for part in
+                                                     (relationship_excerpt, _project_body(row))
+                                                     if part)[:500],
                                  "version": row["version"], "similarity": round(score, 3)})
             else:
                 selected.append({"kind": kind, "id": row["id"], "title": row["title"],

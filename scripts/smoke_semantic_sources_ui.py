@@ -15,6 +15,8 @@ from smoke_ui import ROOT, port_free, stop_test_server
 sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
+from jarvis.project_aliases import ProjectAliasStore
+from jarvis.project_people import ProjectPeopleStore
 from jarvis.tasks import TaskStore
 from jarvis.work_states import WorkStateStore
 
@@ -38,6 +40,12 @@ def main() -> None:
         states = WorkStateStore(db, docs, TaskStore(db))
         project = states.create("Umzug", "Mietvertrag unterschrieben", "",
                                 "Schlüssel am Freitag abholen", [], [], [])
+        people = ProjectPeopleStore(db, states)
+        person = people.add(project["id"], project["version"], "Mira Weber",
+                            "reviewer", "Prüft die Nebenkosten", None)
+        ProjectAliasStore(db, states, people).add(
+            project["id"], project["version"], person["id"], person["version"],
+            "Mimi", "Rufname im Umzugsteam", None)
         document = docs.documents()[0]
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
@@ -63,6 +71,10 @@ def main() -> None:
                         expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände · 0 Lebensereignisse")).to_be_visible(timeout=120000)
                         expect(results.locator("article").filter(has_text="Gespräch vom Dienstag")).to_be_visible()
                         expect(results.locator("article").filter(has_text="Umzug")).to_contain_text("Arbeitsstand v1")
+                        expect(results.locator("article").filter(has_text="Umzug")).to_contain_text(
+                            "Projektperson: Mira Weber")
+                        expect(results.locator("article").filter(has_text="Umzug")).to_contain_text(
+                            "Personenalias: Mimi → Mira Weber")
                         expect(results.get_by_text("Ähnlichkeit", exact=False).first).to_be_visible()
                         assert "Kuchen.md" not in results.locator("article").first.inner_text()
                         assert not overflow_nodes(page), overflow_nodes(page)
