@@ -461,6 +461,35 @@ def test_modified_installed_package_is_blocked_until_reinstalled(tmp_path):
         assert client.get("/modules/sample_notes/entries").json() == ["preserved"]
 
 
+def test_upgrade_clears_previous_package_integrity_error(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "preserved"}).status_code == 200
+        (data_dir / "modules" / "sample_notes" / "ui.js").write_text(
+            "// changed after installation", encoding="utf-8")
+        assert "verändert" in client.get("/modules").json()[0]["error"]
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        manifest = source / "jarvis-module.json"
+        newer = json.loads(manifest.read_text(encoding="utf-8"))
+        newer["version"] = "0.2.0"
+        manifest.write_text(json.dumps(newer), encoding="utf-8")
+        response = client.post("/modules/sample_notes/upgrade", headers=headers,
+                               json={"path": str(source)})
+        assert response.status_code == 200, response.text
+        assert response.json()["error"] is None
+        assert client.get("/modules").json()[0]["error"] is None
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").json() == ["preserved"]
+
+
 def test_incomplete_installed_package_can_be_removed_without_losing_data(tmp_path):
     source_root = tmp_path / "source"
     install_fixture(source_root)

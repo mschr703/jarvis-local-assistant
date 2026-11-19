@@ -40,6 +40,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('status');
   const [modules, setModules] = useState<InstalledModule[]>([]);
   const [moduleError, setModuleError] = useState('');
+  const [moduleReloadRequired, setModuleReloadRequired] = useState(false);
   const [documentsOpened, setDocumentsOpened] = useState(false);
   const [unifiedSearchOpened, setUnifiedSearchOpened] = useState(false);
   const [fileGraphOpened, setFileGraphOpened] = useState(false);
@@ -208,6 +209,7 @@ export default function App() {
       </nav>
     </aside>
     <main>
+      {moduleReloadRequired && <section className="card" role="status"><strong>Modul aktualisiert.</strong> Lade Jarvis neu, damit die neue Moduloberfläche verwendet wird. <button onClick={() => window.location.reload()}>Jarvis neu laden</button></section>}
       {page === 'chat' && (quickCapture || captureError) && <section className="card" role="status">
         <div className="card-heading"><h3>Hotkey-Auswahl</h3><button onClick={() => { setQuickCapture(null); setCaptureError(''); }}>Schließen</button></div>
         {captureError && <p className="notice error">{captureError}</p>}
@@ -247,7 +249,7 @@ export default function App() {
         <p className="notice error" role="alert">Modulstatus nicht erreichbar: {moduleError}</p>}
       {['chat', 'drafts', 'research', 'activity'].includes(page) &&
         <ModelChoiceBanner key={page} task={page === 'drafts' ? 'draft' : page === 'research' ? 'research' : page === 'activity' ? 'plan' : 'chat'} />}
-      {page === 'status' ? null : page === 'modules' ? <ModuleManagerView modules={modules} onChanged={refreshModules} /> : page.startsWith('module:') ? (() => { const item = modules.find((candidate) => candidate.id === page.slice(7) && candidate.enabled); return item ? <ModuleHost key={item.id} module={item} /> : <ModuleManagerView modules={modules} onChanged={refreshModules} />; })() : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
+      {page === 'status' ? null : page === 'modules' ? <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page.startsWith('module:') ? (() => { const item = modules.find((candidate) => candidate.id === page.slice(7) && candidate.enabled); return item ? <ModuleHost key={item.id} module={item} /> : <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} />; })() : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
         page === 'documents' ? null :
         page === 'unified_search' ? null :
         page === 'file_graph' ? null :

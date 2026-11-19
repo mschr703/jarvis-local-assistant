@@ -263,6 +263,7 @@ class ModuleRegistry:
             if module_id in self._apps:
                 raise ValueError("Modul vor dem Update deaktivieren")
             upgraded = upgrade_package(source, self.directory.parent, self.db, module_id)
+            self._errors.pop(upgraded, None)
             self.refresh()
             return self._summary(upgraded)
 

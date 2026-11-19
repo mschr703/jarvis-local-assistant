@@ -102,6 +102,8 @@ def main() -> None:
                         page.get_by_role("button", name="Aktualisieren").click()
                         expect(page.get_by_text("Version 0.2.0", exact=False)).to_be_visible()
                         expect(page.get_by_role("status").get_by_text("Modul aktualisiert.", exact=False)).to_be_visible()
+                        page.get_by_role("button", name="Übersicht", exact=True).click()
+                        expect(page.get_by_role("status").get_by_text("Modul aktualisiert.", exact=False)).to_be_visible()
                         page.get_by_role("button", name="Jarvis neu laden").click()
                         page.get_by_role("button", name="Module", exact=True).click()
                         page.get_by_role("button", name="Aktivieren").click()

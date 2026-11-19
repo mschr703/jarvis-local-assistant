@@ -7,13 +7,12 @@ export type InstalledModule = {
   enabled: boolean; requested_enabled: boolean; error: string | null;
 };
 
-export function ModuleManagerView({ modules, onChanged }: {
-  modules: InstalledModule[]; onChanged: () => void;
+export function ModuleManagerView({ modules, onChanged, onUpgraded }: {
+  modules: InstalledModule[]; onChanged: () => void; onUpgraded: () => void;
 }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [source, setSource] = useState('');
-  const [reloadRequired, setReloadRequired] = useState(false);
   async function toggle(item: InstalledModule) {
     setBusy(item.id); setError('');
     try {
@@ -42,7 +41,7 @@ export function ModuleManagerView({ modules, onChanged }: {
       await api(`/modules/${encodeURIComponent(item.id)}/upgrade`, { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: source.trim() }) });
-      setSource(''); setReloadRequired(true); onChanged();
+      setSource(''); onUpgraded(); onChanged();
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(''); }
   }
@@ -58,7 +57,6 @@ export function ModuleManagerView({ modules, onChanged }: {
     <h2>Module</h2>
     <p className="intro">Installierte Erweiterungen lassen sich hier aktivieren und deaktivieren. Deaktivieren behält ihre Daten.</p>
     {error && <p className="notice error" role="alert">{error}</p>}
-    {reloadRequired && <p className="notice" role="status">Modul aktualisiert. Lade Jarvis neu, damit die neue Moduloberfläche verwendet wird.{' '}<button onClick={() => window.location.reload()}>Jarvis neu laden</button></p>}
     <section className="card">
       <h3>Lokales Paket installieren</h3>
       <p>Nur selbst geprüfte Paketordner verwenden. Der installierte Code läuft mit Jarvis-Prozessrechten.</p>
