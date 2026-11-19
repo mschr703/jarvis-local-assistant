@@ -166,6 +166,43 @@ def test_project_task_search_reports_bounded_candidates(tmp_path, monkeypatch):
     assert result["limited"] and result["counts"]["project"] == 1
 
 
+def test_explicit_project_file_name_search_hides_path_and_tracks_unlink(tmp_path):
+    db, _, states, _, document, _, project, file = sample(tmp_path)
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [document["id"]], [], [])
+    result = search(db, "Vertrag_Orion", "project")
+    assert result["counts"]["project"] == 1
+    hit = result["results"][0]
+    assert hit["id"] == project["id"]
+    assert "Projektdatei: Vertrag_Orion.md" in hit["excerpt"]
+    assert "Original und Freigabe im Arbeitsstand prüfen" in hit["excerpt"]
+    assert str(file.parent) not in hit["excerpt"]
+    file.unlink()
+    stale = search(db, "Vertrag_Orion", "project")
+    assert stale["results"][0]["id"] == project["id"]
+    assert "im Arbeitsstand prüfen" in stale["results"][0]["excerpt"]
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], [], [], [])
+    assert search(db, "Vertrag_Orion", "project")["results"] == []
+
+
+def test_project_file_search_reports_bounded_candidates(tmp_path, monkeypatch):
+    db, docs, states, folder, document, _, project, file = sample(tmp_path)
+    second = file.with_name("Kalkulation.md")
+    second.write_text("Eine weitere lokale Datei.", encoding="utf-8")
+    assert docs.index_folder(folder["id"])["indexed"] == 1
+    second_document = next(item for item in docs.documents()
+                           if item["path"] == str(second.resolve()))
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], [document["id"], second_document["id"]], [], [])
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_FILE_ROWS", 1)
+    result = search(db, "Orion", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
+
+
 def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monkeypatch):
     db, _, _, _, _, memory, project, _ = sample(tmp_path)
     with monkeypatch.context() as patch:

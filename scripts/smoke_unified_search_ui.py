@@ -37,18 +37,18 @@ def main() -> None:
         folder = docs.add_folder(str(allowed), "local_only")
         assert docs.index_folder(folder["id"])["indexed"] == 1
         memory = docs.add_memory("Orion braucht den Vertrag am Freitag.", "Eigene Notiz", "local_only")
+        document = docs.documents()[0]
         tasks = TaskStore(db)
         task = tasks.create("Budgetplanung", "", None, "Europe/Paris")
         states = WorkStateStore(db, docs, tasks)
         project = states.create("Projekt Orion", "Vertrag liegt vor",
-                                "", "Unterlagen sammeln", [], [task["id"]], [])
+                                "", "Unterlagen sammeln", [document["id"]], [task["id"]], [])
         people = ProjectPeopleStore(db, states)
         person = people.add(project["id"], project["version"], "Míra Weber",
                             "reviewer", "Prüft die Heizkosten", None)
         ProjectAliasStore(db, states, people).add(
             project["id"], project["version"], person["id"], person["version"],
             "Mími", "Rufname aus eigener Angabe", None)
-        document = docs.documents()[0]
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -69,12 +69,13 @@ def main() -> None:
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         results = page.get_by_role("region", name="Suchergebnisse")
                         expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=30000)
-                        expect(results.locator("article").filter(has_text="Vertrag_Orion.md")).to_be_visible()
+                        expect(results.locator("article").filter(
+                            has_text="Dokument · Vertrag_Orion.md")).to_be_visible()
                         expect(results.get_by_text("Eigene Notiz", exact=False)).to_be_visible()
                         expect(results.get_by_text("Arbeitsstand v1", exact=False)).to_be_visible()
                         expect(results.get_by_text("SHA-256", exact=False)).to_be_visible()
                         for label, kind, source_id in (
-                            ("Vertrag_Orion.md", "document", document["id"]),
+                            ("Dokument · Vertrag_Orion.md", "document", document["id"]),
                             ("Eigene Notiz", "memory", memory["id"]),
                             ("Arbeitsstand v1", "project", project["id"]),
                         ):
@@ -111,7 +112,8 @@ def main() -> None:
                         page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Gemeinsame Suche").fill("Was ist über Orion bekannt?")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
-                        document_hit = results.locator("article").filter(has_text="Vertrag_Orion.md")
+                        document_hit = results.locator("article").filter(
+                            has_text="Dokument · Vertrag_Orion.md")
                         document_hit.get_by_role("button", name="Mit dieser Fundstelle Entwurf starten").click()
                         expect(page.get_by_role("heading", name="Entwürfe", exact=True)).to_be_visible()
                         expect(page.get_by_text("1 Fundstelle(n) ausgewählt.", exact=False)).to_be_visible()
@@ -121,7 +123,11 @@ def main() -> None:
                         assert not overflow_nodes(page), overflow_nodes(page)
                         page.get_by_label("Gemeinsame Suche").fill("Vertrag_Orion")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
-                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(timeout=30000)
+                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=30000)
+                        project_file_hit = results.locator("article").filter(
+                            has_text="Projektdatei: Vertrag_Orion.md")
+                        expect(project_file_hit).to_contain_text("Original und Freigabe im Arbeitsstand prüfen")
+                        assert str(allowed) not in project_file_hit.inner_text()
                         page.get_by_label("Gemeinsame Suche").fill("Saturn")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         expect(results.get_by_text("Keine passenden gespeicherten Quellen gefunden.")).to_be_visible(timeout=30000)
@@ -139,7 +145,8 @@ def main() -> None:
                         expect(page.get_by_text("Die gesuchte Quelle ist nicht mehr vorhanden.", exact=False)).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()
                         file.write_text("Projekt Orion: Der Vertrag wurde geändert.", encoding="utf-8")
-                        results.locator("article").filter(has_text="Vertrag_Orion.md").get_by_role(
+                        results.locator("article").filter(
+                            has_text="Dokument · Vertrag_Orion.md").get_by_role(
                             "button", name="Quelle öffnen").click()
                         expect(page.get_by_text("Das Original hat sich seit der Suche geändert", exact=False)).to_be_visible()
                         page.get_by_role("button", name="Suche", exact=True).click()
