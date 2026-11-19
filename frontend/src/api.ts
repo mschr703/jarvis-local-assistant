@@ -1,0 +1,274 @@
+export type Health = { status: string; provider: string; model: string | null; configured: boolean; message: string };
+export type ChatSummary = { id: string; title: string; created_at: string; updated_at: string;
+  archived_at: string | null; match_preview?: string | null; match_message_id?: string | null };
+export type Message = {
+  id: string; role: 'user' | 'assistant'; content: string; status: string; created_at: string;
+  provider?: string | null; model?: string | null; input_tokens?: number | null;
+  output_tokens?: number | null; cost_usd?: number | null; cost_kind?: string | null;
+  compaction_version?: number | null;
+  context_estimated_tokens?: number | null; context_token_budget?: number | null;
+  context_omitted_count?: number | null; context_latest_omitted_id?: string | null;
+  rule_version?: number | null;
+  skill_id?: string | null; skill_name?: string | null;
+  skill_version?: number | null; skill_hash?: string | null;
+  usage_id?: string | null; usage_duration_seconds?: number | null;
+  memory_context?: { proposal_id: string; memory_id: string; text_snapshot: string;
+    source_quote: string; used_at: string }[];
+  attachments?: ChatAttachment[];
+  evaluation?: { message_id: string; verdict: string; source_quality: string; reason: string;
+    regression_case: number; expected_result: string; version: number; updated_at: string } | null;
+};
+export type ChatAttachment = { id: string; filename: string; sha256: string;
+  size: number; message_id?: string | null; status?: string };
+export type Chat = ChatSummary & { messages: Message[] };
+export type ChatCompaction = { chat_id: string; version: number;
+  covered_message_ids: string[]; entries: { kind: 'goal' | 'decision' | 'open_question' | 'source';
+    text: string; message_ids: string[] }[];
+  provider: string; model: string;
+  created_by: 'ollama' | 'user_remove' | 'user_reset'; created_at: string };
+
+let csrf: string | null = null;
+
+async function ensureSession(): Promise<string> {
+  if (csrf) return csrf;
+  const response = await fetch('/api/session', { credentials: 'same-origin' });
+  if (!response.ok) throw new Error('Lokale Sitzung konnte nicht gestartet werden');
+  csrf = (await response.json() as { csrf: string }).csrf;
+  return csrf;
+}
+
+async function requestWithSession(path: string, options?: RequestInit): Promise<Response> {
+  let token = await ensureSession();
+  const send = (value: string) => {
+    const headers = new Headers(options?.headers);
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    headers.set('X-Jarvis-CSRF', value);
+    return fetch(`/api${path}`, { ...options, headers, credentials: 'same-origin' });
+  };
+  let response = await send(token);
+  if (response.status === 401) {
+    csrf = null;
+    token = await ensureSession();
+    response = await send(token);
+  }
+  return response;
+}
+
+async function responseError(response: Response): Promise<Error> {
+  const body = await response.json().catch(() => ({})) as { detail?: unknown };
+  if (typeof body.detail === 'string' && body.detail.trim()) return new Error(body.detail);
+  if (Array.isArray(body.detail)) {
+    const messages = body.detail.slice(0, 3).map((item: unknown) => {
+      if (!item || typeof item !== 'object') return '';
+      const message = (item as { msg?: unknown }).msg;
+      return typeof message === 'string' ? message : '';
+    }).filter(Boolean);
+    if (messages.length) return new Error(`Ungültige Eingabe: ${messages.join('; ')}`);
+  }
+  return new Error(`HTTP ${response.status}`);
+}
+
+export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await requestWithSession(path, options);
+  if (!response.ok) throw await responseError(response);
+  return response.json() as Promise<T>;
+}
+
+export async function verifiedDocumentForLocalChat(documentId: string,
+  expectedPath: string, expectedSha256: string): Promise<File> {
+  const item = await api<{ path: string; size: number; sha256: string | null;
+    status: string; excluded: number }>(`/documents/${encodeURIComponent(documentId)}`);
+  if (item.status !== 'indexed' || item.excluded || item.path !== expectedPath
+      || item.sha256 !== expectedSha256)
+    throw new Error('Der Suchtreffer ist nicht mehr aktuell. Erneut suchen oder das Dokument neu indexieren.');
+  const filename = item.path.split(/[\\/]/).at(-1) || '';
+  if (!/\.(?:txt|md|markdown|docx|pdf)$/i.test(filename))
+    throw new Error('Für den lokalen Chat werden nur TXT, Markdown, DOCX und Text-PDF unterstützt.');
+  if (!filename || filename.length > 120 || /[<>:"|?*\x00-\x1f]/.test(filename))
+    throw new Error('Der Dateiname ist für einen Chatanhang nicht geeignet.');
+  if (!Number.isSafeInteger(item.size) || item.size <= 0 || item.size > 512 * 1024)
+    throw new Error('Der lokale Chatanhang muss zwischen 1 Byte und 512 KiB groß sein.');
+  const response = await requestWithSession(`/documents/${encodeURIComponent(documentId)}/original`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  const declared = Number(response.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > 512 * 1024)
+    throw new Error('Die Originaldatei überschreitet 512 KiB.');
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength !== item.size)
+    throw new Error('Die Originaldatei hat sich während der Übernahme geändert. Erneut suchen.');
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const sha256 = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  if (sha256 !== expectedSha256)
+    throw new Error('Die Originaldatei stimmt nicht mehr mit dem Suchtreffer überein. Erneut suchen.');
+  return new File([bytes], filename, { type: 'application/octet-stream' });
+}
+
+export async function downloadDocumentPackage(documentIds: string[]): Promise<Blob> {
+  const response = await requestWithSession('/documents/package', {
+    method: 'POST', body: JSON.stringify({ document_ids: documentIds }),
+  });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function downloadPdfIndexText(documentId: string): Promise<Blob> {
+  const response = await requestWithSession(
+    `/documents/${encodeURIComponent(documentId)}/index-text`, { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function downloadChatArchive(chatId: string): Promise<Blob> {
+  const response = await requestWithSession(
+    `/chats/${encodeURIComponent(chatId)}/export`, { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function downloadMemoryTimeline(query: string, fromDate: string,
+  toDate: string): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('q', query.trim());
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const response = await requestWithSession(`/memory-events/export?${params.toString()}`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function downloadMemoryAlbum(eventId: string): Promise<Blob> {
+  const response = await requestWithSession(`/memory-events/${encodeURIComponent(eventId)}/album`,
+    { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
+export async function verifiedSearchDocumentForLocalChat(documentId: string,
+  expectedPath: string, expectedSha256: string): Promise<File> {
+  if (!/\.pdf$/i.test(expectedPath))
+    return verifiedDocumentForLocalChat(documentId, expectedPath, expectedSha256);
+  const item = await api<{ path: string; sha256: string | null;
+    status: string; excluded: number }>(`/documents/${encodeURIComponent(documentId)}`);
+  if (item.status !== 'indexed' || item.excluded || item.path !== expectedPath
+      || item.sha256 !== expectedSha256)
+    throw new Error('Der PDF-Treffer ist nicht mehr aktuell. Erneut suchen oder das Dokument neu indexieren.');
+  const filename = item.path.split(/[\\/]/).at(-1) || '';
+  if (!filename || filename.length > 120 || /[<>:"|?*\x00-\x1f]/.test(filename))
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang nicht geeignet.');
+  const blob = await downloadPdfIndexText(documentId);
+  if (!blob.size || blob.size > 512 * 1024)
+    throw new Error('Der geprüfte PDF-Indextext ist für einen Chatanhang zu groß.');
+  const content = await blob.text();
+  const header = `Jarvis Local · geprüfter PDF-Indextext\nOriginaldatei: ${filename}\nDokument-ID: ${documentId}\nOriginal SHA-256: ${expectedSha256}\n`;
+  if (!content.startsWith(header) || !/\n=== Seite [1-9]\d* ===\n/.test(content)
+      || content.includes('\0'))
+    throw new Error('Der PDF-Indextext passt nicht mehr zum gewählten Suchtreffer. Erneut suchen.');
+  if (content.trim().length > 8000)
+    throw new Error('Der PDF-Indextext überschreitet 8.000 Zeichen für einen lokalen Chat. Eine einzelne Fundstelle wählen.');
+  const chatFilename = `${filename.replace(/\.pdf$/i, '')}-indextext.txt`;
+  if (chatFilename.length > 120)
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang zu lang.');
+  return new File([content], chatFilename, { type: 'text/plain' });
+}
+
+export async function verifiedPdfPassageForLocalChat(documentId: string,
+  passageId: number, expectedPath: string, expectedSha256: string): Promise<File> {
+  const filename = expectedPath.split(/[\\/]/).at(-1) || '';
+  if (!/\.pdf$/i.test(filename) || filename.length > 120
+      || /[<>:"|?*\x00-\x1f]/.test(filename)
+      || !Number.isSafeInteger(passageId) || passageId <= 0
+      || !/^[0-9a-f]{64}$/.test(expectedSha256))
+    throw new Error('Der PDF-Treffer ist für einen lokalen Chatanhang nicht geeignet.');
+  const params = new URLSearchParams({ expected_sha256: expectedSha256 });
+  const item = await api<{ document_id: string; passage_id: number; filename: string;
+    sha256: string; page: number; text: string }>(
+    `/documents/${encodeURIComponent(documentId)}/passages/${passageId}/chat-text?${params}`,
+    { cache: 'no-store' });
+  if (item.document_id !== documentId || item.passage_id !== passageId
+      || item.filename !== filename || item.sha256 !== expectedSha256
+      || !Number.isSafeInteger(item.page) || item.page < 1
+      || typeof item.text !== 'string' || !item.text.trim()
+      || item.text.length > 8000 || item.text.includes('\0'))
+    throw new Error('Die PDF-Fundstelle passt nicht mehr zum Suchtreffer. Erneut suchen.');
+  const content = `Jarvis Local · geprüfte PDF-Fundstelle\nOriginaldatei: ${filename}\nDokument-ID: ${documentId}\nOriginal SHA-256: ${expectedSha256}\nFundstellen-ID: ${passageId}\n\n=== Seite ${item.page} ===\n${item.text}`;
+  if (new TextEncoder().encode(content).length > 512 * 1024)
+    throw new Error('Die PDF-Fundstelle ist für einen Chatanhang zu groß.');
+  const chatFilename = `${filename.replace(/\.pdf$/i, '')}-fundstelle-${passageId}.txt`;
+  if (chatFilename.length > 120)
+    throw new Error('Der PDF-Dateiname ist für einen Chatanhang zu lang.');
+  return new File([content], chatFilename, { type: 'text/plain' });
+}
+
+export type PdfChatPassage = { documentId: string; passageId: number;
+  path: string; sha256: string };
+
+export async function verifiedPdfPassagesForLocalChat(
+  passages: PdfChatPassage[]): Promise<File[]> {
+  if (!passages.length || passages.length > 3
+      || new Set(passages.map((item) => item.passageId)).size !== passages.length)
+    throw new Error('Höchstens drei verschiedene PDF-Fundstellen auswählen.');
+  const files: File[] = [];
+  for (const item of passages)
+    files.push(await verifiedPdfPassageForLocalChat(
+      item.documentId, item.passageId, item.path, item.sha256));
+  return files;
+}
+
+export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
+  text: string; audio_seconds: number; stt_seconds: number; model: string;
+}> {
+  const response = await requestWithSession('/voice/transcribe', {
+    method: 'POST', body: audio, signal, headers: { 'Content-Type': audio.type },
+  });
+  if (!response.ok) throw await responseError(response);
+  return response.json();
+}
+
+export async function uploadChatAttachment(chatId: string, file: File,
+  signal: AbortSignal): Promise<ChatAttachment> {
+  const response = await requestWithSession(
+    `/chats/${chatId}/attachments?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST', body: file, signal,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+  if (!response.ok) throw await responseError(response);
+  return response.json() as Promise<ChatAttachment>;
+}
+
+export async function streamChat(
+  chatId: string, content: string, signal: AbortSignal, allowCloud: boolean,
+  onEvent: (name: string, payload: Record<string, unknown>) => void, skillId: string | null = null,
+  memoryProposalIds: string[] = [], attachmentIds: string[] = [],
+): Promise<void> {
+  const response = await requestWithSession(`/chats/${chatId}/stream`, {
+    method: 'POST', body: JSON.stringify({ content, allow_cloud: allowCloud, skill_id: skillId,
+      memory_proposal_ids: memoryProposalIds, attachment_ids: attachmentIds }), signal,
+    credentials: 'same-origin',
+  });
+  if (!response.ok) throw await responseError(response);
+  if (!response.body) throw new Error('Antwortstream fehlt');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let completed = false;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary: number;
+    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const name = block.match(/^event: (.+)$/m)?.[1];
+      const data = block.match(/^data: (.+)$/m)?.[1];
+      if (!name || !data) continue;
+      const payload = JSON.parse(data) as Record<string, unknown>;
+      onEvent(name, payload);
+      if (name === 'done') completed = true;
+      if (name === 'error') throw new Error(String(payload.message || 'Modellfehler'));
+    }
+  }
+  if (!completed) throw new Error('Antwortstream wurde ohne Abschluss beendet');
+}

@@ -1,0 +1,50 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.7'
+          python-version: '3.13'
+          enable-cache: 'false'
+      - name: Install Python and locked backend dependencies
+        run: |
+          uv python install 3.13
+          uv sync --project backend --frozen
+      - name: Check public files
+        run: uv run --project backend python scripts/audit_public.py
+      - name: Lint Python
+        run: uv run --project backend ruff check backend scripts
+      - name: Test backend
+        run: uv run --project backend pytest backend/tests -q
+
+  frontend:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/setup@9a03ad2bcf699975e2bfd1b2b9d3c54f76b1a56b # v3
+        with:
+          version: '11.25.0'
+          runtime: node@24
+          working-directory: frontend
+          require-lockfile: true
+      - name: Test frontend
+        run: pnpm --dir frontend test
+      - name: Build frontend
+        run: pnpm --dir frontend build

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis · Tab übernehmen</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>Tab an Jarvis</h1>
+    <p id="status" role="status">Prüfe Verbindung…</p>
+    <section id="pairing" hidden>
+      <p>In Jarvis unter „Einstellungen“ einen Kopplungscode erzeugen und hier einfügen.</p>
+      <label>Kopplungscode <input id="code" autocomplete="off" spellcheck="false"></label>
+      <button id="pair">Koppeln</button>
+    </section>
+    <section id="capture" hidden>
+      <p class="caption">Vorschau der bewussten Übergabe</p>
+      <strong id="source-title"></strong>
+      <p id="source-url" class="url"></p>
+      <label>Markierter Text <textarea id="selection" rows="4" readonly></textarea></label>
+      <label>Aufgabe <input id="title" maxlength="300" placeholder="Was soll Jarvis damit tun?"></label>
+      <label class="check"><input id="include-page" type="checkbox"> Seitentext zusätzlich übernehmen (höchstens 20.000 Zeichen)</label>
+      <p id="page-preview" class="preview" hidden></p>
+      <button id="send">Als Aufgabe speichern</button>
+      <p class="hint">Es wird kein Modell gestartet. Jarvis speichert die Aufgabe und den Quellenlink lokal.</p>
+    </section>
+    <p id="result" role="status"></p>
+    <a id="open-jarvis" href="http://127.0.0.1:5173" target="_blank" rel="noopener noreferrer">Jarvis öffnen</a>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

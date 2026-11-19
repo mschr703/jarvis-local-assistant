@@ -1,0 +1,43 @@
+[project]
+name = "jarvis-local"
+version = "0.1.0"
+description = "Lokaler Jarvis-MVP"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic-settings>=2.8,<3",
+  "httpx>=0.28,<1",
+  "pypdf>=6.21.2,<7",
+  "langgraph>=1,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "langchain-openrouter>=0.1,<1",
+  "tzdata>=2026.1",
+  "playwright>=1.64.1",
+  "truststore>=0.10.5,<1",
+  "cryptography>=46,<47",
+  "defusedxml==0.7.1",
+  "pillow==13.0.0",
+  "graphifyy==0.9.101",
+  "agent-reach @ https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip",
+  "pypdfium2>=5,<6",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.11,<1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["jarvis"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
