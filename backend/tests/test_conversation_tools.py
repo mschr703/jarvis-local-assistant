@@ -92,6 +92,24 @@ def test_tool_choice_rejects_invalid_arguments_and_hallucinated_names():
             conversation_tools.parse_choices(value, allowed)
 
 
+def test_follow_up_planner_sees_previous_read_source_and_subject():
+    history = [
+        {"role": "user", "content": "Was weißt du über Projekt Orion?", "status": "complete"},
+        {"role": "assistant", "content": "Projekt Orion: Bericht lesen.",
+         "status": "complete", "tool_uses": [
+             {"name": "context_lookup__search_personal_context", "run_id": "run-1"}]},
+    ]
+    messages = conversation_tools.selection_messages(
+        "Und was muss ich dafür tun?", history,
+        [{"name": "context_lookup__search_personal_context", "schema": {}}],
+        "Europe/Berlin")
+    payload = json.loads(messages[1]["content"])
+    assert "Projekt Orion" in payload["recent_conversation"][0]["content"]
+    assert payload["recent_conversation"][1]["read_tools_used"] == [
+        "context_lookup__search_personal_context"]
+    assert "Anschlussfragen" in messages[0]["content"]
+
+
 @pytest.mark.asyncio
 async def test_chat_can_read_two_distinct_modules_in_one_selection(tmp_path, monkeypatch):
     async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
