@@ -25,10 +25,12 @@ type Contact = { id: string; name: string; context: string; relationship: string
 type ContactForm = { name: string; context: string; relationship: string };
 const emptyForm = (): ContactForm => ({ name: '', context: '', relationship: '' });
 
-export default function ContactView({ visible, requestedContact, onPrepareTask, onOpenEvent }: {
+export default function ContactView({ visible, requestedContact, onPrepareTask, onOpenEvent,
+  onPrepareDraft }: {
   visible: boolean; onPrepareTask: (title: string) => void;
   requestedContact?: { id: string; serial: number } | null;
   onOpenEvent: (eventId: string) => void;
+  onPrepareDraft: (contactId: string, version: number) => void;
 }) {
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -161,7 +163,8 @@ export default function ContactView({ visible, requestedContact, onPrepareTask, 
     </section>
     {selected && <section className="card"><h3>{selected.name} · {selected.context}</h3>
       <p>{selected.relationship || 'Keine Beziehung eingetragen'}</p>
-      <div className="item-actions"><button disabled={busy} onClick={() => { setEditing(true); setForm({ name: selected.name, context: selected.context, relationship: selected.relationship }); }}>Kontakt bearbeiten</button>
+      <div className="item-actions"><button disabled={busy} onClick={() => onPrepareDraft(selected.id, selected.version)}>Nachrichtentwurf vorbereiten</button>
+        <button disabled={busy} onClick={() => { setEditing(true); setForm({ name: selected.name, context: selected.context, relationship: selected.relationship }); }}>Kontakt bearbeiten</button>
         <button disabled={busy} onClick={() => void (async () => {
           if (!window.confirm(`Kontakt „${selected.name}“ mit allen Notizen löschen?`)) return;
           const done = await change(() => api(`/contacts/${encodeURIComponent(selected.id)}?expected_version=${selected.version}`, { method: 'DELETE' }), 'Kontakt gelöscht.', undefined);

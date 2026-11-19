@@ -256,7 +256,7 @@ export default function App() {
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}
-      {contactsOpened && <div hidden={page !== 'contacts'}><ContactView visible={page === 'contacts'} requestedContact={requestedContact} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onOpenEvent={(id) => { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); }} /></div>}
+      {contactsOpened && <div hidden={page !== 'contacts'}><ContactView visible={page === 'contacts'} requestedContact={requestedContact} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onOpenEvent={(id) => { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); }} onPrepareDraft={(contactId, version) => { setSelectedSources([]); setDraftComposer((current) => ({ ...current, kind: 'text', brief: 'Schreibe eine persönliche Nachricht an den ausgewählten Kontakt.', inputText: '', selectedSamples: [], allowCloud: false, recipientContactId: contactId, recipientExpectedVersion: version, recipientNoteIds: [], recipientEvents: [] })); navigate('drafts'); }} /></div>}
       {draftRulesOpened && <div hidden={page !== 'draft_rules'}><ChatRulesView visible={page === 'draft_rules'} scope="draft" /></div>}
       {planRulesOpened && <div hidden={page !== 'plan_rules'}><ChatRulesView visible={page === 'plan_rules'} scope="plan" /></div>}
       </Suspense>

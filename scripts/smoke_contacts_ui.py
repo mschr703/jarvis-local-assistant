@@ -114,6 +114,13 @@ def main() -> None:
                         page.get_by_role("button", name="Kontakte", exact=True).click()
                         expect(page.get_by_text("Erinnerungsaufgabe:", exact=False))\
                             .to_contain_text("Aufgabe geändert")
+                        page.get_by_role("button", name="Nachrichtentwurf vorbereiten").click()
+                        expect(page.get_by_label("Entwurfstyp")).to_have_value("text")
+                        expect(page.get_by_label("Empfänger auswählen").locator("option:checked"))\
+                            .to_have_text("Alex · München privat")
+                        expect(page.get_by_label("Schreibauftrag")).to_have_value(
+                            "Schreibe eine persönliche Nachricht an den ausgewählten Kontakt.")
+                        expect(page.get_by_label("Ereignis", exact=False)).to_have_count(0)
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
@@ -125,6 +132,7 @@ def main() -> None:
                                           "note": "created_and_corrected",
                                           "plan": "created_completed_and_corrected",
                                           "reminder": "prepared_linked_and_changed",
+                                          "draft": "prepared_without_model_call",
                                           "search": "notes_and_plans",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:
