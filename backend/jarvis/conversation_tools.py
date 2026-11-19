@@ -96,7 +96,7 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
         raise ValueError("Lokale Werkzeuge dürfen nur mit Ollama im Chat verwendet werden")
     try:
         capabilities = read_capabilities(engine)
-    except Exception:
+    except Exception:  # noqa: BLE001 - a faulty module callback must not break chat
         return ToolContext([], "Aktive lokale Werkzeuge konnten nicht geladen werden. "
                            "Das sagt nichts darüber aus, ob persönliche Einträge vorhanden sind. "
                            "Bitte um einen neuen Versuch.")
@@ -121,7 +121,7 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
     for name, args in choices:
         try:
             run = await run_in_threadpool(engine.start, name, args)
-        except Exception:
+        except Exception:  # noqa: BLE001 - module handlers are an isolation boundary
             observations.append({"tool": name, "status": "invalid_or_unavailable"})
             break
         status = str(run["status"])
