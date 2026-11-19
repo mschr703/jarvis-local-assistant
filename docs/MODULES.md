@@ -94,6 +94,9 @@ Modul unter **Aktivität**; neue Läufe werden nach Deaktivierung abgewiesen.
 Die normale Freigabe für schreibende Werkzeuge bleibt bestehen. Ein bereits
 begonnener Lauf kann abschließen; beim späteren Start wird der Aktivierungsstatus
 erneut geprüft.
+Jarvis prüft alle Werkzeugdefinitionen vor der Registrierung. Scheitert ein Paket
+an einem ungültigen oder kollidierenden Werkzeug, werden bereits registrierte
+Werkzeuge dieses Aktivierungsversuchs zurückgenommen; der Kern bleibt nutzbar.
 
 `ui.js` registriert das im Manifest genannte Custom Element. Der Kern lädt es
 erst, wenn das Modul aktiv und sein Navigationspunkt geöffnet ist. Er übergibt

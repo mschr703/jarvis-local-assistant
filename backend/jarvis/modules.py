@@ -433,27 +433,51 @@ class ModuleRegistry:
                 raise TypeError("Ungültiges Modulwerkzeug")
             if not MODULE_ID.fullmatch(definition.name):
                 raise ValueError("Ungültiger Modulwerkzeugname")
+            if (not isinstance(definition.schema, type)
+                    or not issubclass(definition.schema, BaseModel)
+                    or not callable(definition.handler)):
+                raise TypeError("Modulwerkzeug benötigt Eingabeschema und Handler")
+            if (not isinstance(definition.scope, str) or not definition.scope
+                    or len(definition.scope) > 100 or definition.effect not in
+                    ("read", "local_open", "write")
+                    or type(definition.timeout_s) is not int
+                    or not 1 <= definition.timeout_s <= 300
+                    or type(definition.cancel_aware) is not bool):
+                raise ValueError("Ungültige Modulwerkzeug-Eigenschaften")
             name = f"{module_id}__{definition.name}"
             if name in planned or len(name) > 80:
                 raise ValueError("Doppelter oder zu langer Modulwerkzeugname")
             planned[name] = definition
+        specs = {name: (definition.schema.model_json_schema(), definition.scope,
+                        definition.effect, definition.timeout_s, definition.cancel_aware)
+                 for name, definition in planned.items()}
         for name, definition in planned.items():
-            spec = (definition.schema.model_json_schema(), definition.scope, definition.effect,
-                    definition.timeout_s, definition.cancel_aware)
+            spec = specs[name]
             if name in self._tool_specs:
                 if self._tool_owners[name] != module_id:
                     raise ValueError("Modulwerkzeugname kollidiert mit anderem Modul")
                 if self._tool_specs[name] != spec:
                     raise ValueError("Modulwerkzeug-Schema wurde geändert; Jarvis neu starten")
-            else:
+        new_names = []
+        try:
+            for name, definition in planned.items():
+                if name in self._tool_specs:
+                    continue
                 registered = replace(
                     definition, name=name,
                     handler=lambda *args, _name=name, **kwargs: self._dispatch_tool(
                         _name, *args, **kwargs),
                     enabled=lambda _id=module_id: self.app_for(_id) is not None)
                 self.engine.register(registered)
-                self._tool_specs[name] = spec
+                self._tool_specs[name] = specs[name]
                 self._tool_owners[name] = module_id
+                new_names.append(name)
+        except Exception:
+            for name in new_names:
+                self.engine.definitions.pop(name, None)
+                self._tool_specs.pop(name, None)
+                self._tool_owners.pop(name, None)
+            raise
         for name, definition in planned.items():
             self._tool_handlers[name] = definition.handler
 

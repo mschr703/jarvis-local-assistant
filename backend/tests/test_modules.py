@@ -297,6 +297,68 @@ def test_module_tool_names_with_double_underscore_stay_separate(tmp_path):
         assert result.status_code == 200 and result.json()["status"] == "succeeded"
 
 
+def test_invalid_module_tool_does_not_leave_partial_registration(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    entry = source / "module.py"
+    invalid = SAMPLE_MODULE.replace(
+        'scope="local_module", effect="read")]',
+        'scope="local_module", effect="read"),\n'
+        '            ToolDefinition("bad_tool", ListArgs, list_entries,\n'
+        '                           scope="local_module", effect="read", timeout_s=0)]')
+    assert invalid != SAMPLE_MODULE
+    entry.write_text(invalid, encoding="utf-8")
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 409
+        assert "sample_notes__list_entries" not in client.app.state.engine.definitions
+        assert "sample_notes__bad_tool" not in client.app.state.engine.definitions
+        assert client.get("/chats").status_code == 200
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 200
+        entry.write_text(SAMPLE_MODULE, encoding="utf-8")
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert "sample_notes__list_entries" in client.app.state.engine.definitions
+
+
+def test_module_registration_rolls_back_if_a_later_tool_collides(tmp_path, monkeypatch):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    entry = source / "module.py"
+    two_tools = SAMPLE_MODULE.replace(
+        'scope="local_module", effect="read")]',
+        'scope="local_module", effect="read"),\n'
+        '            ToolDefinition("other_tool", ListArgs, list_entries,\n'
+        '                           scope="local_module", effect="read")]')
+    assert two_tools != SAMPLE_MODULE
+    entry.write_text(two_tools, encoding="utf-8")
+    with client_for(tmp_path / "data") as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        engine = client.app.state.engine
+        register = engine.register
+
+        def reject_second(tool):
+            if tool.name == "sample_notes__other_tool":
+                raise ValueError("Werkzeugname belegt")
+            return register(tool)
+
+        monkeypatch.setattr(engine, "register", reject_second)
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 409
+        assert "sample_notes__list_entries" not in engine.definitions
+        monkeypatch.setattr(engine, "register", register)
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert "sample_notes__list_entries" in engine.definitions
+        assert "sample_notes__other_tool" in engine.definitions
+
+
 def test_module_can_be_installed_and_removed_through_local_api(tmp_path):
     source_root = tmp_path / "source"
     install_fixture(source_root)
