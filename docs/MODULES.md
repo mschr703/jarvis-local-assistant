@@ -166,3 +166,5 @@ Entfernen/Wiederinstallieren mit erhaltenen Daten, die Neulade-Aufforderung nach
 Update und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
 Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
 beide Module gleichzeitig in der Jarvis-Übersicht und im echten Edge-Browser.
+Die private Windows-CI führt den Zwei-Modul-Edge-Pfad bei jedem Push gegen einen
+frisch geklonten öffentlichen Kern aus; dafür ist kein Modellserver nötig.
