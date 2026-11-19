@@ -53,7 +53,7 @@ def main() -> None:
                         page.get_by_role("button", name="Kontakt anlegen").click()
                         expect(page.get_by_role("heading", name="Alex · Arbeit")).to_be_visible()
                         page.get_by_label("Kontakte durchsuchen").fill("Museum")
-                        page.get_by_role("button", name="Suchen").click()
+                        page.get_by_role("button", name="Suchen", exact=True).click()
                         rows = page.locator(".item-list .item-row").filter(has_text="Alex")
                         expect(rows).to_have_count(1)
                         expect(rows.first).to_contain_text("München")
@@ -80,7 +80,7 @@ def main() -> None:
                         expect(page.get_by_text("Kunstmuseum besuchen", exact=True))\
                             .to_be_visible()
                         page.get_by_label("Kontakte durchsuchen").fill("Kunstmuseum")
-                        page.get_by_role("button", name="Suchen").click()
+                        page.get_by_role("button", name="Suchen", exact=True).click()
                         expect(page.locator(".item-list .item-row").filter(has_text="Alex"))\
                             .to_have_count(1)
                         page.locator(".item-row").filter(has_text="Kunstmuseum besuchen")\

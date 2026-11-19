@@ -15,6 +15,7 @@ from smoke_ui import ROOT, port_free, stop_test_server
 sys.path.insert(0, str(ROOT / "backend"))
 from jarvis.contacts import ContactStore
 from jarvis.db import Database
+from jarvis.memory_events import MemoryEventStore
 
 
 def main() -> None:
@@ -30,6 +31,9 @@ def main() -> None:
         contacts.add_note(private["id"], "Wir lieben Kunstmuseen")
         plan = contacts.add_plan(private["id"], "Museum besuchen", "Am Samstag")
         contacts.add_plan(work["id"], "Quartalsbericht", "Im Büro")
+        events = MemoryEventStore(db)
+        trip = events.create("2024-08-12", "Sommerwochenende", "Am Fluss", "Lyon")
+        events.link_contact(trip["id"], private["id"], 1)
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama",
                            JARVIS_OLLAMA_MODEL="fixture")
@@ -70,12 +74,26 @@ def main() -> None:
                         results = page.get_by_role("region", name="Sinngemäße Kontakttreffer")
                         expect(results).to_contain_text("Galerie besuchen", timeout=120000)
                         assert "Museum besuchen" not in results.locator(".item-row").first.inner_text()
+                        page.get_by_label("Kontakte durchsuchen").fill(
+                            "Mit wem war ich am Fluss in Lyon?")
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        results = page.get_by_role("region", name="Sinngemäße Kontakttreffer")
+                        expect(results.locator(".item-row").first)\
+                            .to_contain_text("Alex · München privat", timeout=120000)
+                        expect(results.locator(".item-row").first).to_contain_text(
+                            "Lyon: Sommerwochenende")
+                        events.unlink_contact(trip["id"], private["id"], 2)
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        results = page.get_by_role("region", name="Sinngemäße Kontakttreffer")
+                        expect(results).to_contain_text("2 Kontakte geprüft", timeout=120000)
+                        assert "Sommerwochenende" not in results.inner_text()
                         assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"same_name": "separate_contexts",
                                           "local_model": "embeddinggemma:300m",
-                                          "plan_update": "fresh", "source": "opened",
+                                          "plan_update": "fresh", "event_link": "found_then_removed",
+                                          "source": "opened",
                                           "mobile_width": "fits", "cloud_calls": 0}))
                     finally:
                         browser.close()

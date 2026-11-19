@@ -123,7 +123,7 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
         <button disabled={busy || query.trim().length < 2 || query.trim().length > 160}
           onClick={() => void runSemantic()}>
           {busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button></div>
-      <small>Die sinngemäße Frage braucht 2–160 Zeichen und lokal Ollama mit embeddinggemma:300m. Sie prüft höchstens 30 zuletzt geänderte Kontakte mit bis zu drei Notizen und Vorhaben je Person.</small></div>
+      <small>Die sinngemäße Frage braucht 2–160 Zeichen und lokal Ollama mit embeddinggemma:300m. Sie prüft höchstens 30 zuletzt geänderte Kontakte mit bis zu drei Notizen, Vorhaben und ausdrücklich verknüpften Lebensereignissen je Person.</small></div>
       <div className="item-list">{contacts.map((person) => <div className="item-row" key={person.id}>
         <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen · {person.plan_count} Vorhaben · {person.event_count} Lebensereignisse</small></div>
         <button onClick={() => void open(person.id)}>Öffnen</button></div>)}</div>

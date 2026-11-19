@@ -10,6 +10,7 @@ MAX_CONTACTS = 30
 MAX_RESULTS = 10
 MAX_NOTES = 3
 MAX_PLANS = 3
+MAX_EVENTS = 3
 
 
 def _snapshot(db: Database, contact_id: str) -> dict | None:
@@ -26,16 +27,26 @@ def _snapshot(db: Database, contact_id: str) -> dict | None:
             "SELECT id,title,details,status,version,updated_at FROM contact_plans "
             "WHERE contact_id=? ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, "
             "updated_at DESC,id DESC LIMIT ?", (contact_id, MAX_PLANS)).fetchall()
+        events = connection.execute(
+            "SELECT e.id,e.date_local,e.title,e.location,e.description,e.version,"
+            "e.updated_at,l.created_at AS linked_at FROM memory_event_contacts l "
+            "JOIN memory_events e ON e.id=l.event_id WHERE l.contact_id=? "
+            "ORDER BY e.updated_at DESC,e.id DESC LIMIT ?",
+            (contact_id, MAX_EVENTS)).fetchall()
     details = [f"Kontakt: {contact['name']} ({contact['context']})"]
     if contact["relationship"]:
         details.append(f"Beziehung: {contact['relationship']}")
-    details.extend(f"Notiz: {note['content']}" for note in notes)
-    details.extend(f"Vorhaben ({'offen' if plan['status'] == 'open' else 'erledigt'}): "
-                   f"{plan['title']} · {plan['details']}" for plan in plans)
+    details.extend(f"Notiz: {note['content']}"[:130] for note in notes)
+    details.extend((f"Vorhaben ({'offen' if plan['status'] == 'open' else 'erledigt'}): "
+                    f"{plan['title']} · {plan['details']}")[:130] for plan in plans)
+    details.extend((f"Bestätigtes Ereignis {event['date_local']} in "
+                    f"{event['location'] or 'unbekannt'}: {event['title']} · "
+                    f"{event['description']}")[:160] for event in events)
     fingerprint = (tuple(contact), tuple(tuple(note) for note in notes),
-                   tuple(tuple(plan) for plan in plans))
+                   tuple(tuple(plan) for plan in plans),
+                   tuple(tuple(event) for event in events))
     return {"id": contact_id, "name": contact["name"], "context": contact["context"],
-            "body": "\n".join(details)[:1200], "fingerprint": fingerprint}
+            "body": "\n".join(details)[:1700], "fingerprint": fingerprint}
 
 
 def search(db: Database, query: str, ollama_url: str) -> dict:
@@ -48,7 +59,12 @@ def search(db: Database, query: str, ollama_url: str) -> dict:
                 COALESCE((SELECT MAX(n.updated_at) FROM contact_notes n
                           WHERE n.contact_id=c.id),''),
                 COALESCE((SELECT MAX(p.updated_at) FROM contact_plans p
-                          WHERE p.contact_id=c.id),'')) AS last_change
+                          WHERE p.contact_id=c.id),''),
+                COALESCE((SELECT MAX(l.created_at) FROM memory_event_contacts l
+                          WHERE l.contact_id=c.id),''),
+                COALESCE((SELECT MAX(e.updated_at) FROM memory_event_contacts l
+                          JOIN memory_events e ON e.id=l.event_id
+                          WHERE l.contact_id=c.id),'')) AS last_change
             FROM contacts c ORDER BY last_change DESC,c.id DESC LIMIT ?
         """, (MAX_CONTACTS + 1,))]
     limited = len(identifiers) > MAX_CONTACTS
