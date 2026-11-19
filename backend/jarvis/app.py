@@ -140,6 +140,7 @@ from jarvis.time_model import (
 from jarvis.unified_search import search as unified_search
 from jarvis.vault import CredentialVault, VaultConflict
 from jarvis.voice import ALLOWED_AUDIO_TYPES, MAX_AUDIO_BYTES, VoiceError, VoiceTranscriber
+from jarvis.work_sessions import WorkSessionStore
 from jarvis.work_states import WorkStateConflict, WorkStateStore
 
 
@@ -451,6 +452,18 @@ class WorkStateInput(BaseModel):
 
 class WorkStateUpdateInput(WorkStateInput):
     expected_version: int = Field(ge=1)
+
+
+class WorkSessionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_state_version: int = Field(ge=1)
+    result: str = Field(min_length=1, max_length=5000)
+    open_questions: str = Field(default="", max_length=3000)
+    next_step: str = Field(min_length=1, max_length=2000)
+    document_ids: list[str] = Field(default_factory=list, max_length=10)
+    task_ids: list[str] = Field(default_factory=list, max_length=10)
+    links: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ProjectPersonInput(BaseModel):
@@ -846,6 +859,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     time_model = TimeModelStore(db)
     evening_plans = EveningPlanStore(db, tasks, time_model)
     work_states = WorkStateStore(db, documents, tasks)
+    work_sessions = WorkSessionStore(db, work_states)
     project_people = ProjectPeopleStore(db, work_states, lambda: config.timezone)
     project_aliases = ProjectAliasStore(db, work_states, project_people)
     project_person_tasks = ProjectPersonTaskStore(db, work_states, project_people,
@@ -975,6 +989,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.time_model = time_model
     app.state.evening_plans = evening_plans
     app.state.work_states = work_states
+    app.state.work_sessions = work_sessions
     app.state.project_checks = project_checks
     app.state.project_reviews = project_reviews
     app.state.vault = vault
@@ -3716,6 +3731,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if state is None:
             raise HTTPException(404, "Arbeitsstand nicht gefunden")
         return state
+
+    @app.get("/work-states/{state_id}/sessions")
+    async def work_sessions_list(state_id: str):
+        try:
+            return await run_in_threadpool(work_sessions.list, state_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/work-states/{state_id}/sessions", status_code=201)
+    async def work_sessions_create(state_id: str, data: WorkSessionInput):
+        try:
+            return await run_in_threadpool(
+                work_sessions.create, state_id, data.expected_state_version, data.result,
+                data.open_questions, data.next_step, data.document_ids, data.task_ids,
+                data.links)
+        except WorkStateConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/work-states/{state_id}/sessions/{session_id}")
+    async def work_sessions_delete(state_id: str, session_id: str):
+        try:
+            await run_in_threadpool(work_sessions.delete, state_id, session_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"deleted": True}
 
     @app.get("/work-states/{state_id}/people")
     async def project_people_list(state_id: str):

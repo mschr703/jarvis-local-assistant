@@ -29,7 +29,7 @@ def test_encrypted_roundtrip_and_new_profile_start(profile, tmp_path):
     data, memory = profile
     archive = tmp_path / "backup.jbackup"
     result = create_encrypted_backup(data, archive, "ein langes Testpasswort 123")
-    assert result["encrypted"] and result["schema"] == 63
+    assert result["encrypted"] and result["schema"] == 64
     payload = archive.read_bytes()
     assert not payload.startswith(b"PK")
     assert b"Sehr vertraulicher Atlas-Stand" not in payload
@@ -37,7 +37,7 @@ def test_encrypted_roundtrip_and_new_profile_start(profile, tmp_path):
     assert b"secret" not in payload
     restored = tmp_path / "restored"
     info = restore_encrypted_backup(archive, restored, "ein langes Testpasswort 123")
-    assert info["encrypted"] and info["schema"] == 63
+    assert info["encrypted"] and info["schema"] == 64
     assert (restored / "notes" / "notiz.md").read_text(encoding="utf-8") == "Nur im geschützten Archiv"
     assert not (restored / ".env").exists()
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,

@@ -51,7 +51,7 @@ class Database:
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nCOMMIT;")
 
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 63:
+            if version > 64:
                 raise RuntimeError(f"Datenbank-Schema {version} ist neuer als diese Jarvis-Version")
             if version == 0:
                 apply_migration("""
@@ -1107,6 +1107,23 @@ class Database:
                     CREATE INDEX IF NOT EXISTS memory_event_contacts_contact
                         ON memory_event_contacts(contact_id,event_id);
                     PRAGMA user_version=63;
+                """)
+            if version < 64:
+                apply_migration("""
+                    CREATE TABLE IF NOT EXISTS work_sessions (
+                        id TEXT PRIMARY KEY,
+                        state_id TEXT NOT NULL REFERENCES work_states(id) ON DELETE CASCADE,
+                        state_version INTEGER NOT NULL,
+                        project_snapshot TEXT NOT NULL,
+                        result TEXT NOT NULL,
+                        open_questions TEXT NOT NULL,
+                        next_step TEXT NOT NULL,
+                        references_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS work_sessions_state
+                        ON work_sessions(state_id,created_at DESC,id DESC);
+                    PRAGMA user_version=64;
                 """)
 
     def claim_lease(self, owner: str, seconds: int = 12) -> bool:

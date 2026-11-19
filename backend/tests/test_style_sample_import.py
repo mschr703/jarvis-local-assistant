@@ -75,7 +75,7 @@ def test_import_is_explicit_idempotent_local_and_usable_for_draft(tmp_path, monk
         token(client)
         assert client.get("/style/samples").json()[0]["source_sha256"] == document["sha256"]
     archive = tmp_path / "samples.zip"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     recovered = DraftStore(Database(restored / "jarvis.db"), restored).samples()[0]
@@ -162,4 +162,4 @@ def test_import_rejects_pdf_and_migrates_old_profile(tmp_path):
         db.execute("PRAGMA user_version=33")
     assert DraftStore(Database(legacy), tmp_path).samples() == []
     with sqlite3.connect(legacy) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 64

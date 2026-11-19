@@ -60,9 +60,9 @@ def test_person_task_link_lifecycle_with_source_and_project_change(tmp_path):
                             [document["id"]], [], [])
     assert links.list_for_state(state["id"])[0]["status"] == "aufgabe_nicht_mehr_zugeordnet"
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 63
+    assert restore_backup(archive, restored)["schema"] == 64
     with Database(restored / "jarvis.db").connect() as connection:
         assert connection.execute("SELECT count(*) FROM project_person_tasks WHERE id=?",
                                   (link["id"],)).fetchone()[0] == 1
@@ -175,10 +175,10 @@ def test_person_task_link_limit_and_schema42_migration(tmp_path):
         connection.execute("PRAGMA user_version=42")
     migrated = Database(db.path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 64
         assert connection.execute("SELECT count(*) FROM project_people").fetchone()[0] == 16
         assert connection.execute("SELECT count(*) FROM project_person_tasks").fetchone()[0] == 0
     assert WorkStateStore(migrated, DocumentStore(migrated), TaskStore(migrated)).get(
         state["id"])["documents"][0]["id"] == document["id"]
     with sqlite3.connect(migrated.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 64

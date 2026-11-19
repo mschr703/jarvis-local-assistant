@@ -91,9 +91,9 @@ def test_event_contact_api_and_backup(tmp_path):
         with Database(root / "jarvis.db").connect() as connection:
             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 63
+    assert restore_backup(archive, restored)["schema"] == 64
     assert MemoryEventStore(Database(restored / "jarvis.db")).get(event["id"])[
         "contacts"][0]["contact_id"] == contact["id"]
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
@@ -114,7 +114,7 @@ def test_event_contact_migration_from_62(tmp_path):
         connection.execute("PRAGMA user_version=62")
     migrated = Database(db.path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 64
         assert connection.execute("SELECT count(*) FROM memory_event_contacts").fetchone()[0] == 0
 
 

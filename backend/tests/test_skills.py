@@ -45,7 +45,7 @@ def test_skill_versions_conflict_disable_rollback_and_backup(tmp_path):
         connection.execute("UPDATE skill_versions SET content='Nenne den nächsten Schritt.' WHERE skill_id=? AND version=1",
                            (skill_id,))
     archive = tmp_path / "skills.zip"
-    assert create_backup(data, archive)["schema"] == 63
+    assert create_backup(data, archive)["schema"] == 64
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     restored_store = SkillStore(Database(restored / "jarvis.db"))

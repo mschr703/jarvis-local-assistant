@@ -76,9 +76,9 @@ def test_local_draft_uses_only_selected_recipient_and_freezes_snapshot(tmp_path,
         assert client.get(f"/drafts/{draft['id']}").json()["recipient_snapshot"] == snapshot
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 63
+    assert restore_backup(archive, restored_root)["schema"] == 64
     restored_db = Database(restored_root / "jarvis.db")
     assert DraftStore(restored_db, restored_root).get_draft(draft["id"])[
         "recipient_snapshot"] == snapshot
@@ -218,9 +218,9 @@ def test_selected_shared_event_is_local_versioned_and_preserved_in_backup(tmp_pa
         assert len(prompts) == 1
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 63
+    assert restore_backup(archive, restored)["schema"] == 64
     assert DraftStore(Database(restored / "jarvis.db"), restored).get_draft(draft["id"])[
         "recipient_snapshot"] == snapshot
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import WorkSessionView from './WorkSessionView';
 
 type FileRef = { id: string; path: string; sha256: string; status: string };
 type TaskRef = { id: string; title: string; status: string; current_title: string | null;
@@ -614,6 +615,7 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
         <div className="item-row" key={item.id}><div><strong>{item.project}</strong><small>Weiter: {item.next_step} · {new Date(item.updated_at).toLocaleString('de-DE')}</small></div>
           <button disabled={busy} onClick={() => select(item.id)}>Öffnen</button></div>)}</div>}
     </section>
+    {active && !editingId && <WorkSessionView key={active.id} state={active} />}
     {active && !editingId && <section id={`search-source-project-${active.id}`}
       className={`card${requestedSource?.id === active.id ? ' source-opened' : ''}`}>
       <div className="card-heading"><h3>{active.project}</h3><small>Stand {active.version}</small></div>

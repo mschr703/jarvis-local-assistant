@@ -114,9 +114,9 @@ def test_schema40_migration_and_budget_restore(tmp_path):
                    context_estimated_tokens=250, context_token_budget=2048,
                    context_omitted_count=4, context_latest_omitted_id="old-id")
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 63
+    assert restore_backup(archive, restored_root)["schema"] == 64
     restored = Database(restored_root / "jarvis.db").list_messages(chat_id)[0]
     assert (restored["context_estimated_tokens"], restored["context_omitted_count"],
             restored["context_latest_omitted_id"]) == (250, 4, "old-id")
@@ -140,7 +140,7 @@ def test_schema40_migration_and_budget_restore(tmp_path):
     migrated = Database(db.path)
     assert migrated.list_messages(chat_id)[0]["context_estimated_tokens"] is None
     with sqlite3.connect(db.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 64
 
 
 def test_failed_local_answer_keeps_context_receipt(tmp_path, monkeypatch):

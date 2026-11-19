@@ -86,9 +86,9 @@ def test_exif_api_backup_and_migration(tmp_path):
         with Database(root / "jarvis.db").connect() as connection:
             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 63
+    assert create_backup(root, archive)["schema"] == 64
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 63
+    assert restore_backup(archive, restored)["schema"] == 64
     assert PhotoLibrary(Database(restored / "jarvis.db")).list()[0][
         "capture_local"] == "2024-08-12T14:30:05"
 
@@ -98,6 +98,6 @@ def test_exif_api_backup_and_migration(tmp_path):
         connection.execute("PRAGMA user_version=61")
     migrated = Database(migrated_db.path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 64
         columns = [row[1] for row in connection.execute("PRAGMA table_info(photo_assets)")]
         assert "capture_local" in columns

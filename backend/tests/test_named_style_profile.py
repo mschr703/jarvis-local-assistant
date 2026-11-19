@@ -70,9 +70,9 @@ def test_maxim_choice_applies_to_four_kinds_and_survives_profile_change(tmp_path
         assert ordinary["named_style_profile"] is None
 
     archive = tmp_path.parent / "maxim.zip"
-    assert create_backup(tmp_path, archive)["schema"] == 63
+    assert create_backup(tmp_path, archive)["schema"] == 64
     restored = tmp_path.parent / "restored-maxim"
-    assert restore_backup(archive, restored)["schema"] == 63
+    assert restore_backup(archive, restored)["schema"] == 64
     store = DraftStore(Database(restored / "jarvis.db"), restored)
     assert store.named_profile()["revision"] == 2
     assert store.get_draft(drafts[0]["id"])["named_style_profile"]["revision"] == 1
