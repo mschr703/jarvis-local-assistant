@@ -28,6 +28,8 @@ speichern, die Seite neu laden und den Eintrag wiederfinden. Unter **Module** ei
 deaktivieren: Sein Navigationspunkt, seine API und sein ausgelieferter UI-Code sind
 sofort gesperrt; das andere Modul bleibt nutzbar. Beim erneuten Aktivieren sind die
 Daten wieder da. Beide Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
+Die **Übersicht** zeigt Anzahl und Zustand installierter Module sowie Fehler und
+führt mit **Module verwalten** direkt zum Modulmanager.
 
 Alternativ lässt sich das Paket direkt in **Module → Lokales Paket installieren**
 hinzufügen. Dort den absoluten Pfad zum Ordner `day_notes` eintragen. Mit PowerShell

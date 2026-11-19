@@ -232,6 +232,13 @@ export default function App() {
             health ? <><p>{health.message}</p><dl><dt>Provider</dt><dd>{health.provider}</dd><dt>Modell</dt><dd>{health.model ?? 'Nicht eingerichtet'}</dd></dl></> : <p>Verbindung wird geprüft.</p>}
           <div className="item-actions"><button onClick={refreshHealth}>Status prüfen</button></div>
         </section>
+        <section className="card" aria-live="polite">
+          <div className="card-heading"><h3>Module</h3><span className={moduleError || modules.some((item) => item.error) ? 'badge error' : 'badge ok'}>{modules.filter((item) => item.enabled).length} aktiv</span></div>
+          {moduleError ? <p className="notice error">Modulstatus nicht erreichbar: {moduleError}</p> :
+            modules.length ? <ul>{modules.map((item) => <li key={item.id}>{item.name}: {item.enabled ? 'aktiv' : 'inaktiv'}{item.error ? ` · ${item.error}` : ''}</li>)}</ul> :
+              <p>Keine optionalen Module installiert.</p>}
+          <button onClick={() => navigate('modules')}>Module verwalten</button>
+        </section>
         <section className="card muted"><h3>Einrichtung</h3><p>Der Chat antwortet erst, wenn ein lokales Ollama-Modell läuft oder OpenRouter mit Schlüssel und Modell eingerichtet ist. Es werden keine Beispielantworten als echte Ergebnisse gezeigt.</p></section>
         <SettingsPanel healthStatus={health?.status || 'starting'} visible={page === 'status'} onSaved={refreshHealth} settings={settingsDraft} setSettings={setSettingsDraft} />
       </div>

@@ -44,7 +44,10 @@ def main() -> None:
                         page = browser.new_page(viewport={"width": 390, "height": 844})
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded",
                                   timeout=120000)
-                        page.get_by_role("button", name="Module", exact=True).click()
+                        overview = page.locator("section.card").filter(
+                            has=page.get_by_role("heading", name="Module", exact=True))
+                        expect(overview.get_by_text("Keine optionalen Module installiert.")).to_be_visible()
+                        overview.get_by_role("button", name="Module verwalten").click()
                         expect(page.get_by_text("Keine Module installiert.", exact=False)).to_be_visible()
                         page.get_by_label("Absoluter Pfad zum Paketordner").fill(
                             str(args.module_source.absolute()))
@@ -54,6 +57,10 @@ def main() -> None:
                         expect(page.get_by_role("button", name="Tagesnotizen")).to_have_count(0)
                         page.get_by_role("button", name="Aktivieren").click()
                         expect(page.get_by_role("button", name="Tagesnotizen")).to_be_visible()
+                        page.get_by_role("button", name="Übersicht", exact=True).click()
+                        expect(overview.get_by_text("1 aktiv")).to_be_visible()
+                        expect(overview.get_by_text("Tagesnotizen: aktiv")).to_be_visible()
+                        assert not overflow_nodes(page), overflow_nodes(page)
                         page.get_by_role("button", name="Tagesnotizen").click()
                         expect(page.get_by_label("Neue Tagesnotiz")).to_be_visible()
                         page.get_by_label("Neue Tagesnotiz").fill("Privater Modul-Pilot")
@@ -111,8 +118,8 @@ def main() -> None:
                             "// changed after installation", encoding="utf-8")
                         page.reload()
                         page.get_by_role("button", name="Module", exact=True).click()
-                        expect(page.get_by_text("Paketdateien wurden seit Installation verändert",
-                                                exact=False)).to_be_visible()
+                        expect(page.get_by_role("alert").filter(
+                            has_text="Paketdateien wurden seit Installation verändert")).to_be_visible()
                         expect(page.get_by_role("button", name="Tagesnotizen")).to_have_count(0)
                         page.get_by_role("button", name="Deaktivieren").click()
                         page.get_by_role("button", name="Entfernen (Daten behalten)").click()
