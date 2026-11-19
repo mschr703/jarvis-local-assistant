@@ -51,7 +51,10 @@ Der Befehl entfernt nur die drei installierten Paketdateien und ihren Python-Cac
 `jarvis.db`. Ein später neu installiertes Modul kann sie wieder verwenden. Das
 reguläre Jarvis-Backup sichert die Datenbank einschließlich Modultabellen, aber
 **nicht** den Modulcode. Nach einem Restore private Module aus einer vertrauten
-Quelle erneut installieren. Eine automatische Datenlöschung gibt es nicht.
+Quelle erneut installieren. War ein Modul vor dem Restore aktiv, zeigt **Module**
+das fehlende Paket mit einem Fehler an. Nach der Neuinstallation lässt es sich dort
+wieder aktivieren; seine Daten bleiben erhalten. Eine automatische Datenlöschung
+gibt es nicht.
 Der Knopf **Entfernen (Daten behalten)** in der Modulansicht führt denselben
 Vorgang aus; er ist erst nach Deaktivierung nutzbar.
 

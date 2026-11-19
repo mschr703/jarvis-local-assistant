@@ -120,6 +120,31 @@ def test_module_lifecycle_and_backup(tmp_path):
         assert client.get("/modules/sample_notes/entries").json() == ["first"]
 
 
+def test_missing_saved_package_is_visible_and_can_be_reinstalled(tmp_path):
+    data_dir = tmp_path / "data"
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    Database(data_dir / "jarvis.db").set_settings({"module.sample_notes.enabled": "1"})
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        missing = client.get("/modules").json()
+        assert len(missing) == 1
+        assert missing[0]["id"] == "sample_notes"
+        assert missing[0]["requested_enabled"] is True
+        assert missing[0]["enabled"] is False
+        assert "Modulpaket fehlt" in missing[0]["error"]
+        assert client.get("/chats").status_code == 200
+        installed = client.post("/modules/install", headers=headers,
+                                json={"path": str(source)})
+        assert installed.status_code == 200, installed.text
+        restored = client.get("/modules").json()[0]
+        assert restored["api"] == 1 and restored["error"] is None
+        assert restored["requested_enabled"] is True and restored["enabled"] is False
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").status_code == 200
+
+
 def test_module_bad_package_does_not_break_core_and_dependency_is_enforced(tmp_path):
     data_dir = tmp_path / "data"
     install_fixture(data_dir, "requires_other", ["other_module"])

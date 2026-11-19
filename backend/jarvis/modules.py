@@ -31,6 +31,7 @@ from jarvis.engine import RunEngine, ToolDefinition, ToolUserError
 MODULE_API = 1
 MODULE_ID = re.compile(r"^[a-z][a-z0-9_]{2,39}$")
 VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+MISSING_PACKAGE_ERROR = "Modulpaket fehlt; aus vertrauter Quelle neu installieren"
 
 
 class ModuleManifest(BaseModel):
@@ -190,11 +191,13 @@ class ModuleRegistry:
                 self._errors = {}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._mark_missing_requested()
                 return
             if self.directory.is_symlink() or self.directory.is_junction():
                 self._errors = {"_directory": "Modulverzeichnis darf kein Link sein"}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._mark_missing_requested()
                 return
             try:
                 paths = sorted(self.directory.iterdir())
@@ -202,6 +205,7 @@ class ModuleRegistry:
                 self._errors = {"_directory": f"Modulverzeichnis nicht lesbar: {type(exc).__name__}"}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._mark_missing_requested()
                 return
             for path in paths:
                 try:
@@ -235,12 +239,21 @@ class ModuleRegistry:
                 except (ValueError, OSError) as exc:
                     manifest_errors[path.name] = str(exc)
             self._errors = {module_id: message for module_id, message in previous_errors.items()
-                            if module_id in self._manifests}
+                            if module_id in self._manifests and message != MISSING_PACKAGE_ERROR}
             self._errors.update(manifest_errors)
             for module_id in list(self._apps):
                 if module_id not in self._manifests:
                     self._deactivate(module_id)
             self._deactivate_missing_dependents()
+            self._mark_missing_requested()
+
+    def _mark_missing_requested(self) -> None:
+        for key, value in self.db.get_settings().items():
+            if not (key.startswith("module.") and key.endswith(".enabled") and value == "1"):
+                continue
+            module_id = key[len("module."):-len(".enabled")]
+            if MODULE_ID.fullmatch(module_id) and module_id not in self._manifests:
+                self._errors.setdefault(module_id, MISSING_PACKAGE_ERROR)
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
