@@ -12,8 +12,10 @@ MAX_CANDIDATES = 100
 MAX_FRESHNESS_CHECKS = 30
 MAX_PROJECT_ROWS = 2000
 MAX_EVENT_ROWS = 2000
+MAX_CONTACT_ROWS = 2000
+MAX_CONTACT_DETAILS = 5
 MAX_PER_KIND = 10
-SOURCE_KINDS = frozenset({"all", "document", "memory", "project", "life_event"})
+SOURCE_KINDS = frozenset({"all", "document", "memory", "project", "life_event", "contact"})
 STOPWORDS = frozenset({"was", "wer", "wie", "wo", "wann", "welche", "welcher", "welches",
                        "ist", "sind", "hat", "haben", "ich", "mir", "mein", "meine", "zu",
                        "zur", "zum", "von", "für", "mit", "über", "und", "oder", "der",
@@ -117,10 +119,45 @@ def search(db: Database, query: str, kind: str = "all",
             GROUP BY e.id ORDER BY e.date_local DESC,e.id DESC LIMIT ?
         """, (from_date, from_date, to_date, to_date,
               MAX_EVENT_ROWS + 1))] if kind in {"all", "life_event"} else []
+        contacts = [dict(row) for row in connection.execute("""
+            SELECT id,name,context,relationship,version FROM contacts
+            ORDER BY updated_at DESC,id DESC LIMIT ?
+        """, (MAX_CONTACT_ROWS + 1,))] if kind in {"all", "contact"} else []
+        contact_details: dict[str, list[tuple[str, str]]] = {}
+        contact_details_limited = False
+        if contacts:
+            sources = (
+                ("Notiz", ("SELECT contact_id,content AS detail,updated_at,id "
+                           "FROM contact_notes")),
+                ("Vorhaben", ("SELECT contact_id,title||' · '||details AS detail,"
+                              "updated_at,id FROM contact_plans")),
+                ("Ereignis", ("SELECT l.contact_id,e.date_local||' · '||e.title||' · '||"
+                              "e.location AS detail,e.updated_at,l.event_id AS id "
+                              "FROM memory_event_contacts l JOIN memory_events e "
+                              "ON e.id=l.event_id")),
+            )
+            for label, query_sql in sources:
+                rows = connection.execute(f"""
+                    WITH candidates AS (SELECT id FROM contacts
+                        ORDER BY updated_at DESC,id DESC LIMIT ?),
+                    ranked AS (SELECT detail,source.contact_id,
+                        ROW_NUMBER() OVER (PARTITION BY source.contact_id
+                            ORDER BY source.updated_at DESC,source.id DESC) AS rank
+                        FROM ({query_sql}) source
+                        JOIN candidates c ON c.id=source.contact_id)
+                    SELECT contact_id,detail,rank FROM ranked WHERE rank<=?
+                """, (MAX_CONTACT_ROWS, MAX_CONTACT_DETAILS + 1))
+                for row in rows:
+                    if row["rank"] > MAX_CONTACT_DETAILS:
+                        contact_details_limited = True
+                        continue
+                    contact_details.setdefault(row["contact_id"], []).append(
+                        (label, row["detail"]))
 
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
-               or len(events) > MAX_EVENT_ROWS)
+               or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
+               or contact_details_limited)
     by_document: dict[str, dict] = {}
     for row in passages[:MAX_CANDIDATES] + paths[:MAX_CANDIDATES]:
         title = Path(row["path"]).name
@@ -224,7 +261,22 @@ def search(db: Database, query: str, kind: str = "all",
                                 "date_local": row["date_local"], "version": row["version"],
                                 "score": score})
 
-    groups = [current_documents, memory_items, project_items, event_items]
+    contact_items = []
+    for row in contacts[:MAX_CONTACT_ROWS]:
+        details = contact_details.get(row["id"], [])
+        title = f"{row['name']} · {row['context']}"
+        body = " · ".join([row["relationship"], *(detail for _, detail in details)])
+        score = _score(_fold(cleaned), folded_terms, _fold(title), _fold(body))
+        if score:
+            matching = [f"{label}: {detail}" for label, detail in details
+                        if any(term in _fold(detail) for term in folded_terms)][:2]
+            excerpt = " · ".join(part for part in [row["relationship"], *matching] if part)
+            contact_items.append({"kind": "contact", "id": row["id"],
+                                  "title": title, "excerpt": excerpt[:500],
+                                  "source": "Kontakt · manuell bestätigt",
+                                  "version": row["version"], "score": score})
+
+    groups = [current_documents, memory_items, project_items, event_items, contact_items]
     selected = []
     for group in groups:
         group.sort(key=lambda item: (-item["score"], item["title"].casefold(), item["id"]))
@@ -237,4 +289,4 @@ def search(db: Database, query: str, kind: str = "all",
             "stale_sources": stale_sources,
             "preferences": preferred,
             "counts": {kind: sum(item["kind"] == kind for item in selected)
-                       for kind in ("document", "memory", "project", "life_event")}}
+                       for kind in ("document", "memory", "project", "life_event", "contact")}}

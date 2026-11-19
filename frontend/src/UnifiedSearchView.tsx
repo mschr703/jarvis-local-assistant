@@ -3,7 +3,8 @@ import { api, verifiedPdfPassageForLocalChat, verifiedPdfPassagesForLocalChat,
   verifiedSearchDocumentForLocalChat, type PdfChatPassage } from './api';
 import type { Source } from './DocumentView';
 
-type Kind = 'document' | 'memory' | 'project' | 'life_event';
+type Kind = 'document' | 'memory' | 'project' | 'life_event' | 'contact';
+type SemanticKind = Exclude<Kind, 'contact'>;
 type SourceKind = 'all' | Kind;
 type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: string;
   score: number; policy?: string; document_id?: string; passage_id?: number | null;
@@ -17,11 +18,12 @@ type SearchResult = { query: string; results: Hit[]; limited: boolean;
   event_from_date: string | null; event_to_date: string | null;
   counts: Record<Kind, number>; preferences: Preference[];
   stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
-type SemanticHit = Omit<Hit, 'score'> & { similarity: number; preference_status?: 'current' | 'updated' | null };
+type SemanticHit = Omit<Hit, 'kind' | 'score'> & { kind: SemanticKind;
+  similarity: number; preference_status?: 'current' | 'updated' | null };
 type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   event_from_date: string | null; event_to_date: string | null;
   checked_passages: number; checked_memories: number; checked_projects: number;
-  checked_events: number; counts: Record<Kind, number>; model: string;
+  checked_events: number; counts: Record<SemanticKind, number>; model: string;
   document_scope: { id: string; title: string } | null;
   preferences: { document_id: string; path: string; status: Preference['status'] }[];
   changed_sources: { kind: 'memory' | 'project' | 'life_event'; id: string }[];
@@ -33,6 +35,7 @@ type ChatDocument = { id: string; path: string; sha256: string };
 const names: Record<Kind, string> = {
   document: 'Dokument', memory: 'Erinnerung', project: 'Arbeitsstand',
   life_event: 'Lebensereignis',
+  contact: 'Kontakt',
 };
 
 function draftSource(hit: Hit | SemanticHit): Source | null {
@@ -116,7 +119,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
-    if (busy || cacheBusy || preparingChat || query.trim().length < 2) return;
+    if (busy || cacheBusy || preparingChat || sourceKind === 'contact'
+        || query.trim().length < 2) return;
     setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
     setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     try {
@@ -257,7 +261,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   const deepDocuments = documents.filter((document) => document.status === 'indexed'
     && !document.excluded && (!folderId || document.folder_id === folderId));
   return <div className="section-stack unified-search"><h2>Gemeinsame Suche</h2>
-    <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen, Arbeitsstände und manuell bestätigte Lebensereignisse ohne Modell. Die optionale sinngemäße Suche nutzt Ollama derzeit für Dateien, Erinnerungen und Arbeitsstände. Nach Dateiänderungen kannst du veraltete Dateien direkt im Suchergebnis einzeln neu indexieren.</p>
+    <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen, Arbeitsstände, manuell bestätigte Lebensereignisse und Kontakte ohne Modell. Die optionale sinngemäße Suche nutzt Ollama für die ersten vier Quellarten; Kontakte kannst du im Kontakte-Bereich sinngemäß suchen. Nach Dateiänderungen kannst du veraltete Dateien direkt im Suchergebnis einzeln neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
       <label>Quelltyp
         <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy || !!preparingChat}
@@ -265,7 +269,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
             setSourceKind(next); setResult(null); setSemantic(null);
             setSelectedDraftSources([]); setSelectedChatDocuments([]);
             setSelectedChatPassages([]); setNotice('');
-            if (next === 'memory' || next === 'project' || next === 'life_event') { setFolderId(''); setDocumentId(''); }
+            if (next === 'memory' || next === 'project' || next === 'life_event' || next === 'contact') { setFolderId(''); setDocumentId(''); }
             if (next !== 'all' && next !== 'life_event') { setEventFromDate(''); setEventToDate(''); }
           }}>
           <option value="all">Alle Quellen</option>
@@ -273,6 +277,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           <option value="memory">Erinnerungen</option>
           <option value="project">Arbeitsstände</option>
           <option value="life_event">Lebensereignisse</option>
+          <option value="contact">Kontakte</option>
         </select></label>
       <label style={{ display: 'grid', gap: 7, minWidth: 0, maxWidth: '100%' }}>Suchbegriff oder Stichwortfrage<input aria-label="Gemeinsame Suche" value={query}
         style={{ width: '100%', minWidth: 0, maxWidth: '100%', background: '#101823',
@@ -292,21 +297,22 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
         <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId}
-          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project' || sourceKind === 'life_event'}
+          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project' || sourceKind === 'life_event' || sourceKind === 'contact'}
           onChange={(event) => { setFolderId(event.target.value); setDocumentId(''); }}>
           <option value="">Alle freigegebenen Ordner</option>
           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select></label>
       <label>Einzelnes Dokument tief durchsuchen
         <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId}
-          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project' || sourceKind === 'life_event'}
+          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project' || sourceKind === 'life_event' || sourceKind === 'contact'}
           onChange={(event) => { setDocumentId(event.target.value);
             if (event.target.value) { setEventFromDate(''); setEventToDate(''); } }}>
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
         </select></label>
-      <button type="button" disabled={busy || cacheBusy || !!preparingChat || query.trim().length < 2}
+      <button type="button" disabled={busy || cacheBusy || !!preparingChat || sourceKind === 'contact' || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
+      {sourceKind === 'contact' && <small>Kontakte lassen sich unter „Kontakte“ sinngemäß lokal suchen.</small>}
       <div role="status"><small>{statusChecking ? 'Prüfe lokales Suchmodell…' :
         modelStatus?.message || 'Modellstatus noch nicht geprüft.'}</small>
         <button type="button" disabled={statusChecking} onClick={() => void refreshModelStatus()}>
@@ -413,7 +419,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       {(result.event_from_date || result.event_to_date) && <small>
         Ereignisdatum: {result.event_from_date || 'Anfang offen'} bis {result.event_to_date || 'Ende offen'}
       </small>}
-      <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände · {result.counts.life_event} Lebensereignisse</p>
+      <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände · {result.counts.life_event} Lebensereignisse · {result.counts.contact} {result.counts.contact === 1 ? 'Kontakt' : 'Kontakte'}</p>
       {result.stale_sources.length > 0 && <div className="notice" role="status">
         <strong>Originaldateien und Index weichen ab</strong><p>Die betroffene Datei einzeln neu indexieren. Danach aktualisiert Jarvis die Stichworttreffer. Alte Auszüge erscheinen nicht als aktuelle Treffer.</p>
         <ul>{result.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>

@@ -27,7 +27,7 @@ def test_life_event_search_by_text_date_and_photo_name(tmp_path):
 
     by_title = search(db, "cafe", "life_event")
     assert by_title["counts"] == {"document": 0, "memory": 0, "project": 0,
-                                  "life_event": 1}
+                                  "life_event": 1, "contact": 0}
     assert by_title["results"][0]["id"] == first["id"]
     assert by_title["results"][0]["source"] == "2024-08-12 · manuell bestätigt"
     assert by_title["preferences"] == [] and by_title["stale_sources"] == []

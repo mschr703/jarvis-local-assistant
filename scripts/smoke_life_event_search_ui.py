@@ -102,6 +102,17 @@ def main() -> None:
                         event_row = page.locator(".item-row").filter(has_text="Café in Lyon")
                         event_row.get_by_role("button", name="Kontakt Alex (Lyon privat) öffnen").click()
                         expect(page.get_by_role("heading", name="Alex · Lyon privat")).to_be_visible()
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Quelltyp der gemeinsamen Suche").select_option("contact")
+                        page.get_by_label("Gemeinsame Suche").fill("Lyon privat")
+                        expect(page.get_by_role("button", name="Sinngemäß lokal suchen")).to_be_disabled()
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        results = page.get_by_role("region", name="Suchergebnisse")
+                        expect(results).to_contain_text("1 Kontakt")
+                        expect(results).to_contain_text("Kontakt · Alex · Lyon privat")
+                        expect(results).not_to_contain_text("Alex · Arbeit")
+                        results.get_by_role("button", name="Quelle öffnen").click()
+                        expect(page.get_by_role("heading", name="Alex · Lyon privat")).to_be_visible()
                         page.get_by_role("button", name="Kontakte", exact=True).click()
                         contact_list = page.locator("section.card").filter(
                             has=page.get_by_role("heading", name="Kontakt suchen"))
@@ -130,7 +141,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"text": "accent_insensitive", "photo_name": "found",
-                                          "contact": "linked_opened_both_directions_unlinked",
+                                          "contact": "linked_opened_searched_unlinked",
                                           "source": "opened", "model_usage": 0,
                                           "mobile_width": "fits"}))
                     finally:

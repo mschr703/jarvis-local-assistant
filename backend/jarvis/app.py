@@ -1225,7 +1225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/search/unified")
     async def unified_search_view(q: str = Query(min_length=2, max_length=160),
-                                  kind: str = Query(default="all", pattern="^(all|document|memory|project|life_event)$"),
+                                  kind: str = Query(default="all", pattern="^(all|document|memory|project|life_event|contact)$"),
                                   from_date: str | None = Query(default=None, max_length=10),
                                   to_date: str | None = Query(default=None, max_length=10)):
         try:

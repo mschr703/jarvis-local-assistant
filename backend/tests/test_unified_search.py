@@ -35,7 +35,8 @@ def sample(tmp_path):
 def test_search_combines_sources_with_exact_references(tmp_path):
     db, docs, _, _, document, memory, project, file = sample(tmp_path)
     result = search(db, "Was ist über Orion bekannt?")
-    assert result["counts"] == {"document": 1, "memory": 1, "project": 1, "life_event": 0}
+    assert result["counts"] == {"document": 1, "memory": 1, "project": 1,
+                                "life_event": 0, "contact": 0}
     assert not result["limited"]
     by_kind = {item["kind"]: item for item in result["results"]}
     found = by_kind["document"]
@@ -64,7 +65,7 @@ def test_source_kind_filter_limits_results_before_document_checks(tmp_path, monk
                 (kind, expected_id)]
             assert result["preferences"] == [] and result["stale_sources"] == []
             assert result["counts"] == {source: int(source == kind) for source in
-                                         ("document", "memory", "project", "life_event")}
+                                         ("document", "memory", "project", "life_event", "contact")}
     assert [item["kind"] for item in search(db, "Orion", "document")["results"]] == [
         "document"]
     with pytest.raises(ValueError, match="Quelltyp"):
@@ -83,9 +84,10 @@ def test_search_reflects_updates_exclusion_and_deletion(tmp_path):
     file.rename(file.with_name("Vertrag_Vega.md"))
     docs.index_folder(folder["id"])
     assert search(db, "Orion")["counts"] == {"document": 0, "memory": 0, "project": 0,
-                                             "life_event": 0}
+                                             "life_event": 0, "contact": 0}
     current = search(db, "Vega")
-    assert current["counts"] == {"document": 1, "memory": 1, "project": 1, "life_event": 0}
+    assert current["counts"] == {"document": 1, "memory": 1, "project": 1,
+                                 "life_event": 0, "contact": 0}
     current_document = next(item for item in current["results"] if item["kind"] == "document")
     docs.set_excluded(current_document["document_id"], True)
     docs.delete_memory(memory["id"])
@@ -209,7 +211,8 @@ def test_search_is_bounded_and_rejects_empty_words(tmp_path, monkeypatch):
     docs.add_memory("Orion zweiter Hinweis", "Eigene Notiz", "local_only")
     monkeypatch.setattr("jarvis.unified_search.MAX_PER_KIND", 1)
     result = search(db, "Orion")
-    assert result["counts"] == {"document": 1, "memory": 1, "project": 1, "life_event": 0}
+    assert result["counts"] == {"document": 1, "memory": 1, "project": 1,
+                                "life_event": 0, "contact": 0}
     assert result["limited"]
     for query in (" ", "was ist das?", "x" * 161):
         try:
@@ -229,10 +232,11 @@ def test_search_api_requires_session_and_is_read_only(tmp_path):
         answer = client.get("/search/unified", params={"q": "Orion"})
         assert answer.status_code == 200
         assert answer.json()["counts"] == {"document": 1, "memory": 1, "project": 1,
-                                            "life_event": 0}
+                                            "life_event": 0, "contact": 0}
         assert client.get("/search/unified", params={
             "q": "Orion", "kind": "memory"}).json()["counts"] == {
-                "document": 0, "memory": 1, "project": 0, "life_event": 0}
+                "document": 0, "memory": 1, "project": 0, "life_event": 0,
+                "contact": 0}
         assert client.get("/search/unified", params={
             "q": "Orion", "kind": "invalid"}).status_code == 422
         assert client.get("/search/unified", params={"q": "was ist das?"}).status_code == 422

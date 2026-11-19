@@ -266,7 +266,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
-    if source_kind not in SOURCE_KINDS:
+    if source_kind not in SOURCE_KINDS or source_kind == "contact":
         raise ValueError("Unbekannter Such-Quelltyp")
     from_date, to_date = validate_event_range(source_kind, from_date, to_date)
     if document_id and (from_date or to_date):
