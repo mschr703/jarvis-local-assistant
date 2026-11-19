@@ -95,6 +95,13 @@ def main() -> None:
                         expect(opened).to_contain_text("Café in Lyon")
                         expect(opened).to_contain_text("Mit Alex am Fluss")
                         expect(opened).to_contain_text("Alex · Lyon privat · manuell bestätigt")
+                        opened.get_by_role("button", name="Kontakt Alex (Lyon privat) öffnen").click()
+                        expect(page.get_by_role("heading", name="Alex · Lyon privat")).to_be_visible()
+                        expect(page.get_by_role("heading", name="Alex · Arbeit")).not_to_be_visible()
+                        page.get_by_role("button", name="Lebenschronik", exact=True).click()
+                        event_row = page.locator(".item-row").filter(has_text="Café in Lyon")
+                        event_row.get_by_role("button", name="Kontakt Alex (Lyon privat) öffnen").click()
+                        expect(page.get_by_role("heading", name="Alex · Lyon privat")).to_be_visible()
                         page.get_by_role("button", name="Kontakte", exact=True).click()
                         contact_list = page.locator("section.card").filter(
                             has=page.get_by_role("heading", name="Kontakt suchen"))
@@ -123,7 +130,7 @@ def main() -> None:
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"text": "accent_insensitive", "photo_name": "found",
-                                          "contact": "linked_searched_opened_unlinked",
+                                          "contact": "linked_opened_both_directions_unlinked",
                                           "source": "opened", "model_usage": 0,
                                           "mobile_width": "fits"}))
                     finally:

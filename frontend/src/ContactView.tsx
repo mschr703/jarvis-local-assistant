@@ -25,8 +25,9 @@ type Contact = { id: string; name: string; context: string; relationship: string
 type ContactForm = { name: string; context: string; relationship: string };
 const emptyForm = (): ContactForm => ({ name: '', context: '', relationship: '' });
 
-export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
+export default function ContactView({ visible, requestedContact, onPrepareTask, onOpenEvent }: {
   visible: boolean; onPrepareTask: (title: string) => void;
+  requestedContact?: { id: string; serial: number } | null;
   onOpenEvent: (eventId: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -83,7 +84,7 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
   const open = async (id: string) => {
     ++refreshRequest.current;
     const request = ++openRequest.current;
-    setNotice(''); setEditing(false); setEditingNote(null); setNoteDraft('');
+    setSelected(null); setNotice(''); setEditing(false); setEditingNote(null); setNoteDraft('');
     setEditingPlan(null); setPlanTitle(''); setPlanDetails('');
     try {
       const person = await api<Contact>(`/contacts/${encodeURIComponent(id)}`);
@@ -92,6 +93,9 @@ export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
       setForm(emptyForm());
     } catch (error) { setNotice((error as Error).message); }
   };
+  useEffect(() => {
+    if (visible && requestedContact) void open(requestedContact.id);
+  }, [requestedContact?.serial]);
   const runSemantic = async () => {
     if (inFlight.current || query.trim().length < 2 || query.trim().length > 160) return;
     inFlight.current = true; setBusy(true); setNotice(''); setSemantic(null);

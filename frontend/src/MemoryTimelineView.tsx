@@ -11,8 +11,10 @@ type ContactOption = { id: string; name: string; context: string };
 type Form = Pick<Event, 'date_local' | 'title' | 'description' | 'location'>;
 const emptyForm = (): Form => ({ date_local: '', title: '', description: '', location: '' });
 
-export default function MemoryTimelineView({ requestedEvent }: {
-  requestedEvent?: { id: string; serial: number } | null }) {
+export default function MemoryTimelineView({ requestedEvent, onOpenContact }: {
+  requestedEvent?: { id: string; serial: number } | null;
+  onOpenContact: (contactId: string) => void;
+}) {
   const [items, setItems] = useState<Event[]>([]);
   const [eventOptions, setEventOptions] = useState<TimelineEventOption[]>([]);
   const [openedEvent, setOpenedEvent] = useState<Event | null>(null);
@@ -127,6 +129,8 @@ export default function MemoryTimelineView({ requestedEvent }: {
     <small>Bewusst zugeordnete Kontakte: {item.contacts.length || 'keine'}</small>
     {item.contacts.map((contact) => <div className="item-actions" key={contact.contact_id}>
       <span>{contact.name} · {contact.context} · manuell bestätigt</span>
+      <button aria-label={`Kontakt ${contact.name} (${contact.context}) öffnen`}
+        onClick={() => onOpenContact(contact.contact_id)}>Kontakt öffnen</button>
       <button disabled={busy} aria-label={`Zuordnung zu ${contact.name} (${contact.context}) lösen`}
         onClick={() => void changeContact(item, contact.contact_id, false)}>Zuordnung lösen</button></div>)}
     <div className="item-actions"><select aria-label={`Kontakt für Ereignis ${item.title}`}

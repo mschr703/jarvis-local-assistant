@@ -384,6 +384,8 @@ Du kannst einem Ereignis unter „Lebenschronik“ bis zu zehn bereits angelegte
 
 Unter „Kontakte“ siehst du bei jeder Person die Anzahl bewusst verknüpfter Lebensereignisse. Nach „Öffnen“ zeigt „Gemeinsame Lebensereignisse“ bis zu 200 Einträge nach Datum mit Titel und Ort; „Ereignis öffnen“ springt direkt zum bestätigten Eintrag der Lebenschronik. Die Kontakt-ID hält gleichnamige Personen getrennt. Nach einer Bearbeitung, gelösten Zuordnung oder Löschung aktualisiert ein erneutes Öffnen die Liste; weder das bloße Öffnen noch eine getrennte Löschung verändert den jeweils anderen Datensatz. Die Angaben bleiben lokal und werden nicht automatisch in Modellanfragen eingefügt.
 
+Umgekehrt öffnet „Kontakt öffnen“ bei einem zugeordneten Kontakt im Ereignis oder in der Zeitleiste direkt dessen Kontaktansicht. Die Zuordnung verwendet die Kontakt-ID, damit zwei Personen mit gleichem Namen nicht verwechselt werden. Von dort führt „Ereignis öffnen“ zurück zum bestätigten Ereignis.
+
 ## Globaler Hotkey auf Windows (S5a)
 
 Solange `python scripts/dev.py` läuft, registriert der kleine Windows-Helfer `Ctrl+Alt+J`. In einer Anwendung Text markieren oder im Explorer Dateien auswählen und die Kombination drücken. Jarvis kopiert diese Auswahl einmalig, stellt die vorherigen Zwischenablageformate wieder her und öffnet einen neuen Browser-Tab. Bei Text ist das Chat-Eingabefeld vorausgefüllt und fokussiert; erst ein bewusster Klick auf „Senden“ startet Ollama. Bei Dateien zeigt Jarvis zunächst nur die ausgewählten Pfade. Für Dateiinhalte den Ordner unter „Dokumente“ freigeben und indexieren. Auswahl und Zwischenablage werden nicht dauerhaft überwacht.

@@ -64,6 +64,7 @@ export default function App() {
   const [selectedSources, setSelectedSources] = useState<Source[]>([]);
   const [requestedSource, setRequestedSource] = useState<SearchSourceRequest | null>(null);
   const [requestedLifeEvent, setRequestedLifeEvent] = useState<{ id: string; serial: number } | null>(null);
+  const [requestedContact, setRequestedContact] = useState<{ id: string; serial: number } | null>(null);
   const sourceOpenSequence = useRef(0);
   const [chatDraft, setChatDraft] = useState('');
   const [suggestedTaskTitle, setSuggestedTaskTitle] = useState('');
@@ -232,7 +233,7 @@ export default function App() {
         page === 'research' ? null :
         page === 'tasks' ? null :
         page === 'contacts' ? null :
-        page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} /> :
+        page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} onOpenContact={(id) => { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); }} /> :
         page === 'time_model' ? null :
         page === 'evening_plans' ? null :
         page === 'work_states' ? null :
@@ -254,7 +255,7 @@ export default function App() {
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}
-      {contactsOpened && <div hidden={page !== 'contacts'}><ContactView visible={page === 'contacts'} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onOpenEvent={(id) => { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); }} /></div>}
+      {contactsOpened && <div hidden={page !== 'contacts'}><ContactView visible={page === 'contacts'} requestedContact={requestedContact} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onOpenEvent={(id) => { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); }} /></div>}
       {draftRulesOpened && <div hidden={page !== 'draft_rules'}><ChatRulesView visible={page === 'draft_rules'} scope="draft" /></div>}
       {planRulesOpened && <div hidden={page !== 'plan_rules'}><ChatRulesView visible={page === 'plan_rules'} scope="plan" /></div>}
       </Suspense>
