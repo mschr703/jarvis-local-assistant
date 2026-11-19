@@ -34,6 +34,25 @@ hinzufügen. Dort den absoluten Pfad zum Ordner `day_notes` eintragen. Mit Power
 liefert `(Resolve-Path ..\jarvis-private-modules\day_notes).Path` den passenden Wert.
 Die Oberfläche zeigt die deklarierte Version, Datenversion und Abhängigkeiten an.
 
+## Paket aktualisieren
+
+Für ein neues Paket desselben Moduls zuerst **Module → Deaktivieren** wählen. Den
+absoluten Pfad zum neuen Paketordner in das Feld oben eintragen und beim betroffenen
+Modul **Aktualisieren** klicken. Danach das Modul erneut aktivieren. Es muss nicht
+vorher entfernt werden; vorhandene Daten bleiben. In PowerShell geht derselbe
+Austausch mit:
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\module_package.py upgrade ..\jarvis-private-modules\day_notes
+```
+
+Jarvis vergleicht die drei kopierten Dateien mit der Quelle, speichert den neuen
+SHA-256-Beleg und stellt das bisherige Paket wieder her, wenn der Austausch oder
+die Belegspeicherung scheitert. Eine niedrigere Datenversion als die bereits
+gespeicherte wird abgewiesen. Die Datenmigration läuft erst bei der anschließenden
+Aktivierung; scheitert sie, wird ihre Datenbanktransaktion zurückgenommen und das
+Modul bleibt inaktiv. Nach einem UI-Code-Update den Browser neu laden.
+
 Liegt das private Repository schon neben dem Hauptordner, den `git clone`-Schritt
 überspringen. `module_package.py` liest wie Jarvis den Datenordner aus `.env`
 oder `JARVIS_DATA_DIR`; ohne eigene Einstellung nutzt es
@@ -68,9 +87,9 @@ Die Installation kopiert diese drei lokalen Dateien in `<JARVIS_DATA_DIR>/module
 Es gibt keinen automatischen Download oder Hot-Update von GitHub.
 Jarvis speichert ihre gemeinsame SHA-256-Prüfsumme lokal in `jarvis.db`. Ändert sich
 eine installierte Datei danach, sperrt Jarvis das Modul samt API, UI und Werkzeugen.
-In **Module** erst deaktivieren, dann das Paket entfernen und bewusst aus der
-vertrauten Quelle neu installieren. Eine aktualisierte Quelle kann so mit höherer
-`data_version` migrieren; eine ältere Datenversion wird abgewiesen.
+In **Module** erst deaktivieren, dann das Paket aus einer vertrauten Quelle
+aktualisieren oder entfernen und neu installieren. Eine aktualisierte Quelle kann
+mit höherer `data_version` migrieren; eine ältere Datenversion wird abgewiesen.
 
 `module.py` stellt `migrate(connection, from_version)` und `create_app(db)` bereit.
 Eine Migration läuft nur beim Schritt zu einer höheren `data_version`; die
@@ -125,7 +144,7 @@ werden im Modulstatus gezeigt, während der Kern weiterläuft.
 Der zweite Befehl startet einen isolierten Edge-Klicktest mit temporärem
 Datenprofil und benötigt freie Ports 8765/5173. Er prüft Installation,
 Aktivierung, privates UI-Bundle, Speichern, Reload, Deaktivierung, gesperrte
-API/UI-Routen und Werkzeuge, Reaktivierung, Entfernen/Wiederinstallieren mit
-erhaltenen Daten und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
+API/UI-Routen und Werkzeuge, Reaktivierung, direkten Paketwechsel,
+Entfernen/Wiederinstallieren mit erhaltenen Daten und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
 Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
 beide Module gleichzeitig im echten Edge-Browser.

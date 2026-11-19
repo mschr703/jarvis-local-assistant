@@ -34,6 +34,17 @@ export function ModuleManagerView({ modules, onChanged }: {
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(''); }
   }
+  async function upgrade(item: InstalledModule) {
+    if (!source.trim()) return;
+    setBusy(item.id); setError('');
+    try {
+      await api(`/modules/${encodeURIComponent(item.id)}/upgrade`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: source.trim() }) });
+      setSource(''); onChanged();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(''); }
+  }
   async function remove(item: InstalledModule) {
     setBusy(item.id); setError('');
     try {
@@ -49,6 +60,7 @@ export function ModuleManagerView({ modules, onChanged }: {
     <section className="card">
       <h3>Lokales Paket installieren</h3>
       <p>Nur selbst geprüfte Paketordner verwenden. Der installierte Code läuft mit Jarvis-Prozessrechten.</p>
+      <p>Für ein Update zuerst das Modul deaktivieren, hier den neuen Paketordner eingeben und bei dem Modul „Aktualisieren“ wählen. Danach wieder aktivieren.</p>
       <label htmlFor="module-source">Absoluter Pfad zum Paketordner</label>
       <input id="module-source" value={source} onChange={(event) => setSource(event.target.value)} />
       <button disabled={busy !== '' || !source.trim()} onClick={() => void install()}>Installieren</button>
@@ -60,6 +72,7 @@ export function ModuleManagerView({ modules, onChanged }: {
       <p>Vertrauenswürdiger lokaler Code mit Prozessrechten. Deklarierte Nutzung: {item.permissions.join(', ') || 'keine'}{item.dependencies.length ? ` · Benötigt: ${item.dependencies.join(', ')}` : ''}</p>
       {item.error && <p className="notice error" role="alert">{item.error}</p>}
       <button disabled={busy === item.id || (item.api === 0 && !item.requested_enabled)} onClick={() => void toggle(item)}>{item.enabled || (item.api === 0 && item.requested_enabled) ? 'Deaktivieren' : 'Aktivieren'}</button>
+      {item.api !== 0 && <button disabled={busy !== '' || item.enabled || item.requested_enabled || !source.trim()} onClick={() => void upgrade(item)}>Aktualisieren</button>}
       {!item.enabled && <button disabled={busy === item.id || item.id === '_directory' || item.requested_enabled} onClick={() => void remove(item)}>Entfernen (Daten behalten)</button>}
     </section>)}
   </>;

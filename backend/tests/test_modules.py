@@ -440,6 +440,44 @@ def test_modified_installed_package_is_blocked_until_reinstalled(tmp_path):
         assert client.get("/modules/sample_notes/entries").json() == ["preserved"]
 
 
+def test_module_upgrade_failure_restores_previous_package(tmp_path, monkeypatch):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/upgrade", headers=headers,
+                           json={"path": str(source)}).status_code == 422
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        target = data_dir / "modules" / "sample_notes"
+        previous_digest = package_digest(target)
+        manifest = source / "jarvis-module.json"
+        changed = json.loads(manifest.read_text(encoding="utf-8"))
+        changed["version"] = "0.2.0"
+        manifest.write_text(json.dumps(changed), encoding="utf-8")
+        db = client.app.state.modules.db
+        original = db.set_settings
+
+        def fail_receipt(values):
+            if "module.sample_notes.package_sha256" in values:
+                raise OSError("injected receipt failure")
+            return original(values)
+
+        monkeypatch.setattr(db, "set_settings", fail_receipt)
+        failed = client.post("/modules/sample_notes/upgrade", headers=headers,
+                             json={"path": str(source)})
+        assert failed.status_code == 409
+        monkeypatch.setattr(db, "set_settings", original)
+        assert package_digest(target) == previous_digest
+        assert not list(data_dir.glob(".jarvis-module-*"))
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").status_code == 200
+
+
 def test_module_upgrade_migrates_existing_data_once(tmp_path):
     source_root = tmp_path / "source"
     install_fixture(source_root)
@@ -453,7 +491,6 @@ def test_module_upgrade_migrates_existing_data_once(tmp_path):
         assert client.post("/modules/sample_notes/entries", headers=headers,
                            json={"value": "old row"}).status_code == 200
         assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
-        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 200
         manifest = source / "jarvis-module.json"
         upgraded = json.loads(manifest.read_text(encoding="utf-8"))
         upgraded.update(version="0.2.0", data_version=2)
@@ -466,8 +503,10 @@ def test_module_upgrade_migrates_existing_data_once(tmp_path):
             "    if from_version < 2:\n"
             "        connection.execute(\"ALTER TABLE fixture_module ADD COLUMN tag TEXT DEFAULT 'kept'\")"),
             encoding="utf-8")
-        assert client.post("/modules/install", headers=headers,
-                           json={"path": str(source)}).status_code == 200
+        upgraded_response = client.post("/modules/sample_notes/upgrade", headers=headers,
+                                        json={"path": str(source)})
+        assert upgraded_response.status_code == 200, upgraded_response.text
+        assert upgraded_response.json()["version"] == "0.2.0"
         assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
         assert client.get("/modules/sample_notes/entries").json() == ["old row"]
         assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200

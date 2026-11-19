@@ -1110,6 +1110,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except OSError as exc:
             raise HTTPException(409, "Modulpaket konnte nicht kopiert werden") from exc
 
+    @app.post("/modules/{module_id}/upgrade")
+    async def module_upgrade(module_id: str, data: ModuleInstallInput):
+        source = Path(data.path)
+        if not source.is_absolute() or str(source).startswith("\\\\"):
+            raise HTTPException(422, "Lokaler absoluter Modulpfad erforderlich")
+        try:
+            return await run_in_threadpool(modules.upgrade_from, module_id, source)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, "Modulpaket konnte nicht aktualisiert werden") from exc
+
     @app.post("/modules/{module_id}/enable")
     async def module_enable(module_id: str):
         await run_in_threadpool(modules.refresh)

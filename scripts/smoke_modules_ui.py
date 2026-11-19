@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,12 @@ def main() -> None:
     with TemporaryDirectory(prefix="jarvis-module-ui-") as temporary:
         root = Path(temporary)
         data = root / "data"
+        upgrade_source = root / "source" / "day_notes"
+        shutil.copytree(args.module_source, upgrade_source)
+        upgrade_manifest = upgrade_source / "jarvis-module.json"
+        upgraded = json.loads(upgrade_manifest.read_text(encoding="utf-8"))
+        upgraded["version"] = "0.2.0"
+        upgrade_manifest.write_text(json.dumps(upgraded), encoding="utf-8")
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama")
         with (root / "server.log").open("w", encoding="utf-8") as log:
@@ -82,6 +89,15 @@ def main() -> None:
                         page.get_by_role("button", name="Tagesnotizen").click()
                         expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
                         page.get_by_role("button", name="Module", exact=True).click()
+                        page.get_by_label("Absoluter Pfad zum Paketordner").fill(
+                            str(upgrade_source.absolute()))
+                        page.get_by_role("button", name="Deaktivieren").click()
+                        page.get_by_role("button", name="Aktualisieren").click()
+                        expect(page.get_by_text("Version 0.2.0", exact=False)).to_be_visible()
+                        page.get_by_role("button", name="Aktivieren").click()
+                        page.get_by_role("button", name="Tagesnotizen").click()
+                        expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
+                        page.get_by_role("button", name="Module", exact=True).click()
                         page.get_by_role("button", name="Deaktivieren").click()
                         page.get_by_role("button", name="Entfernen (Daten behalten)").click()
                         expect(page.get_by_text("Keine Module installiert.", exact=False)).to_be_visible()
@@ -111,6 +127,7 @@ def main() -> None:
                                           "disabled_api_and_ui": "blocked",
                                           "disabled_tool": "blocked",
                                           "data_after_reinstall": "retained",
+                                          "package_upgrade": "data_retained",
                                           "modified_package": "blocked_and_recovered",
                                           "mobile_width": "fits"}))
                     finally:

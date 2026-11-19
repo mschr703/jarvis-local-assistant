@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
@@ -119,6 +120,57 @@ def install_package(source: Path, data_dir: Path, db: Database | None = None) ->
     return manifest.id
 
 
+def upgrade_package(source: Path, data_dir: Path, db: Database,
+                    expected_id: str | None = None) -> str:
+    manifest = checked_package(source)
+    if expected_id is not None and manifest.id != expected_id:
+        raise ValueError("Paketordner gehört zu einem anderen Modul")
+    root = Path(data_dir) / "modules"
+    target = root / manifest.id
+    if root.is_symlink() or root.is_junction() or not _safe_directory(target, root):
+        raise ValueError("Modul ist nicht installiert")
+    if target.resolve() == Path(source).resolve():
+        raise ValueError("Installierter Ordner kann nicht seine eigene Updatequelle sein")
+    if db.get_settings().get(f"module.{manifest.id}.enabled") == "1":
+        raise ValueError("Modul vor dem Update deaktivieren")
+    checked_package(target)
+    stored_version = db.get_settings().get(f"module.{manifest.id}.data_version", "0")
+    try:
+        previous_version = int(stored_version)
+    except ValueError as exc:
+        raise ValueError("Gespeicherte Modul-Datenversion ist ungültig") from exc
+    if previous_version > manifest.data_version:
+        raise ValueError("Modulcode ist älter als die gespeicherten Moduldaten")
+    source_digest = package_digest(source)
+    nonce = uuid4().hex
+    stage = root.parent / f".jarvis-module-stage-{manifest.id}-{nonce}"
+    backup = root.parent / f".jarvis-module-backup-{manifest.id}-{nonce}"
+    stage.mkdir()
+    old_moved = False
+    new_moved = False
+    try:
+        for name in ("jarvis-module.json", "module.py", "ui.js"):
+            shutil.copyfile(Path(source) / name, stage / name)
+        if package_digest(stage) != source_digest:
+            raise ValueError("Modulquelle hat sich während des Updates geändert")
+        target.rename(backup)
+        old_moved = True
+        stage.rename(target)
+        new_moved = True
+        db.set_settings({f"module.{manifest.id}.package_sha256": source_digest})
+    except BaseException:
+        if new_moved:
+            shutil.rmtree(target)
+        if old_moved:
+            backup.rename(target)
+        raise
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+    shutil.rmtree(backup, ignore_errors=True)
+    return manifest.id
+
+
 def remove_package(module_id: str, data_dir: Path, db: Database) -> str:
     if not MODULE_ID.fullmatch(module_id):
         raise ValueError("Ungültige Modul-ID")
@@ -167,6 +219,14 @@ class ModuleRegistry:
             module_id = install_package(source, self.directory.parent, self.db)
             self.refresh()
             return self._summary(module_id)
+
+    def upgrade_from(self, module_id: str, source: Path) -> dict[str, Any]:
+        with self._lock:
+            if module_id in self._apps:
+                raise ValueError("Modul vor dem Update deaktivieren")
+            upgraded = upgrade_package(source, self.directory.parent, self.db, module_id)
+            self.refresh()
+            return self._summary(upgraded)
 
     def remove_installed(self, module_id: str) -> dict[str, Any]:
         with self._lock:
