@@ -4,8 +4,10 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import expect, sync_playwright
 from smoke_code_project_ui import wait_ui
@@ -81,15 +83,48 @@ def main() -> None:
                         page.get_by_role("button", name="Suchen").click()
                         expect(page.locator(".item-list .item-row").filter(has_text="Alex"))\
                             .to_have_count(1)
+                        page.locator(".item-row").filter(has_text="Kunstmuseum besuchen")\
+                            .get_by_role("button", name="Wieder öffnen").click()
+                        page.locator(".item-row").filter(has_text="Kunstmuseum besuchen")\
+                            .get_by_role("button", name="Erinnerungsaufgabe vorbereiten").click()
+                        suggested = "Mit Alex (München privat): Kunstmuseum besuchen"
+                        expect(page.get_by_label("Aufgabe", exact=True)).to_have_value(suggested)
+                        due = (datetime.now(UTC) + timedelta(days=3)).astimezone(
+                            ZoneInfo("Europe/Paris")).strftime("%Y-%m-%dT%H:%M")
+                        page.get_by_label("Lokale Fälligkeit").fill(due)
+                        expect(page.get_by_role("button", name="Aufgabe speichern"))\
+                            .to_be_enabled(timeout=10000)
+                        page.get_by_role("button", name="Aufgabe speichern").click()
+                        expect(page.get_by_text("Aufgabe gespeichert.", exact=False))\
+                            .to_be_visible()
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        choice = page.get_by_label("Erinnerungsaufgabe für Kunstmuseum besuchen")
+                        expect(choice.locator("option")).to_have_count(2)
+                        task_id = choice.locator("option").nth(1).get_attribute("value")
+                        assert task_id
+                        choice.select_option(task_id)
+                        page.get_by_role("button", name="Aufgabe verbinden").click()
+                        expect(page.get_by_text("Erinnerungsaufgabe:", exact=False))\
+                            .to_contain_text("ausstehend")
+                        page.get_by_role("button", name="Aufgaben", exact=True).click()
+                        task_row = page.locator(".item-row").filter(has_text=suggested)
+                        task_row.get_by_role("button", name="Ändern").click()
+                        page.get_by_label("Aufgabe", exact=True).fill("Kunstmuseum mit Alex verschoben")
+                        page.get_by_role("button", name="Änderung speichern").click()
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        expect(page.get_by_text("Erinnerungsaufgabe:", exact=False))\
+                            .to_contain_text("Aufgabe geändert")
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM contacts").fetchone()[0] == 2
-                            assert connection.execute("SELECT status FROM contact_plans").fetchone()[0] == "completed"
+                            assert connection.execute("SELECT status FROM contact_plans").fetchone()[0] == "open"
+                            assert connection.execute("SELECT count(*) FROM contact_plan_reminders").fetchone()[0] == 1
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"same_name": "distinct_contexts",
                                           "note": "created_and_corrected",
                                           "plan": "created_completed_and_corrected",
+                                          "reminder": "prepared_linked_and_changed",
                                           "search": "notes_and_plans",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:

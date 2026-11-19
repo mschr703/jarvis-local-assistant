@@ -120,9 +120,9 @@ def test_chat_attachment_message_reload_context_backup_and_delete(tmp_path, monk
         assert "Kaution für München" in " ".join(msg["content"] for msg in provider.calls[1])
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(data_dir, archive)["schema"] == 56
+    assert create_backup(data_dir, archive)["schema"] == 57
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 56
+    assert restore_backup(archive, restored)["schema"] == 57
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
                                         JARVIS_OLLAMA_MODEL="fixture"))) as client:
         headers = token(client)
@@ -299,7 +299,7 @@ def test_text_pdf_attachment_keeps_original_and_page_context(tmp_path, monkeypat
         assert client.get(f"/chats/{chat}").json()["messages"][0]["attachments"][0]["filename"] == "Mietbeleg.pdf"
         assert client.get(f"/chats/{chat}/attachments/{attachment_id}").content == original
     archive = tmp_path / "pdf-backup.zip"
-    assert create_backup(data_dir, archive)["schema"] == 56
+    assert create_backup(data_dir, archive)["schema"] == 57
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
@@ -376,7 +376,7 @@ def test_image_attachment_uses_local_vision_model_and_keeps_original(tmp_path, m
         assert models == ["vision-fixture", "text-fixture"]
         assert all("images" not in message for message in provider.calls[1])
     archive = tmp_path / "image-backup.zip"
-    assert create_backup(data_dir, archive)["schema"] == 56
+    assert create_backup(data_dir, archive)["schema"] == 57
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     with TestClient(create_app(Settings(JARVIS_DATA_DIR=restored,
@@ -457,7 +457,7 @@ def test_schema52_migrates_to_chat_attachments_without_losing_messages(tmp_path)
         connection.execute("PRAGMA user_version=52")
     migrated = Database(path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 57
         assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 0
     assert migrated.list_messages(chat["id"])[0]["content"] == "Bestehende Nachricht"
 

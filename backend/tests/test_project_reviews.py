@@ -90,7 +90,7 @@ def test_source_task_changes_restart_catchup_and_restore(project, tmp_path):
     assert restarted.tick(local(2027, 1, 5, 20, 0)) == []
     assert restarted.status(state_id)["next_local_date"] == "2027-01-07"
     archive = tmp_path / "reviews.zip"
-    assert create_backup(db.path.parent, archive)["schema"] == 56
+    assert create_backup(db.path.parent, archive)["schema"] == 57
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     restored_db = Database(restored / "jarvis.db")

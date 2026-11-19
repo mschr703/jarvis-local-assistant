@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import unicodedata
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from jarvis.db import Database, utcnow
@@ -71,8 +72,39 @@ class ContactStore:
             plans = db.execute("SELECT * FROM contact_plans WHERE contact_id=? "
                                "ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, "
                                "updated_at DESC,id DESC", (contact_id,)).fetchall()
+            links = db.execute("""SELECT l.*,t.title AS current_title,
+                t.status AS current_status,t.due_utc AS current_due_utc,
+                t.due_local AS current_due_local,t.timezone AS current_timezone,
+                (SELECT j.status FROM reminder_jobs j WHERE j.task_id=t.id
+                    AND j.due_utc=t.due_utc ORDER BY j.rowid DESC LIMIT 1)
+                    AS current_reminder_status
+                FROM contact_plan_reminders l
+                JOIN contact_plans p ON p.id=l.plan_id
+                LEFT JOIN tasks t ON t.id=l.task_id WHERE p.contact_id=?""",
+                (contact_id,)).fetchall()
+            reminders = {link["plan_id"]: self._reminder_status(dict(link)) for link in links}
             return {**dict(row), "notes": [dict(note) for note in notes],
-                    "plans": [dict(plan) for plan in plans]}
+                    "plans": [{**dict(plan), "reminder": reminders.get(plan["id"])}
+                              for plan in plans]}
+
+    @staticmethod
+    def _reminder_status(link: dict) -> dict:
+        if link["task_id"] is None:
+            status = "task_deleted"
+        elif link["current_status"] == "done":
+            status = "task_completed"
+        elif link["current_due_utc"] is None:
+            status = "due_removed"
+        elif (link["current_due_utc"] != link["due_utc_snapshot"]
+              or link["current_title"] != link["task_title_snapshot"]):
+            status = "task_changed"
+        elif link["current_reminder_status"] == "fired":
+            status = "fired"
+        elif link["current_reminder_status"] == "cancelled":
+            status = "cancelled"
+        else:
+            status = "active"
+        return {**link, "status": status}
 
     def create(self, name: str, context: str, relationship: str = "") -> dict:
         name = _clean(name, "Name", 120)
@@ -190,6 +222,69 @@ class ContactStore:
                 self._missing_or_conflict(db, "contact_plans", plan_id, version, contact_id)
             db.execute("UPDATE contacts SET version=version+1,updated_at=? WHERE id=?",
                        (utcnow(), contact_id))
+
+    def link_reminder(self, contact_id: str, plan_id: str, plan_version: int,
+                      task_id: str) -> dict:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            plan = db.execute("SELECT version,status FROM contact_plans WHERE id=? AND contact_id=?",
+                              (plan_id, contact_id)).fetchone()
+            if plan is None:
+                raise LookupError("Vorhaben nicht gefunden")
+            if plan["version"] != plan_version:
+                raise ContactConflict("Vorhaben wurde inzwischen geändert")
+            if plan["status"] != "open":
+                raise ValueError("Nur offene Vorhaben können eine Erinnerung erhalten")
+            task = db.execute("SELECT id,title,status,due_utc,due_local,timezone FROM tasks "
+                              "WHERE id=?", (task_id,)).fetchone()
+            if task is None:
+                raise LookupError("Aufgabe nicht gefunden")
+            if (task["status"] != "open" or not task["due_utc"]
+                    or datetime.fromisoformat(task["due_utc"]) <= datetime.now(UTC)):
+                raise ValueError("Nur offene Aufgaben mit zukünftiger Erinnerung können verknüpft werden")
+            now = utcnow()
+            try:
+                db.execute("""INSERT INTO contact_plan_reminders(
+                    plan_id,task_id,task_title_snapshot,due_utc_snapshot,
+                    due_local_snapshot,timezone_snapshot,linked_at)
+                    VALUES(?,?,?,?,?,?,?) ON CONFLICT(plan_id) DO UPDATE SET
+                    task_id=excluded.task_id,task_title_snapshot=excluded.task_title_snapshot,
+                    due_utc_snapshot=excluded.due_utc_snapshot,
+                    due_local_snapshot=excluded.due_local_snapshot,
+                    timezone_snapshot=excluded.timezone_snapshot,
+                    linked_at=excluded.linked_at""",
+                    (plan_id, task_id, task["title"], task["due_utc"],
+                     task["due_local"], task["timezone"], now))
+            except sqlite3.IntegrityError as exc:
+                raise ContactConflict("Diese Aufgabe ist bereits mit einem Vorhaben verbunden") from exc
+            db.execute("UPDATE contact_plans SET version=version+1,updated_at=? WHERE id=?",
+                       (now, plan_id))
+            db.execute("UPDATE contacts SET version=version+1,updated_at=? WHERE id=?",
+                       (now, contact_id))
+        return self._plan(contact_id, plan_id)
+
+    def unlink_reminder(self, contact_id: str, plan_id: str, plan_version: int) -> dict:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            plan = db.execute("SELECT version FROM contact_plans WHERE id=? AND contact_id=?",
+                              (plan_id, contact_id)).fetchone()
+            if plan is None:
+                raise LookupError("Vorhaben nicht gefunden")
+            if plan["version"] != plan_version:
+                raise ContactConflict("Vorhaben wurde inzwischen geändert")
+            removed = db.execute("DELETE FROM contact_plan_reminders WHERE plan_id=?",
+                                 (plan_id,))
+            if not removed.rowcount:
+                raise LookupError("Keine Erinnerung mit diesem Vorhaben verbunden")
+            now = utcnow()
+            db.execute("UPDATE contact_plans SET version=version+1,updated_at=? WHERE id=?",
+                       (now, plan_id))
+            db.execute("UPDATE contacts SET version=version+1,updated_at=? WHERE id=?",
+                       (now, contact_id))
+        return self._plan(contact_id, plan_id)
+
+    def _plan(self, contact_id: str, plan_id: str) -> dict:
+        return next(plan for plan in self.get(contact_id)["plans"] if plan["id"] == plan_id)
 
     @staticmethod
     def _missing_or_conflict(db: sqlite3.Connection, table: str, identifier: str,

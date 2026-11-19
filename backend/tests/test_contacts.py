@@ -1,5 +1,8 @@
 """Personal contacts stay distinct, editable, searchable, and backup safe."""
 
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,6 +11,12 @@ from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.contacts import ContactConflict, ContactStore
 from jarvis.db import Database
+from jarvis.tasks import TaskStore
+
+
+def future_due(days: int = 3) -> str:
+    return (datetime.now(UTC) + timedelta(days=days)).astimezone(
+        ZoneInfo("Europe/Paris")).strftime("%Y-%m-%dT%H:%M")
 
 
 def test_two_people_same_name_notes_search_and_backup(tmp_path):
@@ -25,9 +34,9 @@ def test_two_people_same_name_notes_search_and_backup(tmp_path):
     assert contacts.get(colleague["id"])["notes"] == []
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 56
+    assert create_backup(root, archive)["schema"] == 57
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 56
+    assert restore_backup(archive, restored_root)["schema"] == 57
     restored = ContactStore(Database(restored_root / "jarvis.db"))
     assert restored.get(friend["id"])["notes"][0]["content"] == "Wir wollen ins Museum."
     assert restored.get(colleague["id"])["notes"] == []
@@ -107,7 +116,7 @@ def test_schema_54_migrates_without_dropping_existing_data(tmp_path):
         connection.execute("PRAGMA user_version=54")
     migrated = Database(path)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 57
         assert connection.execute("SELECT detail FROM activity WHERE id='old'").fetchone()[0] == "kept"
     assert ContactStore(migrated).create("Alt", "Migration")["name"] == "Alt"
 
@@ -134,9 +143,9 @@ def test_shared_plans_search_versions_backup_and_cascade(tmp_path):
         store.update_plan(alex["id"], plan["id"], 2, "X", "", "maybe")
 
     archive = tmp_path / "backup.zip"
-    assert create_backup(root, archive)["schema"] == 56
+    assert create_backup(root, archive)["schema"] == 57
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 56
+    assert restore_backup(archive, restored_root)["schema"] == 57
     restored = ContactStore(Database(restored_root / "jarvis.db"))
     assert restored.get(alex["id"])["plans"][0]["title"] == "Kunstmuseum"
     restored.delete_plan(alex["id"], plan["id"], 2)
@@ -189,3 +198,100 @@ def test_schema_55_contacts_and_notes_survive_plan_migration(tmp_path):
     assert migrated.get(person["id"])["notes"][0]["id"] == note["id"]
     assert migrated.get(person["id"])["plans"] == []
     assert migrated.add_plan(person["id"], "Spaziergang")["status"] == "open"
+
+
+def test_plan_reminder_link_tracks_task_changes_and_delivery(tmp_path):
+    db = Database(tmp_path / "jarvis.db")
+    contacts = ContactStore(db)
+    tasks = TaskStore(db)
+    person = contacts.create("Mira", "Verein")
+    plan = contacts.add_plan(person["id"], "Museum")
+    due = future_due()
+    task = tasks.create("Mit Mira ins Museum", "", due, "Europe/Paris")
+    linked = contacts.link_reminder(person["id"], plan["id"], 1, task["id"])
+    assert linked["version"] == 2
+    assert linked["reminder"]["status"] == "active"
+    assert linked["reminder"]["task_title_snapshot"] == task["title"]
+    with pytest.raises(ContactConflict):
+        contacts.unlink_reminder(person["id"], plan["id"], 1)
+    another = contacts.add_plan(person["id"], "Kino")
+    with pytest.raises(ContactConflict):
+        contacts.link_reminder(person["id"], another["id"], 1, task["id"])
+    tasks.update(task["id"], "Mit Mira ins Kunstmuseum", "", due, "Europe/Paris")
+    assert next(p for p in contacts.get(person["id"])["plans"] if p["id"] == plan["id"])[
+        "reminder"]["status"] == "task_changed"
+    tasks.update(task["id"], "Mit Mira ins Kunstmuseum", "", None, "Europe/Paris")
+    assert next(p for p in contacts.get(person["id"])["plans"] if p["id"] == plan["id"])[
+        "reminder"]["status"] == "due_removed"
+    tasks.complete(task["id"])
+    assert next(p for p in contacts.get(person["id"])["plans"] if p["id"] == plan["id"])[
+        "reminder"]["status"] == "task_completed"
+    tasks.delete(task["id"])
+    stale = next(p for p in contacts.get(person["id"])["plans"] if p["id"] == plan["id"])
+    assert stale["reminder"]["status"] == "task_deleted"
+    assert stale["reminder"]["task_id"] is None
+    assert stale["reminder"]["task_title_snapshot"] == "Mit Mira ins Museum"
+    assert contacts.unlink_reminder(person["id"], plan["id"], 2)["reminder"] is None
+
+
+def test_reminder_link_backup_migration_and_actual_local_notification(tmp_path):
+    root = tmp_path / "data"
+    db = Database(root / "jarvis.db")
+    contacts = ContactStore(db)
+    tasks = TaskStore(db)
+    person = contacts.create("Alex", "München")
+    plan = contacts.add_plan(person["id"], "Kino")
+    task = tasks.create("Kino mit Alex", "", future_due(), "Europe/Paris")
+    contacts.link_reminder(person["id"], plan["id"], 1, task["id"])
+    archive = tmp_path / "backup.zip"
+    assert create_backup(root, archive)["schema"] == 57
+    restored_root = tmp_path / "restored"
+    assert restore_backup(archive, restored_root)["schema"] == 57
+    restored_db = Database(restored_root / "jarvis.db")
+    assert ContactStore(restored_db).get(person["id"])["plans"][0]["reminder"][
+        "status"] == "active"
+    future_utc = (datetime.fromisoformat(task["due_utc"]) + timedelta(minutes=1)).isoformat()
+    assert TaskStore(restored_db).fire_due(future_utc) == 1
+    assert ContactStore(restored_db).get(person["id"])["plans"][0]["reminder"][
+        "status"] == "fired"
+    with restored_db.connect() as connection:
+        assert connection.execute("SELECT title FROM notifications WHERE task_id=?",
+                                  (task["id"],)).fetchone()[0] == "Kino mit Alex"
+    with db.connect() as connection:
+        connection.execute("DROP TABLE contact_plan_reminders")
+        connection.execute("PRAGMA user_version=56")
+    migrated = ContactStore(Database(db.path))
+    assert migrated.get(person["id"])["plans"][0]["title"] == "Kino"
+    assert migrated.get(person["id"])["plans"][0]["reminder"] is None
+
+
+def test_reminder_link_api_rejects_stale_and_missing_due(tmp_path):
+    settings = Settings(JARVIS_DATA_DIR=tmp_path / "data", JARVIS_OLLAMA_MODEL="fixture")
+    with TestClient(create_app(settings)) as client:
+        csrf = client.get("/session").json()["csrf"]
+        headers = {"x-jarvis-csrf": csrf}
+        person = client.post("/contacts", json={"name": "Mira", "context": "Freundin"},
+                             headers=headers).json()
+        plan = client.post(f"/contacts/{person['id']}/plans", json={"title": "Wandern"},
+                           headers=headers).json()
+        task = client.post("/tasks", json={"title": "Wandern mit Mira", "notes": "",
+                                          "local_due": future_due(),
+                                          "timezone": "Europe/Paris"}, headers=headers).json()
+        endpoint = f"/contacts/{person['id']}/plans/{plan['id']}/reminder"
+        assert client.put(endpoint, json={"task_id": task["id"],
+                                          "expected_plan_version": 1}).status_code == 403
+        response = client.put(endpoint, json={"task_id": task["id"],
+                                              "expected_plan_version": 1}, headers=headers)
+        assert response.status_code == 200 and response.json()["reminder"]["status"] == "active"
+        assert client.put(endpoint, json={"task_id": task["id"],
+                                          "expected_plan_version": 1},
+                          headers=headers).status_code == 409
+        assert client.delete(f"{endpoint}?expected_plan_version=1",
+                             headers=headers).status_code == 409
+        assert client.delete(f"{endpoint}?expected_plan_version=2",
+                             headers=headers).status_code == 200
+        no_due = client.post("/tasks", json={"title": "Ohne Datum", "notes": "",
+                                            "timezone": "Europe/Paris"}, headers=headers).json()
+        assert client.put(endpoint, json={"task_id": no_due["id"],
+                                          "expected_plan_version": 3},
+                          headers=headers).status_code == 422

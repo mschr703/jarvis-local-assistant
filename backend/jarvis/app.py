@@ -205,6 +205,13 @@ class ContactPlanUpdateInput(ContactPlanInput):
     status: Literal["open", "completed"]
 
 
+class ContactPlanReminderInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_plan_version: int = Field(ge=1)
+    task_id: str = Field(min_length=1, max_length=80)
+
+
 class ChatSuggestionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -3350,6 +3357,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await run_in_threadpool(contacts.delete_plan, contact_id, plan_id,
                                     expected_version)
             return {"deleted": True}
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.put("/contacts/{contact_id}/plans/{plan_id}/reminder")
+    async def contact_plan_reminder_link(contact_id: str, plan_id: str,
+                                         data: ContactPlanReminderInput):
+        try:
+            return await run_in_threadpool(contacts.link_reminder, contact_id, plan_id,
+                                           data.expected_plan_version, data.task_id)
+        except ContactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/contacts/{contact_id}/plans/{plan_id}/reminder")
+    async def contact_plan_reminder_unlink(contact_id: str, plan_id: str,
+                                           expected_plan_version: int = Query(ge=1)):
+        try:
+            return await run_in_threadpool(contacts.unlink_reminder, contact_id, plan_id,
+                                           expected_plan_version)
         except ContactConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except LookupError as exc:

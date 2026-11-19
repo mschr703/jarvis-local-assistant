@@ -17,7 +17,7 @@ from jarvis.instance import InstanceLock
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_FILE_COUNT = 10_000
 MAX_DIRECTORY_COUNT = 2_000
-SUPPORTED_SCHEMA = 56
+SUPPORTED_SCHEMA = 57
 
 
 def sha256(path: Path) -> str:

@@ -83,9 +83,9 @@ def test_person_source_lifecycle_and_other_project_isolation(tmp_path):
     another = people.add(state["id"], refreshed["version"], "Noah", "contributor",
                          "Von mir eingetragen", None)
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 56
+    assert create_backup(root, archive)["schema"] == 57
     restored_root = tmp_path / "restored"
-    assert restore_backup(archive, restored_root)["schema"] == 56
+    assert restore_backup(archive, restored_root)["schema"] == 57
     restored_db = Database(restored_root / "jarvis.db")
     with restored_db.connect() as connection:
         assert connection.execute("SELECT name FROM project_people WHERE id=?",
@@ -157,7 +157,7 @@ def test_schema41_migrates_to_project_people_without_touching_work_states(tmp_pa
     assert ProjectPeopleStore(migrated, WorkStateStore(
         migrated, DocumentStore(migrated), TaskStore(migrated))).list_for_state(state["id"]) == []
     with sqlite3.connect(db.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 56
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 57
 
 
 def test_local_project_connections_show_provenance_changes_and_isolate_projects(tmp_path):

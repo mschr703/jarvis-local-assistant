@@ -4,16 +4,28 @@ import { api } from './api';
 type Note = { id: string; contact_id: string; content: string; source_kind: 'manual';
   version: number; created_at: string; updated_at: string };
 type Plan = { id: string; contact_id: string; title: string; details: string;
-  status: 'open' | 'completed'; version: number; created_at: string; updated_at: string };
+  status: 'open' | 'completed'; version: number; created_at: string; updated_at: string;
+  reminder: ReminderLink | null };
+type ReminderLink = { task_id: string | null; task_title_snapshot: string;
+  due_local_snapshot: string; timezone_snapshot: string; current_title: string | null;
+  current_status: string | null; current_due_local: string | null;
+  current_timezone: string | null;
+  status: 'active' | 'fired' | 'cancelled' | 'task_changed' | 'task_completed' | 'task_deleted' | 'due_removed' };
+type TaskOption = { id: string; title: string; status: 'open' | 'done';
+  due_utc: string | null; due_local: string | null; timezone: string | null };
 type Contact = { id: string; name: string; context: string; relationship: string;
   version: number; created_at: string; updated_at: string; note_count?: number;
   plan_count?: number; notes?: Note[]; plans?: Plan[] };
 type ContactForm = { name: string; context: string; relationship: string };
 const emptyForm = (): ContactForm => ({ name: '', context: '', relationship: '' });
 
-export default function ContactView({ visible }: { visible: boolean }) {
+export default function ContactView({ visible, onPrepareTask }: {
+  visible: boolean; onPrepareTask: (title: string) => void;
+}) {
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
+  const [chosenTasks, setChosenTasks] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Contact | null>(null);
   const [form, setForm] = useState<ContactForm>(emptyForm);
   const [editing, setEditing] = useState(false);
@@ -25,13 +37,23 @@ export default function ContactView({ visible }: { visible: boolean }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  const refreshRequest = useRef(0);
+  const openRequest = useRef(0);
 
   const reload = async (term = query, id = selected?.id) => {
-    const list = await api<Contact[]>(`/contacts?q=${encodeURIComponent(term.trim())}`);
+    const request = ++refreshRequest.current;
+    const selection = openRequest.current;
+    const [list, availableTasks] = await Promise.all([
+      api<Contact[]>(`/contacts?q=${encodeURIComponent(term.trim())}`),
+      api<TaskOption[]>('/tasks'),
+    ]);
+    if (request !== refreshRequest.current) return;
     setContacts(list);
+    setTasks(availableTasks);
     if (id) {
       const person = await api<Contact>(`/contacts/${encodeURIComponent(id)}`).catch(() => null);
-      setSelected(person);
+      if (request === refreshRequest.current && selection === openRequest.current)
+        setSelected(person);
     }
   };
   useEffect(() => { if (visible) void reload().catch((error: Error) => setNotice(error.message)); }, [visible]);
@@ -51,10 +73,13 @@ export default function ContactView({ visible }: { visible: boolean }) {
     } finally { inFlight.current = false; setBusy(false); }
   };
   const open = async (id: string) => {
+    ++refreshRequest.current;
+    const request = ++openRequest.current;
     setNotice(''); setEditing(false); setEditingNote(null); setNoteDraft('');
     setEditingPlan(null); setPlanTitle(''); setPlanDetails('');
     try {
       const person = await api<Contact>(`/contacts/${encodeURIComponent(id)}`);
+      if (request !== openRequest.current) return;
       setSelected(person);
       setForm(emptyForm());
     } catch (error) { setNotice((error as Error).message); }
@@ -62,13 +87,15 @@ export default function ContactView({ visible }: { visible: boolean }) {
   const saveContact = async () => {
     if (!editing || !selected) {
       const created = await api<Contact>('/contacts', { method: 'POST', body: JSON.stringify(form) });
-      setSelected(created); setForm(emptyForm());
+      setForm(emptyForm());
       return created.id;
     }
     await api<Contact>(`/contacts/${encodeURIComponent(selected.id)}`, { method: 'PUT',
       body: JSON.stringify({ ...form, expected_version: selected.version }) });
     return selected.id;
   };
+  const eligibleTasks = tasks.filter((task) => task.status === 'open' && task.due_utc
+    && new Date(task.due_utc).getTime() > Date.now());
 
   return <div className="section-stack"><h2>Kontakte</h2>
     <p className="intro">Personen und bestätigte Notizen bleiben lokal. Nutze einen eindeutigen Kontext, wenn zwei Menschen denselben Namen haben. Notizen werden nur gespeichert, wenn du sie selbst einträgst.</p>
@@ -124,12 +151,25 @@ export default function ContactView({ visible }: { visible: boolean }) {
       </div><div className="item-actions"><button disabled={busy} onClick={() => { setEditingPlan(plan.id); setPlanTitle(plan.title); setPlanDetails(plan.details); }}>Bearbeiten</button>
         <button disabled={busy} onClick={() => void change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}`,
           { method: 'PUT', body: JSON.stringify({ title: plan.title, details: plan.details, status: plan.status === 'open' ? 'completed' : 'open', expected_version: plan.version }) }),
-        plan.status === 'open' ? 'Vorhaben als erledigt markiert.' : 'Vorhaben wieder geöffnet.')}>{plan.status === 'open' ? 'Erledigt' : 'Wieder öffnen'}</button>
+        plan.status === 'open' ? plan.reminder ? 'Vorhaben erledigt. Die verknüpfte Aufgabe bleibt separat offen.' : 'Vorhaben als erledigt markiert.' : 'Vorhaben wieder geöffnet.')}>{plan.status === 'open' ? 'Erledigt' : 'Wieder öffnen'}</button>
         <button disabled={busy} onClick={() => void (async () => {
           if (!window.confirm(`Vorhaben „${plan.title}“ löschen?`)) return;
           const done = await change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}?expected_version=${plan.version}`, { method: 'DELETE' }), 'Vorhaben gelöscht.');
           if (done && editingPlan === plan.id) { setEditingPlan(null); setPlanTitle(''); setPlanDetails(''); }
-        })()}>Löschen</button></div></div>)}</div>
+        })()}>Löschen</button></div>
+        {plan.reminder && <p role="status">Erinnerungsaufgabe: {plan.reminder.current_title || plan.reminder.task_title_snapshot} · {plan.reminder.current_due_local || plan.reminder.due_local_snapshot} {plan.reminder.current_timezone || plan.reminder.timezone_snapshot} · {{ active: 'ausstehend', fired: 'ausgelöst', cancelled: 'abgebrochen', task_changed: 'Aufgabe geändert – bitte prüfen', task_completed: 'Aufgabe erledigt', task_deleted: 'Aufgabe gelöscht – Verknüpfung prüfen', due_removed: 'Fälligkeit entfernt – keine Erinnerung mehr' }[plan.reminder.status]}</p>}
+        {plan.reminder && ['task_changed', 'due_removed', 'task_deleted'].includes(plan.reminder.status) && <small>Beim Verknüpfen: {plan.reminder.task_title_snapshot} · {plan.reminder.due_local_snapshot} {plan.reminder.timezone_snapshot}</small>}
+        {plan.status === 'open' && <div className="memory-form"><button disabled={busy} onClick={() => onPrepareTask(`Mit ${selected.name} (${selected.context}): ${plan.title}`)}>Erinnerungsaufgabe vorbereiten</button>
+          <select aria-label={`Erinnerungsaufgabe für ${plan.title}`} value={chosenTasks[plan.id] || ''}
+            onChange={(event) => setChosenTasks((current) => ({ ...current, [plan.id]: event.target.value }))}>
+            <option value="">Aufgabe mit zukünftiger Erinnerung wählen</option>
+            {eligibleTasks.map((task) => <option key={task.id} value={task.id}>{task.title} · {task.due_local} {task.timezone}</option>)}
+          </select>
+          <button disabled={busy || !chosenTasks[plan.id]} onClick={() => void change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}/reminder`,
+            { method: 'PUT', body: JSON.stringify({ task_id: chosenTasks[plan.id], expected_plan_version: plan.version }) }), 'Erinnerungsaufgabe verbunden. Die Aufgabe bleibt unter „Aufgaben“ bearbeitbar.')}>Aufgabe verbinden</button>
+        </div>}
+        {plan.reminder && <button disabled={busy} onClick={() => void change(() => api(`/contacts/${encodeURIComponent(selected.id)}/plans/${encodeURIComponent(plan.id)}/reminder?expected_plan_version=${plan.version}`, { method: 'DELETE' }), 'Erinnerungsverknüpfung entfernt. Die Aufgabe bleibt bestehen.')}>Verknüpfung lösen</button>}
+      </div>)}</div>
       <h4>Bestätigte Notizen</h4><p>Quelle: manuell von dir eingetragen. Änderungen bleiben mit Zeitstempel nachvollziehbar.</p>
       <div className="memory-form"><textarea aria-label={editingNote ? 'Notiz bearbeiten' : 'Neue Kontaktnotiz'} maxLength={4000}
         value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="Was soll Jarvis über diese Person wissen?" />
