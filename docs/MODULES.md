@@ -52,6 +52,9 @@ die Belegspeicherung scheitert. Eine niedrigere Datenversion als die bereits
 gespeicherte wird abgewiesen. Die Datenmigration läuft erst bei der anschließenden
 Aktivierung; scheitert sie, wird ihre Datenbanktransaktion zurückgenommen und das
 Modul bleibt inaktiv. Nach einem UI-Code-Update den Browser neu laden.
+Ändert ein Update die Eingaben oder Eigenschaften bereits registrierter
+Modulwerkzeuge, Jarvis vor der erneuten Aktivierung neu starten; die alte
+Werkzeugdefinition des laufenden Prozesses wird bewusst nicht umgedeutet.
 Liegen im installierten Paketordner unerwartete Dateien, stoppt das Update und
 belässt diese Dateien dort. Erst nach eigener Prüfung entfernen oder verschieben.
 Wartet ein Modulwerkzeug noch auf Freigabe oder läuft es, sind Update und Entfernen
