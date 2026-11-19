@@ -39,7 +39,7 @@ def test_semantic_search_combines_three_local_source_kinds(tmp_path, monkeypatch
 
     monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
     found = search(db, "Was brauche ich für den Mietbeginn?", "http://127.0.0.1:11434")
-    assert found["counts"] == {"document": 1, "memory": 1, "project": 1}
+    assert found["counts"] == {"document": 1, "memory": 1, "project": 1, "life_event": 0}
     assert found["checked_passages"] == 1
     assert found["checked_memories"] == 1 and found["checked_projects"] == 1
     assert len(observed) == 4
@@ -77,7 +77,7 @@ def test_semantic_source_kind_filters_corpus_before_local_embedding(tmp_path, mo
             assert found["preferences"] == []
     found = search(db, "Was steht an?", "http://127.0.0.1:11434",
                    source_kind="document")
-    assert found["counts"] == {"document": 1, "memory": 0, "project": 0}
+    assert found["counts"] == {"document": 1, "memory": 0, "project": 0, "life_event": 0}
     assert found["checked_memories"] == found["checked_projects"] == 0
     assert len(calls[-1]) == 2
     with pytest.raises(ValueError, match="Quelltyp"):
@@ -100,7 +100,7 @@ def test_changed_memory_and_project_are_not_displayed(tmp_path, monkeypatch):
 
     monkeypatch.setattr("jarvis.semantic_search.embed_texts", change_during_embed)
     found = search(db, "Was steht an?", "http://127.0.0.1:11434")
-    assert found["counts"] == {"document": 1, "memory": 0, "project": 0}
+    assert found["counts"] == {"document": 1, "memory": 0, "project": 0, "life_event": 0}
     assert {(item["kind"], item["id"]) for item in found["changed_sources"]} == {
         ("memory", memory["id"]), ("project", project["id"])}
     assert all("Freitag" not in item["excerpt"] for item in found["results"])
@@ -125,7 +125,7 @@ def test_semantic_search_works_without_documents_and_bounds_saved_sources(tmp_pa
 
     monkeypatch.setattr(module, "embed_texts", fake_embed)
     found = search(db, "Welche Projekte?", "http://127.0.0.1:11434")
-    assert found["counts"] == {"document": 0, "memory": 2, "project": 2}
+    assert found["counts"] == {"document": 0, "memory": 2, "project": 2, "life_event": 0}
     assert found["checked_passages"] == 0
     assert found["checked_memories"] == 2 and found["checked_projects"] == 2
     assert len(observed) == 5 and found["limited"]
@@ -141,12 +141,14 @@ def test_semantic_source_api_returns_evidence(tmp_path, monkeypatch):
         found = client.get("/search/semantic", params={"q": "Wohnung"})
         assert found.status_code == 200
         body = found.json()
-        assert body["counts"] == {"document": 1, "memory": 1, "project": 1}
+        assert body["counts"] == {"document": 1, "memory": 1, "project": 1,
+                                   "life_event": 0}
         assert {memory["id"], project["id"]}.issubset(
             {item["id"] for item in body["results"]})
         filtered = client.get("/search/semantic", params={"q": "Wohnung", "kind": "project"})
         assert filtered.status_code == 200
-        assert filtered.json()["counts"] == {"document": 0, "memory": 0, "project": 1}
+        assert filtered.json()["counts"] == {"document": 0, "memory": 0, "project": 1,
+                                              "life_event": 0}
         assert client.get("/search/semantic", params={
             "q": "Wohnung", "kind": "project", "document_id": "wrong"}).status_code == 422
         assert client.get("/search/semantic", params={

@@ -135,6 +135,9 @@ class ContactStore:
                                       relationship, utcnow(), contact_id, version))
                 if not changed.rowcount:
                     self._missing_or_conflict(db, "contacts", contact_id, version)
+                db.execute("UPDATE memory_events SET version=version+1,updated_at=? "
+                           "WHERE id IN (SELECT event_id FROM memory_event_contacts "
+                           "WHERE contact_id=?)", (utcnow(), contact_id))
         except sqlite3.IntegrityError as exc:
             raise ContactConflict("Name und Kontext sind bereits vergeben") from exc
         return self.get(contact_id)

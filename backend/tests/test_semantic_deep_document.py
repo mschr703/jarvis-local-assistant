@@ -37,7 +37,7 @@ def test_deep_search_finds_later_passage_and_keeps_each_reference(tmp_path, monk
     db, docs, _, document, file = sample(tmp_path)
     monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
     broad = search(db, "Wie hoch ist die Kaution?", "http://127.0.0.1:11434")
-    assert broad["counts"] == {"document": 1, "memory": 1, "project": 1}
+    assert broad["counts"] == {"document": 1, "memory": 1, "project": 1, "life_event": 0}
     assert "Kaution beträgt" not in next(item["excerpt"] for item in broad["results"]
                                          if item["kind"] == "document")
     deep = search(db, "Wie hoch ist die Kaution?", "http://127.0.0.1:11434",
@@ -45,7 +45,7 @@ def test_deep_search_finds_later_passage_and_keeps_each_reference(tmp_path, monk
     assert deep["document_scope"] == {"id": document["id"], "title": file.name}
     assert deep["checked_passages"] > 3
     assert deep["checked_memories"] == deep["checked_projects"] == 0
-    assert deep["counts"] == {"document": 5, "memory": 0, "project": 0}
+    assert deep["counts"] == {"document": 5, "memory": 0, "project": 0, "life_event": 0}
     assert deep["limited"]
     assert "Kaution beträgt 900 Euro" in deep["results"][0]["excerpt"]
     assert len({item["passage_id"] for item in deep["results"]}) == 5

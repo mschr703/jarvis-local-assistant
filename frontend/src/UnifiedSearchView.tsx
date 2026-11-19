@@ -4,7 +4,6 @@ import { api, verifiedPdfPassageForLocalChat, verifiedPdfPassagesForLocalChat,
 import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project' | 'life_event';
-type SemanticKind = Exclude<Kind, 'life_event'>;
 type SourceKind = 'all' | Kind;
 type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: string;
   score: number; policy?: string; document_id?: string; passage_id?: number | null;
@@ -20,10 +19,10 @@ type SearchResult = { query: string; results: Hit[]; limited: boolean;
 type SemanticHit = Omit<Hit, 'score'> & { similarity: number; preference_status?: 'current' | 'updated' | null };
 type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
   checked_passages: number; checked_memories: number; checked_projects: number;
-  counts: Record<SemanticKind, number>; model: string;
+  checked_events: number; counts: Record<Kind, number>; model: string;
   document_scope: { id: string; title: string } | null;
   preferences: { document_id: string; path: string; status: Preference['status'] }[];
-  changed_sources: { kind: 'memory' | 'project'; id: string }[];
+  changed_sources: { kind: 'memory' | 'project' | 'life_event'; id: string }[];
   stale_sources: SearchResult['stale_sources'] };
 type SemanticStatus = { model: string; status: 'ready' | 'model_missing' | 'service_unavailable' | 'invalid_response' | 'invalid_url';
   service_available: boolean; ready: boolean; message: string };
@@ -111,8 +110,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
-    if (busy || cacheBusy || preparingChat || sourceKind === 'life_event'
-        || query.trim().length < 2) return;
+    if (busy || cacheBusy || preparingChat || query.trim().length < 2) return;
     setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
     setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     try {
@@ -288,9 +286,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
         </select></label>
-      <button type="button" disabled={busy || cacheBusy || !!preparingChat || sourceKind === 'life_event' || query.trim().length < 2}
+      <button type="button" disabled={busy || cacheBusy || !!preparingChat || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
-      {sourceKind === 'life_event' && <small>Lebensereignisse sind hier nur in der lokalen Stichwortsuche verfügbar.</small>}
       <div role="status"><small>{statusChecking ? 'Prüfe lokales Suchmodell…' :
         modelStatus?.message || 'Modellstatus noch nicht geprüft.'}</small>
         <button type="button" disabled={statusChecking} onClick={() => void refreshModelStatus()}>
@@ -303,14 +300,14 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           {cacheBusy ? 'Prüfe…' : 'Cache-Stand prüfen'}</button>
         <button type="button" disabled={cacheBusy || busy} onClick={() => void clearCache()}>
           Suchcache leeren</button></div>
-      <small>Leert nur berechnete Suchvektoren. Dokumente, Erinnerungen und Suchindex bleiben erhalten; die nächste sinngemäße Suche berechnet die Vektoren erneut.</small>
+      <small>Leert nur berechnete Suchvektoren. Dokumente, Erinnerungen, Lebensereignisse und Suchindex bleiben erhalten; die nächste sinngemäße Suche berechnet die Vektoren erneut.</small>
       <small>Benötigt lokal <code>embeddinggemma:300m</code>. {documentId ?
         'Im gewählten Dokument werden bis zu 100 Fundstellen und die fünf besten Treffer geprüft.' :
         sourceKind === 'memory' ? 'Es werden höchstens 30 gespeicherte Erinnerungen geprüft.' :
         sourceKind === 'project' ? 'Es werden höchstens 20 gespeicherte Arbeitsstände geprüft.' :
         sourceKind === 'document' ? 'Es werden höchstens 100 Fundstellen aus 30 Dateien geprüft.' :
-        sourceKind === 'life_event' ? 'Für Lebensereignisse ist die sinngemäße Suche derzeit nicht verfügbar.' :
-        'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen und 20 Arbeitsstände geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
+        sourceKind === 'life_event' ? 'Es werden höchstens 30 zuletzt geänderte, manuell bestätigte Lebensereignisse geprüft.' :
+        'Gemeinsam werden höchstens 100 Fundstellen aus 30 Dateien, 30 Erinnerungen, 20 Arbeitsstände und 30 Lebensereignisse geprüft. Für diese Frage bewusst vorgemerkte Dokumente werden innerhalb dieser Grenze zuerst geprüft.'} Die Ähnlichkeit ist kein Wahrheitsbeweis.</small>
     </form></section>
     {error && <p className="notice error" role="alert">{error}</p>}
     {notice && <p className="notice" role="status">{notice}</p>}
@@ -345,8 +342,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
       <p>{semantic.document_scope ?
         `${semantic.counts.document} Fundstellen aus ${semantic.document_scope.title}` :
-        `${semantic.counts.document} Dokumente · ${semantic.counts.memory} Erinnerungen · ${semantic.counts.project} Arbeitsstände`}</p>
-      <small>Geprüft: {semantic.checked_passages} Dokumentfundstellen, {semantic.checked_memories} Erinnerungen, {semantic.checked_projects} Arbeitsstände · Modell {semantic.model}</small>
+        `${semantic.counts.document} Dokumente · ${semantic.counts.memory} Erinnerungen · ${semantic.counts.project} Arbeitsstände · ${semantic.counts.life_event} Lebensereignisse`}</p>
+      <small>Geprüft: {semantic.checked_passages} Dokumentfundstellen, {semantic.checked_memories} Erinnerungen, {semantic.checked_projects} Arbeitsstände, {semantic.checked_events} Lebensereignisse · Modell {semantic.model}</small>
       {semantic.preferences.some((item) => item.status === 'needs_reindex' || item.status === 'unavailable') &&
         <div className="notice" role="status"><strong>Vorgemerkte Quellen nicht aktuell</strong>
           <p>Diese Dokumente wurden nicht an das Modell gesendet. Original und Freigabe prüfen; bei Änderungen neu indexieren.</p>
@@ -357,14 +354,15 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         'Die tiefe Suche prüft höchstens die ersten 100 Fundstellen dieser Datei und zeigt höchstens fünf Treffer.' :
         sourceKind === 'memory' ? 'Es wurden höchstens die 30 neuesten Erinnerungen geprüft und höchstens zehn Treffer angezeigt.' :
         sourceKind === 'project' ? 'Es wurden höchstens die 20 neuesten Arbeitsstände geprüft und höchstens zehn Treffer angezeigt.' :
+        sourceKind === 'life_event' ? 'Es wurden höchstens die 30 zuletzt geänderten Lebensereignisse geprüft und höchstens zehn Treffer angezeigt.' :
         sourceKind === 'document' ? 'Es wurden höchstens 30 Dateien und 100 Fundstellen geprüft, je Datei die ersten drei; höchstens zehn Treffer erscheinen.' :
-        'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich die 30 neuesten Erinnerungen und 20 neuesten Arbeitsstände; höchstens zehn Treffer je Quellart.'}</p>}
+        'Die Kandidaten oder Treffer sind begrenzt. Dokumente: höchstens 30 Dateien und 100 Fundstellen in Pfadreihenfolge, je Datei die ersten drei. Zusätzlich 30 neueste Erinnerungen, 20 neueste Arbeitsstände und 30 zuletzt geänderte Lebensereignisse; höchstens zehn Treffer je Quellart.'}</p>}
       {semantic.stale_sources.length > 0 && <div className="notice" role="status">
         <strong>Originaldateien und Index weichen ab</strong><p>Die alten Auszüge werden nicht als Treffer gezeigt. Die betroffene Datei einzeln neu indexieren und die sinngemäße Suche danach ausdrücklich erneut starten.</p>
         <ul>{semantic.stale_sources.map((item) => <li key={item.document_id} style={{ overflowWrap: 'anywhere' }}>{item.path} <button type="button" disabled={busy || !!preparingChat} onClick={() => void reindexFromSearch(item.document_id)}>{reindexingDocument === item.document_id ? 'Indexiere…' : 'Diese Datei neu indexieren'}</button></li>)}</ul>
       </div>}
       {semantic.changed_sources.length > 0 && <p className="notice" role="status">
-        {semantic.changed_sources.length} gespeicherte Erinnerungen oder Arbeitsstände wurden während der Suche geändert oder entfernt und daher nicht als Treffer angezeigt. Erneut suchen.
+        {semantic.changed_sources.length} persönliche Quellen wurden während der Suche geändert oder entfernt und daher nicht als Treffer angezeigt. Erneut suchen.
       </p>}
       {!semantic.results.length && <p>Keine aktuellen Quellen gefunden.</p>}
       <div className="item-list">{semantic.results.map((hit, index) => <article className="item-row" key={`${hit.kind}:${hit.id}:${hit.passage_id ?? ''}`}>

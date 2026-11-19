@@ -72,8 +72,8 @@ def main() -> None:
 
                         page.get_by_role("button", name="Suche", exact=True).click()
                         page.get_by_label("Quelltyp der gemeinsamen Suche").select_option("life_event")
-                        expect(page.get_by_role("button", name="Sinngemäß lokal suchen")).to_be_disabled()
                         page.get_by_label("Gemeinsame Suche").fill("cafe")
+                        expect(page.get_by_role("button", name="Sinngemäß lokal suchen")).to_be_enabled()
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         results = page.get_by_role("region", name="Suchergebnisse")
                         expect(results).to_contain_text("Café in Lyon")

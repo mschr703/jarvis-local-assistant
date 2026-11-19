@@ -20,6 +20,7 @@ MAX_PASSAGES = 100
 MAX_DOCUMENTS = 30
 MAX_MEMORIES = 30
 MAX_PROJECTS = 20
+MAX_EVENTS = 30
 MAX_RESULTS = 10
 MAX_DEEP_RESULTS = 5
 _cache_lock = threading.Lock()
@@ -209,15 +210,39 @@ def _project_body(row: dict) -> str:
                       (row["confirmed"], row["open_questions"], row["next_step"]) if part)
 
 
+EVENT_SELECT = """SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
+    e.updated_at,
+    (SELECT GROUP_CONCAT(name||' ('||context||')',' | ') FROM
+        (SELECT c.name,c.context FROM memory_event_contacts l
+         JOIN contacts c ON c.id=l.contact_id WHERE l.event_id=e.id
+         ORDER BY c.name_key,c.context_key,c.id)) AS contact_names,
+    (SELECT GROUP_CONCAT(name,' | ') FROM
+        (SELECT a.name FROM photo_assets a WHERE a.event_id=e.id
+         ORDER BY a.name,a.id)) AS photo_names
+    FROM memory_events e"""
+
+
+def _event_body(row: dict) -> str:
+    return " · ".join(str(part) for part in
+                      (row["date_local"], row["title"], row["location"],
+                       row["description"], row["contact_names"], row["photo_names"]) if part)
+
+
 def _record_is_current(db: Database, kind: str, row: dict) -> bool:
-    """Do not show a saved memory or work state changed during the Ollama call."""
+    """Do not show a personal source changed during the Ollama call."""
     if kind == "memory":
         fields = ("id", "text", "source_ref", "policy", "updated_at")
         table = "memories"
-    else:
+    elif kind == "project":
         fields = ("id", "project", "confirmed", "open_questions", "next_step",
                   "version", "updated_at")
         table = "work_states"
+    else:
+        fields = ("id", "date_local", "title", "description", "location", "version",
+                  "updated_at", "contact_names", "photo_names")
+        with db.connect() as connection:
+            current = connection.execute(EVENT_SELECT + " WHERE e.id=?", (row["id"],)).fetchone()
+        return current is not None and all(current[field] == row[field] for field in fields)
     with db.connect() as connection:
         current = connection.execute(
             f"SELECT {','.join(fields)} FROM {table} WHERE id=?", (row["id"],)
@@ -242,9 +267,9 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
     if source_kind not in SOURCE_KINDS:
         raise ValueError("Unbekannter Such-Quelltyp")
-    if source_kind in {"memory", "project"} and (folder_id or document_id):
+    if source_kind in {"memory", "project", "life_event"} and (folder_id or document_id):
         raise ValueError("Dokumentfilter und Quelltyp passen nicht zusammen")
-    preferences = ([] if document_id or source_kind in {"memory", "project"}
+    preferences = ([] if document_id or source_kind in {"memory", "project", "life_event"}
                    else _preferences(db, cleaned))
     preferred_ids = [item["document_id"] for item in preferences
                      if item["status"] in {"current", "updated"}]
@@ -289,8 +314,12 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             SELECT id,project,confirmed,open_questions,next_step,version,updated_at
             FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?
         """, (MAX_PROJECTS + 1,))]
+        events = [] if document_id or source_kind not in {"all", "life_event"} else [
+            dict(row) for row in connection.execute(
+                EVENT_SELECT + " ORDER BY e.updated_at DESC,e.id DESC LIMIT ?",
+                (MAX_EVENTS + 1,))]
     limited = (len(rows) > MAX_PASSAGES or len(memories) > MAX_MEMORIES
-               or len(projects) > MAX_PROJECTS)
+               or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS)
     freshness: dict[str, bool] = {}
     fresh = []
     stale = []
@@ -313,24 +342,27 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
             fresh.append(row)
     memories = memories[:MAX_MEMORIES]
     projects = projects[:MAX_PROJECTS]
+    events = events[:MAX_EVENTS]
     corpus = ([('document', row, row["text"]) for row in fresh]
               + [('memory', row, f'{row["source_ref"]}\n{row["text"]}') for row in memories]
-              + [('project', row, f'{row["project"]}\n{_project_body(row)}') for row in projects])
+              + [('project', row, f'{row["project"]}\n{_project_body(row)}') for row in projects]
+              + [('life_event', row, _event_body(row)) for row in events])
     if not corpus:
         if stale:
             PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
         return {"query": cleaned, "results": [], "stale_sources": stale,
                 "changed_sources": [], "limited": limited, "model": MODEL,
                 "checked_passages": checked_passages, "checked_memories": 0,
-                "checked_projects": 0, "document_scope": scope,
+                "checked_projects": 0, "checked_events": 0, "document_scope": scope,
                 "preferences": [{"document_id": item["document_id"],
                                  "path": item["path"], "status": item["status"]}
                                 for item in preferences],
-                "counts": {kind: 0 for kind in ("document", "memory", "project")}}
+                "counts": {kind: 0 for kind in ("document", "memory", "project",
+                                                  "life_event")}}
     vectors = embed_texts(ollama_url, [cleaned] + [body[:1200] for _, _, body in corpus],
                           db.path.parent / "semantic-embeddings.sqlite")
     question = vectors[0]
-    preferences = ([] if document_id or source_kind in {"memory", "project"}
+    preferences = ([] if document_id or source_kind in {"memory", "project", "life_event"}
                    else _preferences(db, cleaned))
     preferred_status = {item["document_id"]: item["status"] for item in preferences
                         if item["status"] in {"current", "updated"}}
@@ -346,7 +378,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     selected = []
     changed_sources = []
     seen_documents: set[str] = set()
-    counts = {kind: 0 for kind in ("document", "memory", "project")}
+    counts = {kind: 0 for kind in ("document", "memory", "project", "life_event")}
     for score, kind, row, body in ranked_results:
         result_limit = MAX_DEEP_RESULTS if document_id and kind == "document" else MAX_RESULTS
         if counts[kind] == result_limit:
@@ -384,22 +416,29 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                 selected.append({"kind": kind, "id": row["id"], "title": "Erinnerung",
                                  "source": row["source_ref"], "excerpt": row["text"][:500],
                                  "policy": row["policy"], "similarity": round(score, 3)})
-            else:
+            elif kind == "project":
                 selected.append({"kind": kind, "id": row["id"], "title": row["project"],
                                  "source": f'Arbeitsstand v{row["version"]}',
                                  "excerpt": _project_body(row)[:500],
+                                 "version": row["version"], "similarity": round(score, 3)})
+            else:
+                selected.append({"kind": kind, "id": row["id"], "title": row["title"],
+                                 "source": f'{row["date_local"]} · manuell bestätigt',
+                                 "excerpt": _event_body(row)[:500],
                                  "version": row["version"], "similarity": round(score, 3)})
         counts[kind] += 1
     limited = (limited or (len(fresh) > MAX_DEEP_RESULTS if document_id else
                           len({row["document_id"] for _, kind, row, _ in ranked_results
                                if kind == "document"}) > MAX_RESULTS)
-               or len(memories) > MAX_RESULTS or len(projects) > MAX_RESULTS)
+               or len(memories) > MAX_RESULTS or len(projects) > MAX_RESULTS
+               or len(events) > MAX_RESULTS)
     if stale or changed_sources:
         PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
     return {"query": cleaned, "results": selected, "stale_sources": stale,
             "changed_sources": changed_sources, "limited": limited,
             "model": MODEL, "checked_passages": checked_passages,
             "checked_memories": len(memories), "checked_projects": len(projects),
+            "checked_events": len(events),
             "counts": counts, "document_scope": scope,
             "preferences": [{"document_id": item["document_id"],
                              "path": item["path"], "status": item["status"]}

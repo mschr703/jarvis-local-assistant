@@ -1253,7 +1253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def semantic_search_view(q: str = Query(min_length=2, max_length=160),
                                    folder_id: str | None = Query(default=None, max_length=64),
                                    document_id: str | None = Query(default=None, max_length=64),
-                                   kind: str = Query(default="all", pattern="^(all|document|memory|project)$")):
+                                   kind: str = Query(default="all", pattern="^(all|document|memory|project|life_event)$")):
         try:
             return await run_in_threadpool(semantic_search, db, q, config.ollama_url,
                                            folder_id, document_id, kind)

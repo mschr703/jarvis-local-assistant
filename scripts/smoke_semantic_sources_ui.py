@@ -60,7 +60,7 @@ def main() -> None:
                         button = page.get_by_role("button", name="Sinngemäß lokal suchen")
                         button.click()
                         results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
-                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=120000)
+                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände · 0 Lebensereignisse")).to_be_visible(timeout=120000)
                         expect(results.locator("article").filter(has_text="Gespräch vom Dienstag")).to_be_visible()
                         expect(results.locator("article").filter(has_text="Umzug")).to_contain_text("Arbeitsstand v1")
                         expect(results.get_by_text("Ähnlichkeit", exact=False).first).to_be_visible()
@@ -76,11 +76,11 @@ def main() -> None:
                                 "button", name="Quelle öffnen").click()
                             expect(page.locator(f"#search-source-{kind}-{source_id}")).to_be_visible()
                             page.get_by_role("button", name="Suche", exact=True).click()
-                            expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible()
+                            expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände · 0 Lebensereignisse")).to_be_visible()
 
                         kind_select = page.get_by_label("Quelltyp der gemeinsamen Suche")
-                        for kind, label in (("memory", "0 Dokumente · 1 Erinnerungen · 0 Arbeitsstände"),
-                                            ("project", "0 Dokumente · 0 Erinnerungen · 1 Arbeitsstände")):
+                        for kind, label in (("memory", "0 Dokumente · 1 Erinnerungen · 0 Arbeitsstände · 0 Lebensereignisse"),
+                                            ("project", "0 Dokumente · 0 Erinnerungen · 1 Arbeitsstände · 0 Lebensereignisse")):
                             kind_select.select_option(kind)
                             assert page.get_by_label("Dokumentordner für sinngemäße Suche").is_disabled()
                             page.get_by_label("Gemeinsame Suche").fill("Schlüssel am Freitag")
@@ -96,7 +96,7 @@ def main() -> None:
                         page.get_by_label("Gemeinsame Suche").fill("Wie backe ich Apfelkuchen?")
                         button.click()
                         results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
-                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände")).to_be_visible(
+                        expect(results.get_by_text("1 Dokumente · 0 Erinnerungen · 0 Arbeitsstände · 0 Lebensereignisse")).to_be_visible(
                             timeout=120000)
                         expect(results.locator("article")).to_contain_text("Kuchen.md")
                         results.locator("article").get_by_role(
@@ -119,7 +119,7 @@ def main() -> None:
                             "Wann bekomme ich den Zugang zur neuen Wohnung?")
                         page.get_by_role("button", name="Sinngemäß lokal suchen").click()
                         results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
-                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände")).to_be_visible(timeout=120000)
+                        expect(results.get_by_text("1 Dokumente · 1 Erinnerungen · 1 Arbeitsstände · 0 Lebensereignisse")).to_be_visible(timeout=120000)
                         assert "Samstag" in results.inner_text()
                         assert "Freitag" not in results.inner_text()
                         expect(results.locator("article").filter(has_text="Umzug")).to_contain_text("Arbeitsstand v2")
