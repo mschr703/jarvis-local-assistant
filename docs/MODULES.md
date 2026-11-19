@@ -95,6 +95,8 @@ Ein Paketordner enthält genau `jarvis-module.json`, `module.py` und `ui.js`.
 Das Manifest nennt `id`, `name`, Semver-`version`, `api: 1`, `data_version`,
 `dependencies`, `permissions`, `navigation`, `view: "web_component_v1"` und
 `element` (einen `jarvis-…`-Custom-Element-Namen). Die ID muss zum Ordner passen.
+Leere oder Steuerzeichen enthaltende Beschriftungen, doppelte Rechte und eine
+Abhängigkeit von sich selbst werden schon bei der Installation abgewiesen.
 Die Installation kopiert diese drei lokalen Dateien in `<JARVIS_DATA_DIR>/modules/<id>`.
 Es gibt keinen automatischen Download oder Hot-Update von GitHub.
 Jarvis speichert ihre gemeinsame SHA-256-Prüfsumme lokal in `jarvis.db`. Ändert sich

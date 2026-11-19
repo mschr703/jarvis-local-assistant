@@ -22,7 +22,7 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
@@ -49,12 +49,32 @@ class ModuleManifest(BaseModel):
     permissions: list[Literal["local_data"]] = Field(default_factory=list, max_length=12)
     dependencies: list[str] = Field(default_factory=list, max_length=12)
 
+    @field_validator("name", "navigation")
+    @classmethod
+    def visible_label(cls, value: str) -> str:
+        if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("Modulname und Navigation brauchen sichtbaren Text")
+        return value.strip()
+
+    @field_validator("permissions")
+    @classmethod
+    def unique_permissions(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Doppelte Modulrechte")
+        return value
+
     @field_validator("dependencies")
     @classmethod
     def valid_dependencies(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)) or any(not MODULE_ID.fullmatch(item) for item in value):
             raise ValueError("Ungültige oder doppelte Modulabhängigkeit")
         return value
+
+    @model_validator(mode="after")
+    def no_self_dependency(self):
+        if self.id in self.dependencies:
+            raise ValueError("Modul hängt von sich selbst ab")
+        return self
 
 
 def _safe_directory(path: Path, root: Path) -> bool:
@@ -310,8 +330,6 @@ class ModuleRegistry:
                         raise ValueError("Modul-ID und Verzeichnisname unterscheiden sich")
                     if manifest.api != MODULE_API:
                         raise ValueError("Inkompatible Modul-API")
-                    if manifest.id in manifest.dependencies:
-                        raise ValueError("Modul hängt von sich selbst ab")
                     self._verify_package(manifest.id, path)
                     self._manifests[manifest.id] = manifest
                 except (ValueError, OSError) as exc:

@@ -145,6 +145,27 @@ def test_missing_saved_package_is_visible_and_can_be_reinstalled(tmp_path):
         assert client.get("/modules/sample_notes/entries").status_code == 200
 
 
+def test_invalid_manifest_labels_rights_and_self_dependency_fail_at_install(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    manifest = source / "jarvis-module.json"
+    base = json.loads(manifest.read_text(encoding="utf-8"))
+    with client_for(tmp_path / "data") as client:
+        headers = csrf(client)
+        for change in ({"name": "  "}, {"navigation": "\n"},
+                       {"permissions": ["local_data", "local_data"]},
+                       {"dependencies": ["sample_notes"]}):
+            manifest.write_text(json.dumps({**base, **change}), encoding="utf-8")
+            response = client.post("/modules/install", headers=headers,
+                                   json={"path": str(source)})
+            assert response.status_code == 422, (change, response.text)
+            assert client.get("/modules").json() == []
+        manifest.write_text(json.dumps(base), encoding="utf-8")
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+
+
 def test_module_bad_package_does_not_break_core_and_dependency_is_enforced(tmp_path):
     data_dir = tmp_path / "data"
     install_fixture(data_dir, "requires_other", ["other_module"])
@@ -581,3 +602,32 @@ def test_module_upgrade_migrates_existing_data_once(tmp_path):
     with db.connect() as connection:
         assert connection.execute("SELECT value,tag FROM fixture_module").fetchone()[:] == (
             "old row", "kept")
+
+
+def test_changed_module_tool_schema_needs_restart_after_upgrade(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        manifest = source / "jarvis-module.json"
+        changed = json.loads(manifest.read_text(encoding="utf-8"))
+        changed["version"] = "0.2.0"
+        manifest.write_text(json.dumps(changed), encoding="utf-8")
+        (source / "module.py").write_text(SAMPLE_MODULE.replace(
+            "class ListArgs(BaseModel):\n    pass",
+            "class ListArgs(BaseModel):\n    limit: int = 20"), encoding="utf-8")
+        assert client.post("/modules/sample_notes/upgrade", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        refused = client.post("/modules/sample_notes/enable", headers=headers)
+        assert refused.status_code == 409 and "neu starten" in client.get("/modules").json()[0]["error"]
+    with client_for(data_dir) as restarted:
+        headers = csrf(restarted)
+        assert restarted.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert any(item["name"] == "sample_notes__list_entries"
+                   for item in restarted.get("/tools").json())
