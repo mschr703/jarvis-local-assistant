@@ -16,7 +16,7 @@ export function ModuleManagerView({ modules, onChanged }: {
   async function toggle(item: InstalledModule) {
     setBusy(item.id); setError('');
     try {
-      await api(`/modules/${encodeURIComponent(item.id)}/${item.enabled ? 'disable' : 'enable'}`,
+      await api(`/modules/${encodeURIComponent(item.id)}/${item.enabled || item.requested_enabled ? 'disable' : 'enable'}`,
         { method: 'POST' });
       onChanged();
     } catch (cause) { setError((cause as Error).message); }
@@ -58,8 +58,8 @@ export function ModuleManagerView({ modules, onChanged }: {
       <p>Version {item.version} · Modul-API {item.api} · Datenversion {item.data_version || '?'}</p>
       <p>Vertrauenswürdiger lokaler Code mit Prozessrechten. Deklarierte Nutzung: {item.permissions.join(', ') || 'keine'}{item.dependencies.length ? ` · Benötigt: ${item.dependencies.join(', ')}` : ''}</p>
       {item.error && <p className="notice error" role="alert">{item.error}</p>}
-      <button disabled={busy === item.id || item.api === 0} onClick={() => void toggle(item)}>{item.enabled ? 'Deaktivieren' : 'Aktivieren'}</button>
-      {!item.enabled && <button disabled={busy === item.id || item.api === 0} onClick={() => void remove(item)}>Entfernen (Daten behalten)</button>}
+      <button disabled={busy === item.id || (item.api === 0 && !item.requested_enabled)} onClick={() => void toggle(item)}>{item.enabled || item.requested_enabled ? 'Deaktivieren' : 'Aktivieren'}</button>
+      {!item.enabled && <button disabled={busy === item.id || item.id === '_directory' || item.requested_enabled} onClick={() => void remove(item)}>Entfernen (Daten behalten)</button>}
     </section>)}
   </>;
 }

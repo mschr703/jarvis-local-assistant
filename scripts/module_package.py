@@ -13,7 +13,7 @@ from jarvis.modules import install_package, remove_package
 
 
 def install(source: Path, data_dir: Path) -> str:
-    return install_package(source, data_dir)
+    return install_package(source, data_dir, Database(data_dir / "jarvis.db"))
 
 
 def remove(module_id: str, data_dir: Path) -> str:

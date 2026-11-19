@@ -91,11 +91,27 @@ def main() -> None:
                         page.get_by_role("button", name="Aktivieren").click()
                         page.get_by_role("button", name="Tagesnotizen").click()
                         expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
+                        (data / "modules" / "day_notes" / "ui.js").write_text(
+                            "// changed after installation", encoding="utf-8")
+                        page.reload()
+                        page.get_by_role("button", name="Module", exact=True).click()
+                        expect(page.get_by_text("Paketdateien wurden seit Installation verändert",
+                                                exact=False)).to_be_visible()
+                        expect(page.get_by_role("button", name="Tagesnotizen")).to_have_count(0)
+                        page.get_by_role("button", name="Deaktivieren").click()
+                        page.get_by_role("button", name="Entfernen (Daten behalten)").click()
+                        page.get_by_label("Absoluter Pfad zum Paketordner").fill(
+                            str(args.module_source.absolute()))
+                        page.get_by_role("button", name="Installieren").click()
+                        page.get_by_role("button", name="Aktivieren").click()
+                        page.get_by_role("button", name="Tagesnotizen").click()
+                        expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
                         print(json.dumps({"module_ui": "private_bundle_loaded",
                                           "activation": "immediate",
                                           "disabled_api_and_ui": "blocked",
                                           "disabled_tool": "blocked",
                                           "data_after_reinstall": "retained",
+                                          "modified_package": "blocked_and_recovered",
                                           "mobile_width": "fits"}))
                     finally:
                         browser.close()

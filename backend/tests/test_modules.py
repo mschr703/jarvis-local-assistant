@@ -9,6 +9,7 @@ from jarvis.app import create_app
 from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
+from jarvis.modules import package_digest
 
 SAMPLE_MODULE = '''
 from fastapi import FastAPI
@@ -170,6 +171,7 @@ def create_app(db):
     with db.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='partial_module_data'").fetchone() is None
     source.write_text(SAMPLE_MODULE, encoding="utf-8")
+    db.set_settings({"module.sample_notes.package_sha256": package_digest(source.parent)})
     db.set_settings({"module.sample_notes.data_version": "2"})
     with client_for(data_dir) as client:
         headers = csrf(client)
@@ -266,3 +268,102 @@ def test_module_can_be_installed_and_removed_through_local_api(tmp_path):
         removed = client.post("/modules/sample_notes/remove", headers=headers)
         assert removed.status_code == 200 and removed.json()["data_retained"] is True
         assert client.get("/modules").json() == []
+
+
+def test_saved_module_system_exit_does_not_stop_core(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir)
+    (data_dir / "modules" / "sample_notes" / "module.py").write_text(
+        "raise SystemExit('optional module stopped')", encoding="utf-8")
+    Database(data_dir / "jarvis.db").set_settings({"module.sample_notes.enabled": "1"})
+    with client_for(data_dir) as client:
+        csrf(client)
+        item = client.get("/modules").json()[0]
+        assert item["enabled"] is False and "SystemExit" in item["error"]
+        assert client.get("/chats").status_code == 200
+
+
+def test_unreadable_module_directory_keeps_core_running(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    (data_dir / "modules").mkdir(parents=True)
+    original = Path.iterdir
+
+    def unreadable(path):
+        if path == data_dir / "modules":
+            raise PermissionError("unreadable fixture")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", unreadable)
+    with client_for(data_dir) as client:
+        csrf(client)
+        item = client.get("/modules").json()[0]
+        assert item["id"] == "_directory" and "nicht lesbar" in item["error"]
+        assert client.get("/chats").status_code == 200
+
+
+def test_modified_installed_package_is_blocked_until_reinstalled(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "preserved"}).status_code == 200
+        installed_ui = data_dir / "modules" / "sample_notes" / "ui.js"
+        installed_ui.write_text("// modified after installation", encoding="utf-8")
+        assert client.get("/modules/sample_notes/entries").status_code == 404
+        assert client.get("/modules/sample_notes/ui.js").status_code == 404
+        assert all(tool["name"] != "sample_notes__list_entries"
+                   for tool in client.get("/tools").json())
+        item = client.get("/modules").json()[0]
+        assert item["enabled"] is False and item["requested_enabled"] is True
+        assert "verändert" in item["error"]
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 200
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").json() == ["preserved"]
+
+
+def test_module_upgrade_migrates_existing_data_once(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "old row"}).status_code == 200
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 200
+        manifest = source / "jarvis-module.json"
+        upgraded = json.loads(manifest.read_text(encoding="utf-8"))
+        upgraded.update(version="0.2.0", data_version=2)
+        manifest.write_text(json.dumps(upgraded), encoding="utf-8")
+        (source / "module.py").write_text(SAMPLE_MODULE.replace(
+            "def migrate(connection, from_version):\n    if from_version == 0:\n"
+            "        connection.execute(\"CREATE TABLE IF NOT EXISTS fixture_module(value TEXT NOT NULL)\")",
+            "def migrate(connection, from_version):\n    if from_version == 0:\n"
+            "        connection.execute(\"CREATE TABLE IF NOT EXISTS fixture_module(value TEXT NOT NULL)\")\n"
+            "    if from_version < 2:\n"
+            "        connection.execute(\"ALTER TABLE fixture_module ADD COLUMN tag TEXT DEFAULT 'kept'\")"),
+            encoding="utf-8")
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": str(source)}).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.get("/modules/sample_notes/entries").json() == ["old row"]
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+    db = Database(data_dir / "jarvis.db")
+    assert db.get_settings()["module.sample_notes.data_version"] == "2"
+    with db.connect() as connection:
+        assert connection.execute("SELECT value,tag FROM fixture_module").fetchone()[:] == (
+            "old row", "kept")

@@ -7,6 +7,7 @@ keeps its tables in jarvis.db so the normal database backup includes its data.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -77,8 +78,23 @@ def checked_package(source: Path) -> ModuleManifest:
     return parsed
 
 
-def install_package(source: Path, data_dir: Path) -> str:
+def package_digest(source: Path) -> str:
+    digest = hashlib.sha256()
+    for name, limit in (("jarvis-module.json", 16_384), ("module.py", 2_000_000),
+                        ("ui.js", 200_000)):
+        path = Path(source) / name
+        if not path.is_file() or path.is_symlink() or path.is_junction():
+            raise ValueError("Paketdatei fehlt oder ist ein Link")
+        content = path.read_bytes()
+        if len(content) > limit:
+            raise ValueError("Paketdatei ist zu groß")
+        digest.update(name.encode("utf-8") + b"\0" + len(content).to_bytes(8, "big") + content)
+    return digest.hexdigest()
+
+
+def install_package(source: Path, data_dir: Path, db: Database | None = None) -> str:
     manifest = checked_package(source)
+    source_digest = package_digest(source)
     root = Path(data_dir) / "modules"
     if root.is_symlink() or root.is_junction():
         raise ValueError("Modulverzeichnis darf kein Link sein")
@@ -90,6 +106,11 @@ def install_package(source: Path, data_dir: Path) -> str:
     try:
         for name in ("jarvis-module.json", "module.py", "ui.js"):
             shutil.copyfile(Path(source) / name, target / name)
+        copied_digest = package_digest(target)
+        if copied_digest != source_digest:
+            raise ValueError("Modulquelle hat sich während der Installation geändert")
+        if db is not None:
+            db.set_settings({f"module.{manifest.id}.package_sha256": copied_digest})
     except BaseException:
         shutil.rmtree(target)
         raise
@@ -141,7 +162,7 @@ class ModuleRegistry:
 
     def install_from(self, source: Path) -> dict[str, Any]:
         with self._lock:
-            module_id = install_package(source, self.directory.parent)
+            module_id = install_package(source, self.directory.parent, self.db)
             self.refresh()
             return self._summary(module_id)
 
@@ -162,13 +183,27 @@ class ModuleRegistry:
             if not self.directory.exists():
                 self._errors = {}
                 self._apps.clear()
+                self._tool_handlers.clear()
                 return
             if self.directory.is_symlink() or self.directory.is_junction():
                 self._errors = {"_directory": "Modulverzeichnis darf kein Link sein"}
                 self._apps.clear()
+                self._tool_handlers.clear()
                 return
-            for path in sorted(self.directory.iterdir()):
-                if not _safe_directory(path, self.directory):
+            try:
+                paths = sorted(self.directory.iterdir())
+            except OSError as exc:
+                self._errors = {"_directory": f"Modulverzeichnis nicht lesbar: {type(exc).__name__}"}
+                self._apps.clear()
+                self._tool_handlers.clear()
+                return
+            for path in paths:
+                try:
+                    safe = _safe_directory(path, self.directory)
+                except OSError as exc:
+                    manifest_errors[path.name] = f"Modulordner nicht lesbar: {type(exc).__name__}"
+                    continue
+                if not safe:
                     continue
                 manifest_path = path / "jarvis-module.json"
                 entry_path = path / "module.py"
@@ -189,6 +224,7 @@ class ModuleRegistry:
                         raise ValueError("Inkompatible Modul-API")
                     if manifest.id in manifest.dependencies:
                         raise ValueError("Modul hängt von sich selbst ab")
+                    self._verify_package(manifest.id, path)
                     self._manifests[manifest.id] = manifest
                 except (ValueError, OSError) as exc:
                     manifest_errors[path.name] = str(exc)
@@ -198,15 +234,7 @@ class ModuleRegistry:
             for module_id in list(self._apps):
                 if module_id not in self._manifests:
                     self._deactivate(module_id)
-            changed = True
-            while changed:
-                changed = False
-                for module_id in list(self._apps):
-                    if any(dependency not in self._apps
-                           for dependency in self._manifests[module_id].dependencies):
-                        self._deactivate(module_id)
-                        self._errors[module_id] = "Benötigtes Modul ist nicht mehr aktiv"
-                        changed = True
+            self._deactivate_missing_dependents()
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -222,8 +250,9 @@ class ModuleRegistry:
                 if module_id not in self._manifests:
                     result.append({"id": module_id, "name": module_id, "version": "?", "api": 0,
                                    "data_version": 0, "element": "",
-                                   "navigation": module_id, "view": "notes_v1", "permissions": [],
-                                   "dependencies": [], "enabled": False, "requested_enabled": False,
+                                   "navigation": module_id, "view": "web_component_v1", "permissions": [],
+                                   "dependencies": [], "enabled": False,
+                                   "requested_enabled": stored.get(f"module.{module_id}.enabled") == "1",
                                    "error": error})
             return result
 
@@ -268,6 +297,7 @@ class ModuleRegistry:
                 raise ValueError("Moduldatei kann nicht geladen werden")
             module = importlib.util.module_from_spec(spec)
             try:
+                self._verify_package(module_id, package)
                 spec.loader.exec_module(module)
                 migrate = getattr(module, "migrate", None)
                 factory = getattr(module, "create_app", None)
@@ -297,7 +327,7 @@ class ModuleRegistry:
                     if not callable(definitions):
                         raise TypeError("tool_definitions muss aufrufbar sein")
                     self._register_tools(module_id, definitions(self.db))
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 # An optional package must not take the core down at startup.
                 self._errors[module_id] = f"{type(exc).__name__}: {exc}"
                 raise RuntimeError("Modul konnte nicht aktiviert werden") from exc
@@ -309,7 +339,11 @@ class ModuleRegistry:
     def disable(self, module_id: str) -> dict[str, Any]:
         with self._lock:
             if module_id not in self._manifests:
-                raise ValueError("Modul ist nicht installiert")
+                if module_id not in self._errors or not MODULE_ID.fullmatch(module_id):
+                    raise ValueError("Modul ist nicht installiert")
+                self._deactivate(module_id)
+                self.db.set_settings({f"module.{module_id}.enabled": "0"})
+                return {"id": module_id, "enabled": False, "error": self._errors[module_id]}
             for dependent in self._manifests.values():
                 if dependent.id in self._apps and module_id in dependent.dependencies:
                     raise ValueError(f"Aktives Modul {dependent.id} benötigt dieses Modul")
@@ -331,7 +365,40 @@ class ModuleRegistry:
 
     def app_for(self, module_id: str) -> FastAPI | None:
         with self._lock:
-            return self._apps.get(module_id)
+            module_app = self._apps.get(module_id)
+            if module_app is None:
+                return None
+            try:
+                self._verify_package(module_id, self.directory / module_id)
+            except (ValueError, OSError) as exc:
+                self._deactivate(module_id)
+                self._errors[module_id] = str(exc)
+                self._deactivate_missing_dependents()
+                return None
+            return module_app
+
+    def _verify_package(self, module_id: str, path: Path) -> None:
+        if not _safe_directory(path, self.directory):
+            raise ValueError("Modulordner ist nicht verfügbar")
+        digest = package_digest(path)
+        key = f"module.{module_id}.package_sha256"
+        expected = self.db.get_settings().get(key)
+        if expected is not None and expected != digest:
+            raise ValueError("Paketdateien wurden seit Installation verändert; neu installieren")
+        if expected is None:
+            # Adopt a local package placed before install receipts were introduced.
+            self.db.set_settings({key: digest})
+
+    def _deactivate_missing_dependents(self) -> None:
+        changed = True
+        while changed:
+            changed = False
+            for module_id in list(self._apps):
+                if any(dependency not in self._apps
+                       for dependency in self._manifests[module_id].dependencies):
+                    self._deactivate(module_id)
+                    self._errors[module_id] = "Benötigtes Modul ist nicht mehr aktiv"
+                    changed = True
 
     def _register_tools(self, module_id: str, definitions: list[ToolDefinition]) -> None:
         if self.engine is None:

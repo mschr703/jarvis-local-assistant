@@ -60,6 +60,11 @@ Das Manifest nennt `id`, `name`, Semver-`version`, `api: 1`, `data_version`,
 `element` (einen `jarvis-…`-Custom-Element-Namen). Die ID muss zum Ordner passen.
 Die Installation kopiert diese drei lokalen Dateien in `<JARVIS_DATA_DIR>/modules/<id>`.
 Es gibt keinen automatischen Download oder Hot-Update von GitHub.
+Jarvis speichert ihre gemeinsame SHA-256-Prüfsumme lokal in `jarvis.db`. Ändert sich
+eine installierte Datei danach, sperrt Jarvis das Modul samt API, UI und Werkzeugen.
+In **Module** erst deaktivieren, dann das Paket entfernen und bewusst aus der
+vertrauten Quelle neu installieren. Eine aktualisierte Quelle kann so mit höherer
+`data_version` migrieren; eine ältere Datenversion wird abgewiesen.
 
 `module.py` stellt `migrate(connection, from_version)` und `create_app(db)` bereit.
 Eine Migration läuft nur beim Schritt zu einer höheren `data_version`; die
