@@ -39,12 +39,28 @@ def main() -> None:
                     try:
                         page = browser.new_page(viewport={"width": 390, "height": 844})
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded")
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        for context in ("Lyon privat", "Arbeit"):
+                            page.get_by_label("Kontaktname").fill("Alex")
+                            page.get_by_label("Unterscheidender Kontext").fill(context)
+                            page.get_by_role("button", name="Kontakt anlegen").click()
+                            expect(page.get_by_role("heading", name=f"Alex · {context}")).to_be_visible()
                         page.get_by_role("button", name="Lebenschronik", exact=True).click()
                         page.get_by_label("Ereignisdatum").fill("2024-08-12")
                         page.get_by_label("Ereignistitel").fill("Café in Lyon")
                         page.get_by_label("Ereignisbeschreibung").fill("Mit Alex am Fluss")
                         page.get_by_role("button", name="Ereignis speichern").click()
                         expect(page.get_by_text("2024-08-12 · Café in Lyon")).to_be_visible()
+                        page.get_by_label("Kontakte für Ereignisse suchen").fill("Lyon privat")
+                        page.get_by_role("button", name="Kontakte finden").click()
+                        event_row = page.locator(".item-row").filter(has_text="Café in Lyon")
+                        expect(event_row.get_by_label("Kontakt für Ereignis Café in Lyon")
+                               .locator("option")).to_have_count(2)
+                        event_row.get_by_label("Kontakt für Ereignis Café in Lyon").select_option(
+                            label="Alex · Lyon privat")
+                        event_row.get_by_role("button", name="Kontakt zuordnen").click()
+                        expect(event_row).to_contain_text("Alex · Lyon privat · manuell bestätigt")
+                        expect(event_row).not_to_contain_text("Alex · Arbeit · manuell bestätigt")
                         page.get_by_label("Absoluter Fotoordnerpfad").fill(str(folder))
                         page.get_by_role("button", name="Fotoordner freigeben").click()
                         page.get_by_role("button", name="Fotos einlesen").click()
@@ -65,16 +81,28 @@ def main() -> None:
                         page.get_by_label("Gemeinsame Suche").fill("weekend")
                         page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         expect(results).to_contain_text("Foto: weekend.jpg")
+                        page.get_by_label("Gemeinsame Suche").fill("Lyon privat")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        expect(results).to_contain_text("Kontakt: Alex (Lyon privat)")
+                        page.get_by_label("Gemeinsame Suche").fill("Arbeit")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        expect(results).to_contain_text("0 Lebensereignisse")
+                        page.get_by_label("Gemeinsame Suche").fill("Lyon privat")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
                         assert str(folder) not in results.inner_text()
                         results.get_by_role("button", name="Quelle öffnen").click()
                         opened = page.get_by_role("region", name="Geöffnetes Lebensereignis")
                         expect(opened).to_contain_text("Café in Lyon")
                         expect(opened).to_contain_text("Mit Alex am Fluss")
+                        expect(opened).to_contain_text("Alex · Lyon privat · manuell bestätigt")
+                        opened.get_by_role("button", name="Zuordnung zu Alex (Lyon privat) lösen").click()
+                        expect(opened).to_contain_text("Bewusst zugeordnete Kontakte: keine")
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"text": "accent_insensitive", "photo_name": "found",
+                                          "contact": "linked_searched_unlinked",
                                           "source": "opened", "model_usage": 0,
                                           "mobile_width": "fits"}))
                     finally:

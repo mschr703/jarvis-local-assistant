@@ -453,7 +453,7 @@ def test_schema_10_plan_runtime_migrates_to_27(tmp_path):
     with migrated.connect() as connection:
         row = connection.execute("""SELECT active_seconds,active_since,rule_version
                                   FROM plans WHERE id='legacy'""").fetchone()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 62
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
         assert row["active_seconds"] == 0
         assert row["active_since"] == "2026-10-24T22:01:00+00:00"
         assert row["rule_version"] is None

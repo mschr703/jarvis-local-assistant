@@ -227,6 +227,12 @@ class MemoryEventUpdateInput(MemoryEventInput):
     expected_version: int = Field(ge=1)
 
 
+class MemoryEventContactInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
 class PhotoFolderInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -3386,6 +3392,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             await run_in_threadpool(memory_events.delete, event_id, expected_version)
             return {"deleted": True}
+        except MemoryEventConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.put("/memory-events/{event_id}/contacts/{contact_id}")
+    async def memory_event_contact_link(event_id: str, contact_id: str,
+                                        data: MemoryEventContactInput):
+        try:
+            return await run_in_threadpool(memory_events.link_contact, event_id,
+                                           contact_id, data.expected_version)
+        except MemoryEventConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/memory-events/{event_id}/contacts/{contact_id}")
+    async def memory_event_contact_unlink(event_id: str, contact_id: str,
+                                          expected_version: int = Query(ge=1)):
+        try:
+            return await run_in_threadpool(memory_events.unlink_contact, event_id,
+                                           contact_id, expected_version)
         except MemoryEventConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         except LookupError as exc:

@@ -141,10 +141,15 @@ class ContactStore:
 
     def delete(self, contact_id: str, version: int) -> None:
         with self.db.connect() as db:
+            events = [row[0] for row in db.execute(
+                "SELECT event_id FROM memory_event_contacts WHERE contact_id=?", (contact_id,))]
             deleted = db.execute("DELETE FROM contacts WHERE id=? AND version=?",
                                  (contact_id, version))
             if not deleted.rowcount:
                 self._missing_or_conflict(db, "contacts", contact_id, version)
+            for event_id in events:
+                db.execute("UPDATE memory_events SET version=version+1,updated_at=? WHERE id=?",
+                           (utcnow(), event_id))
 
     def add_note(self, contact_id: str, content: str) -> dict:
         content = _clean(content, "Notiz", 4000)

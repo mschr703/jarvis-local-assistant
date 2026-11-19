@@ -47,6 +47,19 @@ class MemoryEventStore:
     def __init__(self, db: Database):
         self.db = db
 
+    @staticmethod
+    def _contact_map(db) -> dict[str, list[dict]]:
+        rows = db.execute("SELECT l.event_id,l.contact_id,l.source_kind,l.created_at,"
+                          "c.name,c.context FROM memory_event_contacts l "
+                          "JOIN contacts c ON c.id=l.contact_id "
+                          "ORDER BY c.name_key,c.context_key,c.id").fetchall()
+        contacts: dict[str, list[dict]] = {}
+        for row in rows:
+            item = {key: row[key] for key in ("contact_id", "source_kind", "created_at",
+                                              "name", "context")}
+            contacts.setdefault(row["event_id"], []).append(item)
+        return contacts
+
     def _filtered(self, query: str = "", from_date: str | None = None,
                   to_date: str | None = None, *, limit: int = 200) -> list[dict]:
         query = _one_line(query, "Suche", 200, required=False)
@@ -61,12 +74,16 @@ class MemoryEventStore:
                               "AND (? IS NULL OR date_local<=?) "
                               "ORDER BY date_local DESC,id DESC",
                               (from_date, from_date, to_date, to_date)).fetchall()
+            contacts = self._contact_map(db)
         needle = _key(query)
         matched = []
         for row in rows:
             item = dict(row)
+            item["contacts"] = contacts.get(item["id"], [])
             if needle and not any(needle in _key(str(item[field])) for field in
-                                  ("date_local", "title", "description", "location")):
+                                  ("date_local", "title", "description", "location")) and not any(
+                                      needle in _key(contact["name"] + " " + contact["context"])
+                                      for contact in item["contacts"]):
                 continue
             matched.append(item)
             if len(matched) > limit:
@@ -84,7 +101,7 @@ class MemoryEventStore:
             row = db.execute("SELECT * FROM memory_events WHERE id=?", (event_id,)).fetchone()
             if row is None:
                 raise LookupError("Erinnerungsereignis nicht gefunden")
-            return dict(row)
+            return {**dict(row), "contacts": self._contact_map(db).get(event_id, [])}
 
     def create(self, date_local: str, title: str, description: str = "",
                location: str = "") -> dict:
@@ -122,6 +139,45 @@ class MemoryEventStore:
             if not deleted.rowcount:
                 self._missing_or_conflict(db, event_id)
 
+    def link_contact(self, event_id: str, contact_id: str, version: int) -> dict:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            event = db.execute("SELECT version FROM memory_events WHERE id=?", (event_id,)).fetchone()
+            if event is None:
+                raise LookupError("Erinnerungsereignis nicht gefunden")
+            if event["version"] != version:
+                raise MemoryEventConflict("Ereignis wurde inzwischen geändert")
+            if db.execute("SELECT 1 FROM contacts WHERE id=?", (contact_id,)).fetchone() is None:
+                raise LookupError("Kontakt nicht gefunden")
+            if not db.execute("SELECT 1 FROM memory_event_contacts WHERE event_id=? AND contact_id=?",
+                              (event_id, contact_id)).fetchone():
+                count = db.execute("SELECT count(*) FROM memory_event_contacts WHERE event_id=?",
+                                   (event_id,)).fetchone()[0]
+                if count >= 10:
+                    raise ValueError("Höchstens zehn Kontakte je Ereignis")
+                now = utcnow()
+                db.execute("INSERT INTO memory_event_contacts(event_id,contact_id,created_at) "
+                           "VALUES(?,?,?)", (event_id, contact_id, now))
+                db.execute("UPDATE memory_events SET version=version+1,updated_at=? WHERE id=?",
+                           (now, event_id))
+        return self.get(event_id)
+
+    def unlink_contact(self, event_id: str, contact_id: str, version: int) -> dict:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            event = db.execute("SELECT version FROM memory_events WHERE id=?", (event_id,)).fetchone()
+            if event is None:
+                raise LookupError("Erinnerungsereignis nicht gefunden")
+            if event["version"] != version:
+                raise MemoryEventConflict("Ereignis wurde inzwischen geändert")
+            removed = db.execute("DELETE FROM memory_event_contacts WHERE event_id=? "
+                                 "AND contact_id=?", (event_id, contact_id))
+            if not removed.rowcount:
+                raise LookupError("Kontaktzuordnung nicht gefunden")
+            db.execute("UPDATE memory_events SET version=version+1,updated_at=? WHERE id=?",
+                       (utcnow(), event_id))
+        return self.get(event_id)
+
     @staticmethod
     def _missing_or_conflict(db, event_id: str) -> None:
         if db.execute("SELECT 1 FROM memory_events WHERE id=?", (event_id,)).fetchone():
@@ -135,6 +191,9 @@ class MemoryEventStore:
         for event in events:
             lines.extend([f"## {event['date_local']} · {event['title']}", "",
                           f"Ort: {event['location'] or 'Nicht angegeben'}",
+                          "Kontakte: " + (", ".join(f"{contact['name']} ({contact['context']})"
+                                                    for contact in event["contacts"])
+                                           if event["contacts"] else "Nicht angegeben"),
                           f"Quelle: manuell bestätigt · Version {event['version']}", ""])
             if event["description"]:
                 lines.extend(f"> {line}" if line else ">" for line in

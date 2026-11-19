@@ -146,13 +146,13 @@ def test_schema34_migration_and_schema40_restore(tmp_path):
         connection.execute("PRAGMA user_version=34")
     migrated = Database(root / "jarvis.db")
     profiles = DraftStore(migrated, root)
-    assert sqlite3.connect(migrated.path).execute("PRAGMA user_version").fetchone()[0] == 62
+    assert sqlite3.connect(migrated.path).execute("PRAGMA user_version").fetchone()[0] == 63
     assert profiles.typed_profile("essay")["effective_description"] == "Allgemeine Altvorgabe."
     profiles.set_typed_profile("essay", "Essays mit klarer Gliederung.", "local_only")
     archive = tmp_path / "typed-profiles.zip"
-    assert create_backup(root, archive)["schema"] == 62
+    assert create_backup(root, archive)["schema"] == 63
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 62
+    assert restore_backup(archive, restored)["schema"] == 63
     recovered = DraftStore(Database(restored / "jarvis.db"), restored)
     assert recovered.profile()["description"] == "Allgemeine Altvorgabe."
     assert recovered.typed_profile("essay")["description"] == "Essays mit klarer Gliederung."

@@ -269,7 +269,7 @@ def test_preferred_source_survives_reload_and_tracks_original_changes(tmp_path):
     assert choices.add(question, document["id"])["preferences"][0]["status"] == "current"
 
     archive = tmp_path / "prefs.zip"
-    assert create_backup(db.path.parent, archive)["schema"] == 62
+    assert create_backup(db.path.parent, archive)["schema"] == 63
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     assert SourcePreferences(Database(restored / "jarvis.db")).list(question)["preferences"][0]["status"] == "current"

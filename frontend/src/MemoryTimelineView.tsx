@@ -4,7 +4,10 @@ import PhotoLibraryView, { type TimelineEventOption } from './PhotoLibraryView';
 
 type Event = { id: string; date_local: string; title: string; description: string;
   location: string; source_kind: 'manual'; version: number; created_at: string;
-  updated_at: string };
+  updated_at: string; contacts: EventContact[] };
+type EventContact = { contact_id: string; name: string; context: string;
+  source_kind: 'manual'; created_at: string };
+type ContactOption = { id: string; name: string; context: string };
 type Form = Pick<Event, 'date_local' | 'title' | 'description' | 'location'>;
 const emptyForm = (): Form => ({ date_local: '', title: '', description: '', location: '' });
 
@@ -13,6 +16,9 @@ export default function MemoryTimelineView({ requestedEvent }: {
   const [items, setItems] = useState<Event[]>([]);
   const [eventOptions, setEventOptions] = useState<TimelineEventOption[]>([]);
   const [openedEvent, setOpenedEvent] = useState<Event | null>(null);
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [contactChoice, setContactChoice] = useState<Record<string, string>>({});
+  const [contactQuery, setContactQuery] = useState('');
   const [query, setQuery] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -36,6 +42,14 @@ export default function MemoryTimelineView({ requestedEvent }: {
     if (request === searchRequest.current) { setItems(results); setEventOptions(options); }
   };
   useEffect(() => { void refresh().catch((error: Error) => setNotice(error.message)); }, []);
+  useEffect(() => { void api<ContactOption[]>('/contacts').then(setContacts)
+    .catch((error: Error) => setNotice(error.message)); }, []);
+  const searchContacts = async () => {
+    try {
+      setContacts(await api<ContactOption[]>(`/contacts?q=${encodeURIComponent(contactQuery)}`));
+      setContactChoice({});
+    } catch (error) { setNotice((error as Error).message); }
+  };
   useEffect(() => {
     if (!requestedEvent) return;
     let active = true;
@@ -91,14 +105,58 @@ export default function MemoryTimelineView({ requestedEvent }: {
     } catch (error) { setNotice((error as Error).message); }
     finally { inFlight.current = false; setBusy(false); }
   };
+  const changeContact = async (item: Event, contactId: string, attach: boolean) => {
+    if (inFlight.current) return;
+    inFlight.current = true; setBusy(true); setNotice('');
+    try {
+      const route = `/memory-events/${encodeURIComponent(item.id)}/contacts/${encodeURIComponent(contactId)}`;
+      const updated = await api<Event>(attach ? route : `${route}?expected_version=${item.version}`,
+        attach ? { method: 'PUT', body: JSON.stringify({ expected_version: item.version }) }
+          : { method: 'DELETE' });
+      setOpenedEvent((current) => current?.id === updated.id ? updated : current);
+      setContactChoice((current) => ({ ...current, [item.id]: '' }));
+      await refresh();
+      setNotice(attach ? 'Kontakt dem Ereignis zugeordnet.' : 'Kontaktzuordnung gelöst.');
+    } catch (error) {
+      setNotice((error as Error).message);
+      await refresh().catch(() => undefined);
+      void api<ContactOption[]>('/contacts').then(setContacts).catch(() => undefined);
+    } finally { inFlight.current = false; setBusy(false); }
+  };
+  const contactControls = (item: Event) => <div className="memory-form">
+    <small>Bewusst zugeordnete Kontakte: {item.contacts.length || 'keine'}</small>
+    {item.contacts.map((contact) => <div className="item-actions" key={contact.contact_id}>
+      <span>{contact.name} · {contact.context} · manuell bestätigt</span>
+      <button disabled={busy} aria-label={`Zuordnung zu ${contact.name} (${contact.context}) lösen`}
+        onClick={() => void changeContact(item, contact.contact_id, false)}>Zuordnung lösen</button></div>)}
+    <div className="item-actions"><select aria-label={`Kontakt für Ereignis ${item.title}`}
+      value={contactChoice[item.id] || ''}
+      onChange={(event) => setContactChoice((current) => ({ ...current,
+        [item.id]: event.target.value }))}>
+      <option value="">Kontakt wählen</option>
+      {contacts.filter((contact) => !item.contacts.some((linked) => linked.contact_id === contact.id))
+        .map((contact) => <option value={contact.id} key={contact.id}>
+          {contact.name} · {contact.context}</option>)}</select>
+      <button disabled={busy || !contactChoice[item.id] || item.contacts.length >= 10}
+        onClick={() => void changeContact(item, contactChoice[item.id], true)}>
+        Kontakt zuordnen</button></div>
+    <small>Maximal zehn Kontakte; eine Zuordnung fügt keine Kontaktnotizen in Modellanfragen ein.</small>
+  </div>;
 
   return <div className="section-stack"><h2>Lebenschronik</h2>
     <p className="intro">Halte ausgewählte Erlebnisse mit einem Datum selbst fest. Ort und Beschreibung sind optional. Jarvis leitet hier keine Ereignisse aus Fotos oder Gesprächen ab und ruft kein Modell auf.</p>
+    <div className="item-actions"><input aria-label="Kontakte für Ereignisse suchen"
+      value={contactQuery} onChange={(event) => setContactQuery(event.target.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') void searchContacts(); }}
+      placeholder="Kontaktname oder Kontext" />
+      <button onClick={() => void searchContacts()}>Kontakte finden</button>
+      <small>Bis zu 200 Kontakte in der Auswahl. Suche nach Namen oder Kontext, um weitere zu finden.</small></div>
     {notice && <p className="notice" role="status">{notice}</p>}
     {openedEvent && <section className="card" aria-label="Geöffnetes Lebensereignis">
       <h3>{openedEvent.date_local} · {openedEvent.title}</h3>
       <small>{openedEvent.location || 'Ohne Ort'} · manuell bestätigt · Version {openedEvent.version}</small>
       {openedEvent.description && <p>{openedEvent.description}</p>}
+      {contactControls(openedEvent)}
       <div className="item-actions"><button disabled={busy} onClick={() => { setEditing(openedEvent);
         setForm({ date_local: openedEvent.date_local, title: openedEvent.title,
           description: openedEvent.description, location: openedEvent.location });
@@ -131,7 +189,7 @@ export default function MemoryTimelineView({ requestedEvent }: {
     </section>
     <section className="card"><h3>Ereignisse</h3><div className="item-list">{items.map((item) => <div className="item-row" key={item.id}>
       <div><strong>{item.date_local} · {item.title}</strong><small>{item.location || 'Ohne Ort'} · manuell bestätigt · Version {item.version} · geändert {new Date(item.updated_at).toLocaleString('de-DE')}</small>
-        {item.description && <p>{item.description}</p>}</div>
+        {item.description && <p>{item.description}</p>}{contactControls(item)}</div>
       <div className="item-actions"><button disabled={busy} onClick={() => { setEditing(item); setForm({ date_local: item.date_local, title: item.title, description: item.description, location: item.location }); }}>Bearbeiten</button>
         <button disabled={busy} onClick={() => void remove(item)}>Löschen</button></div></div>)}</div>
       {!items.length && <p>Keine passenden Ereignisse.</p>}

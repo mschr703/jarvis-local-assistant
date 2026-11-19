@@ -87,6 +87,9 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
         """, (MAX_PROJECT_ROWS + 1,))] if kind in {"all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
+                   (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
+                    FROM memory_event_contacts l JOIN contacts c ON c.id=l.contact_id
+                    WHERE l.event_id=e.id) AS contact_names,
                    GROUP_CONCAT(a.name,' | ') AS photo_names
             FROM memory_events e LEFT JOIN photo_assets a ON a.event_id=e.id
             GROUP BY e.id ORDER BY e.date_local DESC,e.id DESC LIMIT ?
@@ -176,7 +179,8 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
     for row in events[:MAX_EVENT_ROWS]:
         photo_names = (row["photo_names"] or "").split(" | ") if row["photo_names"] else []
         body = " · ".join(part for part in (row["date_local"], row["location"],
-                                                row["description"], row["photo_names"]) if part)
+                                                row["description"], row["photo_names"],
+                                                row["contact_names"]) if part)
         score = _score(_fold(cleaned), folded_terms, _fold(row["title"]), _fold(body))
         if score:
             matching_photos = [name for name in photo_names if any(term in _fold(name)
@@ -186,6 +190,11 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
                 details.append(f"Ort: {row['location']}")
             if matching_photos:
                 details.append(f"Foto: {', '.join(matching_photos)}")
+            if row["contact_names"]:
+                matching_contacts = [person for person in row["contact_names"].split(" | ")
+                                     if any(term in _fold(person) for term in folded_terms)][:3]
+                if matching_contacts:
+                    details.append(f"Kontakt: {', '.join(matching_contacts)}")
             event_items.append({"kind": "life_event", "id": row["id"],
                                 "title": row["title"], "excerpt": " · ".join(details)[:500],
                                 "source": f"{row['date_local']} · manuell bestätigt",

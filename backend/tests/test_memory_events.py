@@ -66,7 +66,7 @@ def test_timeline_rejects_invalid_fields(tmp_path, date_local, title, descriptio
 def test_timeline_filter_validation_and_migration(tmp_path):
     db = Database(tmp_path / "jarvis.db")
     with db.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 62
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
         connection.execute("DROP TABLE memory_events")
         connection.execute("PRAGMA user_version=58")
     db.migrate()
@@ -79,7 +79,7 @@ def test_timeline_filter_validation_and_migration(tmp_path):
     with pytest.raises(ValueError):
         store.list("q" * 201)
     with sqlite3.connect(db.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 62
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 63
 
 
 def test_timeline_api_csrf_conflicts_export_and_backup(tmp_path):
@@ -109,8 +109,8 @@ def test_timeline_api_csrf_conflicts_export_and_backup(tmp_path):
         with Database(root / "jarvis.db").connect() as db:
             assert db.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
     archive = tmp_path / "timeline.zip"
-    assert create_backup(root, archive)["schema"] == 62
+    assert create_backup(root, archive)["schema"] == 63
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 62
+    assert restore_backup(archive, restored)["schema"] == 63
     assert MemoryEventStore(Database(restored / "jarvis.db")).get(event["id"])[
         "title"] == "Korrigierter Geburtstag"
