@@ -79,7 +79,7 @@ def test_follow_up_one_new_source_one_local_call_and_restore(tmp_path, monkeypat
         assert client.get(f"/research/{parent['id']}").json() == parent
         assert client.get(f"/research/{follow_up['id']}").json() == follow_up
     archive = tmp_path / "research.zip"
-    assert create_backup(root, archive)["schema"] == 57
+    assert create_backup(root, archive)["schema"] == 58
     restored = tmp_path / "restored"
     restore_backup(archive, restored)
     restored_store = ResearchStore(Database(restored / "jarvis.db"))
@@ -188,7 +188,7 @@ def test_schema_30_migrates_reports_without_follow_up(tmp_path):
     assert migrated["parent_report_id"] is None and migrated["open_point"] is None
     assert migrated["sources"] == parent["sources"]
     with sqlite3.connect(root / "jarvis.db") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 57
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 58
 
 
 def test_direct_follow_ups_only_and_restore(tmp_path):

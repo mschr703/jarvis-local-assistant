@@ -48,9 +48,9 @@ def test_merge_split_preserve_sources_ids_links_and_restore(tmp_path):
     with pytest.raises(ProjectPersonConflict, match="zuerst trennen"):
         people.delete(state["id"], target["id"], 1, 2)
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 57
+    assert create_backup(root, archive)["schema"] == 58
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 57
+    assert restore_backup(archive, restored)["schema"] == 58
     restored_db = Database(restored / "jarvis.db")
     with restored_db.connect() as connection:
         assert connection.execute("SELECT count(*) FROM project_person_merges").fetchone()[0] == 1
@@ -153,7 +153,7 @@ def test_merge_api_csrf_and_schema45_migration(tmp_path):
         connection.execute("PRAGMA user_version=45")
     migrated = Database(db.path)
     with sqlite3.connect(migrated.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 57
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 58
         assert connection.execute("SELECT count(*) FROM project_person_merges").fetchone()[0] == 0
 
 

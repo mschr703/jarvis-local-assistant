@@ -101,9 +101,9 @@ def test_validity_api_revision_backup_and_schema43_migration(tmp_path):
         assert query["timezone"] == "America/New_York"
         assert query["as_of_local_date"] == local_date("America/New_York").isoformat()
     archive = tmp_path / "profile.jarvis"
-    assert create_backup(root, archive)["schema"] == 57
+    assert create_backup(root, archive)["schema"] == 58
     restored = tmp_path / "restored"
-    assert restore_backup(archive, restored)["schema"] == 57
+    assert restore_backup(archive, restored)["schema"] == 58
     with Database(restored / "jarvis.db").connect() as connection:
         assert tuple(connection.execute("SELECT confidence,valid_from FROM project_people WHERE id=?",
                                         (person["id"],)).fetchone()) == ("confirmed", "2026-10-28")
@@ -130,6 +130,6 @@ def test_validity_api_revision_backup_and_schema43_migration(tmp_path):
         connection.execute("PRAGMA user_version=43")
     migrated = Database(older)
     with migrated.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 57
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 58
         assert tuple(connection.execute("SELECT confidence,valid_from,valid_until FROM project_people"
                                         ).fetchone()) == ("unverified", None, None)

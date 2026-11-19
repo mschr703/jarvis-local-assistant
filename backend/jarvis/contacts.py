@@ -286,6 +286,30 @@ class ContactStore:
     def _plan(self, contact_id: str, plan_id: str) -> dict:
         return next(plan for plan in self.get(contact_id)["plans"] if plan["id"] == plan_id)
 
+    def recipient_snapshot(self, contact_id: str, expected_version: int,
+                           note_ids: list[str]) -> dict:
+        if expected_version < 1 or len(note_ids) > 5 or len(set(note_ids)) != len(note_ids):
+            raise ValueError("Empfänger braucht eine aktuelle Version und höchstens fünf verschiedene Notizen")
+        with self.db.connect() as db:
+            db.execute("BEGIN")
+            person = db.execute("SELECT id,name,context,relationship,version FROM contacts "
+                                "WHERE id=?", (contact_id,)).fetchone()
+            if person is None:
+                raise LookupError("Kontakt nicht gefunden")
+            if person["version"] != expected_version:
+                raise ContactConflict("Kontakt wurde inzwischen geändert; Empfänger neu auswählen")
+            notes = []
+            for note_id in note_ids:
+                note = db.execute("SELECT id,content,source_kind,version,updated_at "
+                                  "FROM contact_notes WHERE id=? AND contact_id=?",
+                                  (note_id, contact_id)).fetchone()
+                if note is None:
+                    raise ValueError("Ausgewählte Notiz gehört nicht mehr zu diesem Kontakt")
+                notes.append(dict(note))
+            if sum(len(note["content"]) for note in notes) > 3000:
+                raise ValueError("Ausgewählte Kontaktnotizen überschreiten 3000 Zeichen")
+            return {**dict(person), "notes": notes}
+
     @staticmethod
     def _missing_or_conflict(db: sqlite3.Connection, table: str, identifier: str,
                              version: int, contact_id: str | None = None) -> None:

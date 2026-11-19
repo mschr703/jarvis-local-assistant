@@ -341,7 +341,8 @@ class DraftStore:
                      rule_version: int | None = None, *, word_target: int | None = None,
                      outline: list[str] | None = None, status: str = "editing",
                      feedback_snapshot: list[dict] | None = None,
-                     named_profile: dict | None = None) -> dict:
+                     named_profile: dict | None = None,
+                     recipient_snapshot: dict | None = None) -> dict:
         if kind not in {"email", "text", "answer", "essay"}:
             raise ValueError("Unbekannter Entwurfstyp")
         if status not in {"editing", "partial"}:
@@ -371,6 +372,9 @@ class DraftStore:
                 db.execute("INSERT INTO draft_named_style_usage VALUES(?,?,?,?)",
                            (draft_id, named_profile["name"], named_profile["revision"],
                             named_profile["description"]))
+            if recipient_snapshot is not None:
+                db.execute("INSERT INTO draft_recipients(draft_id,snapshot_json) VALUES(?,?)",
+                           (draft_id, json.dumps(recipient_snapshot, ensure_ascii=False)))
         self.db.log("draft_created", f"Entwurf {draft_id}: {kind}")
         return self.get_draft(draft_id)
 
@@ -391,6 +395,9 @@ class DraftStore:
             named = db.execute("""SELECT name,revision,description FROM draft_named_style_usage
                              WHERE draft_id=?""", (draft_id,)).fetchone()
             draft["named_style_profile"] = dict(named) if named else None
+            recipient = db.execute("SELECT snapshot_json FROM draft_recipients WHERE draft_id=?",
+                                   (draft_id,)).fetchone()
+            draft["recipient_snapshot"] = json.loads(recipient["snapshot_json"]) if recipient else None
             draft["actual_words"] = len(re.findall(r"\b\w+(?:[-’']\w+)*\b", draft["content"]))
             draft["exports"] = [dict(item) for item in db.execute(
                 "SELECT format,path,sha256,created_at FROM draft_exports WHERE draft_id=?", (draft_id,)

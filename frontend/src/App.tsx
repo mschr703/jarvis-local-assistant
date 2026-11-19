@@ -73,6 +73,7 @@ export default function App() {
   const [draftComposer, setDraftComposer] = useState<DraftComposer>({
       kind: 'email', brief: '', inputText: '', namedStyleProfile: '',
       selectedSamples: [], allowCloud: false,
+      recipientContactId: '', recipientExpectedVersion: null, recipientNoteIds: [],
     wordTarget: '600', outlineText: 'Einleitung\nHauptteil\nSchluss', feedbackNote: '',
   });
   const [styleForm, setStyleForm] = useState<StyleForm>({
