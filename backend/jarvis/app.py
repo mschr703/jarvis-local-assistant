@@ -56,12 +56,6 @@ from jarvis.document_packages import build_document_package
 from jarvis.documents import DocumentStore
 from jarvis.drafts import PROFILE_KINDS, DraftStore, StyleProfileConflict
 from jarvis.engine import RunEngine
-from jarvis.evening_plans import (
-    EveningPlanChange,
-    EveningPlanConflict,
-    EveningPlanInput,
-    EveningPlanStore,
-)
 from jarvis.extension_capture import (
     EXTENSION_ORIGIN,
     ExtensionAuthError,
@@ -864,7 +858,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     extension_captures = ExtensionCaptureStore(db)
     focus = FocusStore(db)
     time_model = TimeModelStore(db)
-    evening_plans = EveningPlanStore(db, tasks, time_model)
     work_states = WorkStateStore(db, documents, tasks)
     work_sessions = WorkSessionStore(db, work_states)
     project_people = ProjectPeopleStore(db, work_states, lambda: config.timezone)
@@ -997,7 +990,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.extension_captures = extension_captures
     app.state.focus = focus
     app.state.time_model = time_model
-    app.state.evening_plans = evening_plans
     app.state.work_states = work_states
     app.state.work_sessions = work_sessions
     app.state.project_checks = project_checks
@@ -3375,51 +3367,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return time_model.availability(date_local, timezone)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-
-    @app.post("/evening-plans/preview")
-    async def evening_plan_preview(data: EveningPlanInput):
-        try:
-            return await run_in_threadpool(evening_plans.preview, data)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    @app.get("/evening-plans")
-    async def evening_plan_list():
-        return await run_in_threadpool(evening_plans.list)
-
-    @app.get("/evening-plans/{plan_id}")
-    async def evening_plan_get(plan_id: str):
-        try:
-            plan = await run_in_threadpool(evening_plans.get, plan_id)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        if plan is None:
-            raise HTTPException(404, "Abendplan nicht gefunden")
-        return plan
-
-    @app.post("/evening-plans")
-    async def evening_plan_create(data: EveningPlanInput):
-        try:
-            return await run_in_threadpool(evening_plans.create, data)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    @app.put("/evening-plans/{plan_id}")
-    async def evening_plan_update(plan_id: str, data: EveningPlanChange):
-        try:
-            return await run_in_threadpool(evening_plans.update, plan_id, data)
-        except EveningPlanConflict as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    @app.delete("/evening-plans/{plan_id}")
-    async def evening_plan_delete(plan_id: str, version: int):
-        try:
-            await run_in_threadpool(evening_plans.delete, plan_id, version)
-        except EveningPlanConflict as exc:
-            raise HTTPException(409, str(exc)) from exc
-        return {"deleted": True}
 
     @app.get("/memory-events")
     async def memory_event_list(q: str = Query(default="", max_length=200),

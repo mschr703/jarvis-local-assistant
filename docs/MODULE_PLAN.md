@@ -4,7 +4,7 @@ Stand: 19.11.2026. Die Trello-Karten bleiben die fachliche Quelle. Der Nutzer ha
 
 ## Technischer Schnitt
 
-Der bisherige Code ist noch überwiegend eine gemeinsame FastAPI-/React-Anwendung. Die erste Paketgrenze und zwei private Piloten `day_notes` und `reading_list` sind in [MODULES.md](MODULES.md) dokumentiert. Bestehende Bereiche lassen sich noch **nicht** durch bloßes Entfernen eines Verzeichnisses sicher deinstallieren. [P04](https://trello.com/c/BcttXfbZ) führt die Migration fort:
+Der bisherige Code ist noch überwiegend eine gemeinsame FastAPI-/React-Anwendung. Die Paketgrenze, zwei private Piloten `day_notes` und `reading_list` sowie der ausgelagerte Bereich `evening_plans` sind in [MODULES.md](MODULES.md) dokumentiert. Viele andere bestehende Bereiche lassen sich noch **nicht** durch bloßes Entfernen eines Verzeichnisses sicher deinstallieren. [P04](https://trello.com/c/BcttXfbZ) führt die Migration fort:
 
 1. Ein kleines Basisprogramm behält Konfiguration, Ollama/OpenRouter-Adapter, Freigaben, Werkzeuglauf, Datenbank-/Backup-Grundlagen und eine Modul-Registry.
 2. Ein Modul besitzt eine eindeutige ID, Version, kompatible Kernversion, Abhängigkeiten und angeforderte Rechte. Es registriert eigene API-Routen, Werkzeuge, UI-Navigation und Datenmigrationen. Fehlende/ausgeschaltete Module erscheinen weder als ausführbare Werkzeuge noch in der Navigation.
@@ -28,24 +28,28 @@ Die vom Nutzer ausgewählten GitHub-Ideen sind auf [G00](https://trello.com/c/jn
 
 ## Veröffentlichungsstand
 
-Die privaten Piloten sind `day_notes` und `reading_list`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt; sie dient bis zur Migration als Archiv und Referenz.
+Die privaten Pakete sind `day_notes`, `reading_list` und `evening_plans`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt. Die gemeinsame Featureliste mit Sichtbarkeitsvorschlägen liegt bis zur Entscheidung ausschließlich im privaten Modul-Repository.
 
-## Nächster Schnitt: Abendplanung
+## Erster Monolith-Schnitt: Abendplanung
 
-Der Bereich ist fachlich optional und an klaren Stellen angebunden: Logik in
-`backend/jarvis/evening_plans.py`, API-Routen in `backend/jarvis/app.py`, Ansicht in
-`frontend/src/EveningPlanView.tsx` und Navigation in `frontend/src/App.tsx`.
-Die vorhandene Tabelle `evening_plans` stammt aus der Kernmigration 15; bestehende
-IDs, gespeicherte Eingaben, Ergebnisse und Versionen müssen beim Auslagern erhalten
-bleiben. `EveningPlanStore` nutzt `TaskStore` und `TimeModelStore` des Kerns.
+Der zuvor feste Bereich ist nun als `evening_plans` im privaten Repository umgesetzt.
+Planlogik, API und Web-Component-Oberfläche liegen dort; der öffentliche Kern enthält
+keine feste Route, Navigation oder Abendplan-Quellklasse mehr. Die vorhandene Tabelle
+`evening_plans` stammt aus der historischen Kernmigration 15 und bleibt für alte
+Backups erhalten. Das Modul übernimmt bestehende IDs, Eingaben, Ergebnisse und
+Versionen unverändert und nutzt `TaskStore` sowie `TimeModelStore` des Kerns.
+Der alte Abendplan-Code war bereits Teil früherer öffentlicher Commits. Das aktuelle
+Auslagern entfernt ihn aus dem neuesten öffentlichen Quellstand, nicht aus der
+erreichbaren Git-Historie. Eine spätere Entscheidung über die Veröffentlichung des
+neuen Pakets ändert diesen historischen Umstand nicht.
 
-Ein sicherer Umzug braucht zuerst einen privaten Moduladapter für diese beiden
-Kern-Dienste, eine Migration mit altem und neuem Datenbestand, die API unter der
-Modulroute und eine eigene Web-Component-Ansicht. Danach müssen die festen
-Navigations- und API-Einträge sowie der Quellcode aus dem öffentlichen Kern
-entfernt werden. Erfolgskriterium: vorhandener Abendplan nach Backup/Restore und
-Modulinstallation wieder sichtbar; ohne Paket kein Abendplan-Navigationspunkt
-oder ausführbare Route; Kern und andere Module laufen weiter. Die bisherigen
-`test_evening_plans.py`-Fälle und ein echter Edge-Pfad müssen dann im privaten
-Repository gegen den öffentlichen Kern laufen. Bis dieser vollständige Pfad
-bestanden ist, bleibt die bestehende Funktion im öffentlichen Übergangsstand.
+Sieben private Tests prüfen Planung, Fristen, Zeitumstellung, Versionskonflikte,
+Altbestand, Backup/Restore, Reinstallation und die neue API. Ein echter Edge-Pfad
+prüft bei 390 Pixel Installation, Vorschau, Speichern, veralteten Plan, Neuberechnung,
+Reload, Löschen und Deaktivieren. Die alten `/evening-plans`-Routen sind entfernt;
+die Paketroute liegt unter `/api/modules/evening_plans/`.
+
+Als nächstes folgen die Härtung von Installation und Upgrade sowie weitere
+Monolith-Bereiche. Die Reihenfolge der nächsten Fähigkeiten steht im privaten
+Planungsdokument; öffentlich/private Zielpakete sind bis zur Entscheidung des
+Nutzers Vorschläge.

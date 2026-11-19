@@ -49,7 +49,7 @@ test('API zeigt Validierungsfehler als lesbare Meldung', async () => {
       { loc: ['body', 'estimate_minutes'], msg: 'Input should be greater than or equal to 5' },
     ] }), { status: 422 })));
   const { api } = await import('./api');
-  await expect(api('/evening-plans/preview', { method: 'POST', body: '{}' }))
+  await expect(api('/modules/evening_plans/preview', { method: 'POST', body: '{}' }))
     .rejects.toThrow('Ungültige Eingabe: Input should be greater than or equal to 5');
 });
 

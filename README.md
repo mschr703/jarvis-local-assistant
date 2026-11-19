@@ -1,6 +1,6 @@
 # Jarvis Local
 
-Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, Abendplanung, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Ohne OpenRouter-Key verwendet Jarvis das lokale Ollama-Modell `qwen3:4b-instruct`. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Eine erste [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; die bislang eingebauten Bereiche werden schrittweise ausgelagert.
+Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Die Abendplanung ist ein optionales [privates Modul](docs/MODULES.md). Ohne OpenRouter-Key verwendet Jarvis das lokale Ollama-Modell `qwen3:4b-instruct`. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Die [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; weitere bislang eingebaute Bereiche werden schrittweise ausgelagert.
 
 ## Voraussetzungen
 
@@ -438,6 +438,8 @@ Unter „Zeitmodell“ wiederkehrende feste Zeiten mit Wochentagen, IANA-Zeitzon
 
 ## Abendplanung (A22a)
 
+Die Abendplanung erscheint erst nach Installation und Aktivierung des privaten Pakets `evening_plans`. Die genauen Windows-Befehle stehen in der [Modulanleitung](docs/MODULES.md). Wer nur den öffentlichen Kern installiert, sieht diesen Navigationspunkt nicht. Bereits lokal gespeicherte Abendpläne bleiben nach der Umstellung und nach Backup/Restore in der Datenbank; nach Neuinstallation des Pakets lassen sie sich wieder öffnen.
+
 Zuerst unter „Aufgaben“ offene Aufgaben anlegen und unter „Zeitmodell“ feste Termine, Wegezeiten und Puffer eintragen. Dann „Abendplanung“ öffnen, Datum, Abendbeginn, Schlafziel und Pausenrhythmus wählen, Aufgaben ankreuzen und je eine geschätzte Dauer sowie Priorität von 1 bis 5 setzen. „Plan berechnen“ zeigt die zeitlich sortierten Arbeits- und Pausenabschnitte sowie nicht eingeplante Restminuten. Höhere Priorität geht vor; bei gleicher Priorität werden frühere Fälligkeiten zuerst berücksichtigt. Abschnitte liegen nur in freien Zeitfenstern vor dem Schlafziel und nie nach einer Aufgabefrist. Ein Schlafziel vor dem Abendbeginn gilt für den Folgetag.
 
 „Plan speichern“ hält Eingaben und Ergebnis lokal fest. Nach geänderten Aufgaben oder Zeitblöcken einen gespeicherten Plan erneut öffnen; Jarvis kennzeichnet ihn als veraltet. Mit „Plan berechnen“ und „Neu berechnen und speichern“ entsteht die aktualisierte Fassung. „Neuer Plan“ beginnt einen weiteren Plan, „Diesen Plan löschen“ entfernt die aktuell geöffnete Fassung nach Bestätigung. Die Abendplanung benötigt weder Kalenderkonto noch OpenRouter-Key.
@@ -532,7 +534,7 @@ python -m uv run --project backend python scripts/smoke_hotkey_selection.py
 python -m uv run --project backend python scripts/smoke_hotkey_registration.py
 python -m uv run --project backend python scripts/smoke_quick_capture_ui.py
 python -m uv run --project backend python scripts/smoke_time_model_ui.py
-python -m uv run --project backend python scripts/smoke_evening_plan_ui.py
+python -m uv run --project backend python ..\jarvis-private-modules\tests\smoke_evening_plans_ui.py --core .
 python -m uv run --project backend python scripts/smoke_reminder_followup_ui.py
 python -m uv run --project backend python scripts/smoke_extension_ui.py
 python -m uv run --project backend python scripts/smoke_research_pdf_ui.py

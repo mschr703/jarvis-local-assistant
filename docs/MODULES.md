@@ -2,12 +2,13 @@
 
 Jarvis kann optionale, lokal installierte Feature-Pakete sofort aktivieren und deaktivieren.
 Ein aktives Paket registriert seine eigene API und eine eigene Oberfläche in der normalen
-Jarvis-Navigation. Ohne Paket startet der Kern weiter. Die privaten Piloten `day_notes`
-(Tagesnotizen) und `reading_list` (lokale Leseliste) liegen ausschließlich im privaten
-Modul-Repository. Die Leseliste prüft auch den gleichzeitigen Betrieb zweier Pakete und
-ein schreibendes Werkzeug mit Freigabe. Bestehende ältere Bereiche des Jarvis-Monolithen sind noch nicht in
-solche Pakete ausgelagert; [P04 in Trello](https://trello.com/c/BcttXfbZ) verfolgt diese
-Migration.
+Jarvis-Navigation. Ohne Paket startet der Kern weiter. Die privaten Pakete `day_notes`
+(Tagesnotizen), `reading_list` (lokale Leseliste) und `evening_plans` (Abendplanung)
+liegen ausschließlich im privaten Modul-Repository. Die Abendplanung ist der erste
+vollständig aus dem öffentlichen Monolithen ausgelagerte bestehende Bereich. Die
+Leseliste prüft auch den gleichzeitigen Betrieb mehrerer Pakete und ein schreibendes
+Werkzeug mit Freigabe. Weitere ältere Bereiche sind noch nicht in solche Pakete
+ausgelagert; [P04 in Trello](https://trello.com/c/BcttXfbZ) verfolgt diese Migration.
 
 ## Installation und Start unter Windows
 
@@ -19,15 +20,17 @@ In PowerShell **im Jarvis-Hauptordner**:
 git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-private-modules
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\reading_list
+.\backend\.venv\Scripts\python.exe scripts\module_package.py install ..\jarvis-private-modules\evening_plans
 python scripts\dev.py
 ```
 
-Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“ und „Leseliste“
-aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz oder einen HTTP(S)-Link
-speichern, die Seite neu laden und den Eintrag wiederfinden. Unter **Module** eines
+Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“, „Leseliste“
+und „Abendplanung“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
+einen HTTP(S)-Link oder einen Abendplan speichern, die Seite neu laden und den
+Eintrag wiederfinden. Unter **Module** eines
 deaktivieren: Sein Navigationspunkt, seine API und sein ausgelieferter UI-Code sind
 sofort gesperrt; das andere Modul bleibt nutzbar. Beim erneuten Aktivieren sind die
-Daten wieder da. Beide Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
+Daten wieder da. Die drei Module brauchen weder OpenRouter noch Ollama für ihre Einträge.
 Die **Übersicht** zeigt Anzahl und Zustand installierter Module sowie Fehler und
 führt mit **Module verwalten** direkt zum Modulmanager.
 
@@ -86,6 +89,10 @@ Quelle erneut installieren. War ein Modul vor dem Restore aktiv, zeigt **Module*
 das fehlende Paket mit einem Fehler an. Nach der Neuinstallation lässt es sich dort
 wieder aktivieren; seine Daten bleiben erhalten. Eine automatische Datenlöschung
 gibt es nicht.
+Die Tabelle `evening_plans` bleibt als historische Kernmigration für alte Backups
+erhalten. Sie verleiht dem öffentlichen Kern keine Abendplan-Funktion: Ohne aktives
+Privatpaket gibt es weder den Navigationspunkt noch die API. Nach Installation
+übernimmt das Paket bestehende Pläne mitsamt IDs, Eingaben, Ergebnissen und Versionen.
 Der Knopf **Entfernen (Daten behalten)** in der Modulansicht führt denselben
 Vorgang aus; er ist erst nach Deaktivierung nutzbar.
 Fehlt eine der drei Paketdateien, kann Jarvis den verbliebenen Ordner nach dem
@@ -160,6 +167,8 @@ werden im Modulstatus gezeigt, während der Kern weiterläuft.
 .\backend\.venv\Scripts\python.exe scripts\smoke_modules_ui.py --module-source ..\jarvis-private-modules\day_notes
 .\backend\.venv\Scripts\python.exe -m pytest ..\jarvis-private-modules\tests\test_reading_list.py -q
 .\backend\.venv\Scripts\python.exe ..\jarvis-private-modules\tests\smoke_reading_list_ui.py --core .
+.\backend\.venv\Scripts\python.exe -m pytest ..\jarvis-private-modules\tests\test_evening_plans.py -q
+.\backend\.venv\Scripts\python.exe ..\jarvis-private-modules\tests\smoke_evening_plans_ui.py --core .
 ```
 
 Der zweite Befehl startet einen isolierten Edge-Klicktest mit temporärem
@@ -167,8 +176,9 @@ Datenprofil und benötigt freie Ports 8765/5173. Er prüft Installation,
 Aktivierung, privates UI-Bundle, Speichern, Reload, Deaktivierung, gesperrte
 API/UI-Routen und Werkzeuge, Reaktivierung, direkten Paketwechsel,
 Entfernen/Wiederinstallieren mit erhaltenen Daten, die Neulade-Aufforderung nach dem
-Update und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
-Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
-beide Module gleichzeitig in der Jarvis-Übersicht und im echten Edge-Browser.
-Die private Windows-CI führt den Zwei-Modul-Edge-Pfad bei jedem Push gegen einen
-frisch geklonten öffentlichen Kern aus; dafür ist kein Modellserver nötig.
+Update und 390-Pixel-Ansicht. Die vier letzten Befehle benötigen den privaten
+Checkout. Sie prüfen Leselisten-Daten, Schreibfreigaben und beide Piloten in der
+Jarvis-Übersicht sowie Abendpläne einschließlich Altbestand, Backup/Restore,
+Neuberechnung und Deaktivierung. Die private Windows-CI führt beide Edge-Pfade bei
+jedem Push gegen einen frisch geklonten öffentlichen Kern aus; dafür ist kein
+Modellserver nötig.

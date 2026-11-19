@@ -12,7 +12,6 @@ const TaskView = lazy(() => import('./TaskView'));
 const ActivityView = lazy(() => import('./ActivityView'));
 const WorkStateView = lazy(() => import('./WorkStateView'));
 const TimeModelView = lazy(() => import('./TimeModelView'));
-const EveningPlanView = lazy(() => import('./EveningPlanView'));
 const ResearchView = lazy(() => import('./ResearchView'));
 const VaultView = lazy(() => import('./VaultView'));
 const ChatRulesView = lazy(() => import('./ChatRulesView'));
@@ -26,7 +25,7 @@ const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
 const ContactView = lazy(() => import('./ContactView'));
 const MemoryTimelineView = lazy(() => import('./MemoryTimelineView'));
 
-type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'life_events' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault' | 'modules' | `module:${string}`;
+type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'life_events' | 'time_model' | 'work_states' | 'activity' | 'plan_rules' | 'vault' | 'modules' | `module:${string}`;
 type QuickCapture = { text: string; files: string[]; notice: string };
 type SearchSourceRequest =
   | { kind: 'project'; id: string; serial: number;
@@ -34,7 +33,7 @@ type SearchSourceRequest =
   | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
-const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['life_events', 'Lebenschronik'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge'], ['modules', 'Module']];
+const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['life_events', 'Lebenschronik'], ['time_model', 'Zeitmodell'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge'], ['modules', 'Module']];
 
 export default function App() {
   const [page, setPage] = useState<Page>('status');
@@ -57,7 +56,6 @@ export default function App() {
   const [requestedResearchReport, setRequestedResearchReport] = useState('');
   const [workStatesOpened, setWorkStatesOpened] = useState(false);
   const [timeModelOpened, setTimeModelOpened] = useState(false);
-  const [eveningPlansOpened, setEveningPlansOpened] = useState(false);
   const [vaultOpened, setVaultOpened] = useState(false);
   const [chatRulesOpened, setChatRulesOpened] = useState(false);
   const [skillsOpened, setSkillsOpened] = useState(false);
@@ -131,7 +129,6 @@ export default function App() {
     if (target === 'research') setResearchOpened(true);
     if (target === 'work_states') setWorkStatesOpened(true);
     if (target === 'time_model') setTimeModelOpened(true);
-    if (target === 'evening_plans') setEveningPlansOpened(true);
     if (target === 'vault') setVaultOpened(true);
     if (target === 'chat_rules') setChatRulesOpened(true);
     if (target === 'skills') setSkillsOpened(true);
@@ -270,7 +267,6 @@ export default function App() {
         page === 'contacts' ? null :
         page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} onOpenContact={(id) => { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); }} onPrepareDraft={(contactId, eventId, version, title) => { setSelectedSources([]); setDraftComposer((current) => ({ ...current, kind: 'text', brief: `Schreibe eine persönliche Nachricht über „${title}“.`, inputText: '', selectedSamples: [], allowCloud: false, recipientContactId: contactId, recipientExpectedVersion: null, recipientNoteIds: [], recipientEvents: [{ event_id: eventId, expected_version: version }] })); navigate('drafts'); }} /> :
         page === 'time_model' ? null :
-        page === 'evening_plans' ? null :
         page === 'work_states' ? null :
         page === 'activity' ? null :
         page === 'vault' ? null :
@@ -288,7 +284,6 @@ export default function App() {
       {researchOpened && <div hidden={page !== 'research'}><ResearchView visible={page === 'research'} configured={modelReady} provider={health?.provider || 'ollama'} requestedReportId={requestedResearchReport} onReportLoaded={() => setRequestedResearchReport('')} suggestedQuestion={suggestedResearchQuestion} onSuggestionTaken={() => setSuggestedResearchQuestion('')} /></div>}
       {tasksOpened && <div hidden={page !== 'tasks'}><TaskView visible={page === 'tasks'} onNotificationsChanged={refreshUnreadReminders} suggestedTitle={suggestedTaskTitle} onSuggestionTaken={() => setSuggestedTaskTitle('')} /></div>}
       {timeModelOpened && <div hidden={page !== 'time_model'}><TimeModelView visible={page === 'time_model'} /></div>}
-      {eveningPlansOpened && <div hidden={page !== 'evening_plans'}><EveningPlanView visible={page === 'evening_plans'} /></div>}
       {workStatesOpened && <div hidden={page !== 'work_states'}><WorkStateView visible={page === 'work_states'} requestedSource={requestedSource?.kind === 'project' ? requestedSource : null} onTasks={() => navigate('tasks')} onResearch={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
       {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} onChatEvidence={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} onResearchEvidence={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
