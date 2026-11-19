@@ -86,6 +86,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [active, setActive] = useState<Chat | null>(null);
   const [focusMessageId, setFocusMessageId] = useState('');
   const [streamed, setStreamed] = useState('');
+  const [liveToolUses, setLiveToolUses] = useState<{ name: string; run_id: string; status: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -119,6 +120,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const voiceAbort = useRef<AbortController | null>(null);
   const voiceEpoch = useRef(0);
   const [allowCloud, setAllowCloud] = useState(false);
+  const [useLocalTools, setUseLocalTools] = useState(true);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedAnswerId, setSelectedAnswerId] = useState('');
   const [verdict, setVerdict] = useState('unclear');
@@ -461,7 +463,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     const voiceGenerationEpoch = voiceEpoch.current;
     const memoryIds = [...selectedMemoryIds];
     const previousMessageIds = new Set(active?.messages.map((message) => message.id) || []);
-    setDraft(''); setStreamed(''); setError(''); setBusy(true);
+    setDraft(''); setStreamed(''); setLiveToolUses([]); setError(''); setBusy(true);
     setSelectedMemoryIds([]);
     setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice('');
     const abort = new AbortController(); controller.current = abort;
@@ -484,7 +486,10 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       }] });
       await streamChat(chat.id, content, abort.signal, allowCloud, (name, payload) => {
         if (name === 'delta') setStreamed((previous) => previous + String(payload.text || ''));
-      }, selectedSkillId || null, memoryIds, uploadedAttachmentIds);
+        if (name === 'tools' && Array.isArray(payload.uses))
+          setLiveToolUses(payload.uses as { name: string; run_id: string; status: string }[]);
+      }, selectedSkillId || null, memoryIds, uploadedAttachmentIds,
+      useLocalTools && provider === 'ollama' && selectedFiles.length === 0);
       streamCompleted = true;
       setSelectedFiles([]);
       const updated = await api<Chat>(`/chats/${chat.id}`);
@@ -520,7 +525,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           catch { /* Ein ungesendeter Anhang bleibt im lokalen Chat, bis der Chat gelöscht wird. */ }
         }
       }
-    } finally { setBusy(false); setStreamed(''); controller.current = null; }
+    } finally { setBusy(false); setStreamed(''); setLiveToolUses([]); controller.current = null; }
   };
 
   return <div className="chat-layout">
@@ -574,8 +579,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       {!configured && <div className="notice">{setupMessage}. Der Chat ist bis dahin deaktiviert.</div>}
       <div className="messages" aria-live="polite">
         {!active?.messages.length && <p className="empty">Beginne ein Gespräch. Der Verlauf wird lokal gespeichert.</p>}
-        {active?.messages.map((message) => <article id={`chat-message-${message.id}`} key={message.id} className={`message ${message.role}`}><strong>{message.role === 'user' ? 'Du' : 'Jarvis'}</strong><p>{message.content || (message.status !== 'complete' ? '(keine Ausgabe)' : '')}</p><Usage message={message} />{(message.memory_context?.length ?? 0) > 0 && <details><summary>Bewusst verwendete Erinnerungen ({message.memory_context?.length})</summary><ul>{message.memory_context?.map((item) => <li key={item.proposal_id}>{item.text_snapshot} · Originalstelle: „{item.source_quote}“</li>)}</ul></details>}{message.role === 'assistant' && <><div className="item-actions"><button onClick={() => selectEvaluation(message)}>Antwort bewerten</button>{message.status === 'complete' && message.content.trim() && <button onClick={() => void readAnswer(message)} disabled={!!speechBusyId}>{speechBusyId === message.id ? 'VoiceStudio erzeugt Audio…' : speechActiveId === message.id ? 'Wiedergeben' : 'Vorlesen'}</button>}{message.evaluation && <small>Bewertung: {verdictLabels[message.evaluation.verdict]} · {sourceLabels[message.evaluation.source_quality]}</small>}</div>{speechActiveId === message.id && speechUrl && <div className="speech-player"><small>Stimme: {speechVoice}</small><audio ref={audioRef} controls autoPlay src={speechUrl} aria-label="Jarvis-Antwort als Audio" /><button onClick={stopSpeech}>Stoppen</button></div>}{speechBusyId === message.id && <small role="status">Lokale Audioerzeugung läuft. Der Antworttext bleibt erhalten.</small>}</>}{speechError && message.id === speechErrorId && <p className="notice error" role="alert">{speechError}</p>}</article>)}
-        {busy && <article className="message assistant"><strong>Jarvis · antwortet</strong><p>{streamed || 'Warte auf Modell…'}</p></article>}
+        {active?.messages.map((message) => <article id={`chat-message-${message.id}`} key={message.id} className={`message ${message.role}`}><strong>{message.role === 'user' ? 'Du' : 'Jarvis'}</strong><p>{message.content || (message.status !== 'complete' ? '(keine Ausgabe)' : '')}</p><Usage message={message} />{(message.tool_uses?.length ?? 0) > 0 && <details><summary>Lokale Werkzeugbelege ({message.tool_uses?.length})</summary><ul>{message.tool_uses?.map((tool) => <li key={tool.run_id}>{tool.name.replace('__', ' · ')} · {tool.status === 'succeeded' ? 'erfolgreich' : tool.status} · Lauf {tool.run_id.slice(0, 8)}</li>)}</ul></details>}{(message.memory_context?.length ?? 0) > 0 && <details><summary>Bewusst verwendete Erinnerungen ({message.memory_context?.length})</summary><ul>{message.memory_context?.map((item) => <li key={item.proposal_id}>{item.text_snapshot} · Originalstelle: „{item.source_quote}“</li>)}</ul></details>}{message.role === 'assistant' && <><div className="item-actions"><button onClick={() => selectEvaluation(message)}>Antwort bewerten</button>{message.status === 'complete' && message.content.trim() && <button onClick={() => void readAnswer(message)} disabled={!!speechBusyId}>{speechBusyId === message.id ? 'VoiceStudio erzeugt Audio…' : speechActiveId === message.id ? 'Wiedergeben' : 'Vorlesen'}</button>}{message.evaluation && <small>Bewertung: {verdictLabels[message.evaluation.verdict]} · {sourceLabels[message.evaluation.source_quality]}</small>}</div>{speechActiveId === message.id && speechUrl && <div className="speech-player"><small>Stimme: {speechVoice}</small><audio ref={audioRef} controls autoPlay src={speechUrl} aria-label="Jarvis-Antwort als Audio" /><button onClick={stopSpeech}>Stoppen</button></div>}{speechBusyId === message.id && <small role="status">Lokale Audioerzeugung läuft. Der Antworttext bleibt erhalten.</small>}</>}{speechError && message.id === speechErrorId && <p className="notice error" role="alert">{speechError}</p>}</article>)}
+        {busy && <article className="message assistant"><strong>Jarvis · antwortet</strong><p>{streamed || 'Prüfe lokale Werkzeuge und Modell…'}</p>{liveToolUses.length > 0 && <small>Lokale Werkzeuge: {liveToolUses.map((tool) => tool.name.replace('__', ' · ')).join(', ')}</small>}</article>}
       </div>
       {active?.messages.some((message) => (message.attachments?.length ?? 0) > 0) &&
         <section className="card" aria-label="Dateianhänge im Gespräch"><h3>Dateianhänge im Gespräch</h3>
@@ -619,6 +624,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       {selectedSkillId && !skills.some((skill) => skill.id === selectedSkillId && skill.active_version != null) && <p className="notice">Der zuvor ausgewählte Skill ist nicht mehr aktiv. Wähle „Kein Skill“ oder einen aktiven Skill.</p>}
       {provider === 'ollama' && memoryChoices.some((item) => item.status === 'accepted' && item.current_memory_text === item.decided_text && item.validity_state === 'current') && <section className="card chat-memory-choice"><h3>Erinnerungen für diese Antwort</h3><p>Wähle höchstens drei bestätigte Erinnerungen. Sie gehen nur in die nächste lokale Ollama-Anfrage und werden danach abgewählt.</p><div className="item-list">{memoryChoices.filter((item) => item.status === 'accepted' && item.current_memory_text === item.decided_text && item.validity_state === 'current').map((item) => <label key={item.id}><input type="checkbox" checked={selectedMemoryIds.includes(item.id)} disabled={busy || (selectedMemoryIds.length >= 3 && !selectedMemoryIds.includes(item.id))} onChange={(event) => setSelectedMemoryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.current_memory_text}</label>)}</div></section>}
       {provider === 'openrouter' && <label><input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} /> Diese Nachricht und den bisherigen Chatverlauf an OpenRouter senden</label>}
+      {provider === 'ollama' && <label><input type="checkbox" checked={useLocalTools} onChange={(event) => setUseLocalTools(event.target.checked)} disabled={busy} /> Aktive Module bei passenden Fragen lokal lesen</label>}
+      {provider === 'ollama' && selectedFiles.length > 0 && useLocalTools && <small>Bei Nachrichten mit Dateianhang werden Modulwerkzeuge vorerst nicht genutzt.</small>}
       <section className="card voice-session" aria-label="Sprachmodus">
         <div className="item-actions"><strong>Sprachmodus</strong>
           {!voiceEnabled ? <button onClick={() => void enableVoiceSession()} disabled={!configured || !!active?.archived_at || voiceStatus.startsWith('Prüfe')}>Sprachmodus starten</button>

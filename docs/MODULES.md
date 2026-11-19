@@ -150,6 +150,15 @@ Modul unter **Aktivität**; neue Läufe werden nach Deaktivierung abgewiesen.
 Die normale Freigabe für schreibende Werkzeuge bleibt bestehen. Ein bereits
 begonnener Lauf kann abschließen; beim späteren Start wird der Aktivierungsstatus
 erneut geprüft.
+Bei lokalem Ollama kann der Chat aus aktiven Modulwerkzeugen mit `effect="read"`
+bis zu zwei passende Leseaufrufe für eine Frage wählen. Die Auswahl benutzt
+den Gesprächsverlauf und die aktuellen Werkzeugschemata, keine feste Zuordnung
+zu einzelnen Modulen. Ergebnisdaten werden dem Modell als unvertrauenswürdige
+Quelle mitgegeben; Name, Lauf-ID und Status bleiben an der Antwort gespeichert.
+Fehlende oder deaktivierte Module liefern keine alten Ergebnisse. Schreib-,
+Browser- und Desktopwerkzeuge sind für diesen Chatpfad nicht auswählbar. Weitere
+Schritte zu vorbereiteten Schreibaktionen verfolgen wir separat in
+[Trello P05](https://trello.com/c/9q0uJldq).
 Jarvis prüft alle Werkzeugdefinitionen vor der Registrierung. Scheitert ein Paket
 an einem ungültigen oder kollidierenden Werkzeug, werden bereits registrierte
 Werkzeuge dieses Aktivierungsversuchs zurückgenommen; der Kern bleibt nutzbar.

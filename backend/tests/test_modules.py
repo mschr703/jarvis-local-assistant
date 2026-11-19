@@ -10,6 +10,7 @@ from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.modules import package_digest
+from jarvis.provider import Chunk, Completion, ProviderAdapter
 
 SAMPLE_MODULE = '''
 from fastapi import FastAPI
@@ -216,6 +217,61 @@ def test_package_syntax_is_checked_without_running_code_and_upgrade_keeps_data(t
         assert package_digest(installed) == before
         assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
         assert client.get("/modules/sample_notes/entries").json() == ["kept"]
+
+
+def test_chat_reads_active_module_and_persists_tool_receipt(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir)
+    seen_messages = []
+
+    class AnswerProvider(ProviderAdapter):
+        async def stream(self, messages):
+            seen_messages.append(messages)
+            yield Chunk("text", text="Die Notiz heißt Garten.")
+            yield Chunk("usage", input_tokens=10, output_tokens=7,
+                        cost_usd=0.0, cost_kind="local_no_api_charge")
+
+    async def choose(_db, _settings, _purpose, _messages):
+        return Completion('{"tool":"sample_notes__list_entries","args":{}}',
+                          8, 8, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr("jarvis.app.make_provider", lambda _settings: AnswerProvider())
+    monkeypatch.setattr("jarvis.conversation_tools.generate_text", choose)
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/entries", headers=headers,
+                           json={"value": "Garten"}).status_code == 200
+        chat_id = client.post("/chats", headers=headers).json()["id"]
+        response = client.post(f"/chats/{chat_id}/stream", headers=headers,
+                               json={"content": "Welche Notizen habe ich?",
+                                     "use_local_tools": True})
+        assert response.status_code == 200 and "event: tools" in response.text
+        assert "event: done" in response.text
+        assert "Garten" in seen_messages[-1][-1]["content"]
+        assistant = client.get(f"/chats/{chat_id}").json()["messages"][-1]
+        assert assistant["tool_uses"][0]["name"] == "sample_notes__list_entries"
+        assert assistant["tool_uses"][0]["status"] == "succeeded"
+        run_id = assistant["tool_uses"][0]["run_id"]
+        assert client.get(f"/runs/{run_id}").json()["status"] == "succeeded"
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        second = client.post(f"/chats/{chat_id}/stream", headers=headers,
+                             json={"content": "Sind die Notizen noch aktuell?",
+                                   "use_local_tools": True})
+        assert second.status_code == 200 and "event: tools" not in second.text
+        assert "Keine aktiven lokalen Lese-Werkzeuge" in seen_messages[-1][-1]["content"]
+        assert client.get(f"/chats/{chat_id}").json()["messages"][-1]["tool_uses"] == []
+    archive = tmp_path / "conversation-backup.zip"
+    create_backup(data_dir, archive)
+    restored = tmp_path / "conversation-restored"
+    restore_backup(archive, restored)
+    with client_for(restored) as client:
+        csrf(client)
+        response = client.get(f"/chats/{chat_id}")
+        assert response.status_code == 200, response.text
+        messages = response.json()["messages"]
+        assert messages[1]["tool_uses"][0]["run_id"] == run_id
+        assert messages[-1]["tool_uses"] == []
 
 
 def test_module_bad_package_does_not_break_core_and_dependency_is_enforced(tmp_path):

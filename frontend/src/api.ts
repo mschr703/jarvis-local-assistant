@@ -14,6 +14,7 @@ export type Message = {
   usage_id?: string | null; usage_duration_seconds?: number | null;
   memory_context?: { proposal_id: string; memory_id: string; text_snapshot: string;
     source_quote: string; used_at: string }[];
+  tool_uses?: { name: string; run_id: string; status: string }[];
   attachments?: ChatAttachment[];
   evaluation?: { message_id: string; verdict: string; source_quality: string; reason: string;
     regression_case: number; expected_result: string; version: number; updated_at: string } | null;
@@ -240,11 +241,12 @@ export async function uploadChatAttachment(chatId: string, file: File,
 export async function streamChat(
   chatId: string, content: string, signal: AbortSignal, allowCloud: boolean,
   onEvent: (name: string, payload: Record<string, unknown>) => void, skillId: string | null = null,
-  memoryProposalIds: string[] = [], attachmentIds: string[] = [],
+  memoryProposalIds: string[] = [], attachmentIds: string[] = [], useLocalTools = false,
 ): Promise<void> {
   const response = await requestWithSession(`/chats/${chatId}/stream`, {
     method: 'POST', body: JSON.stringify({ content, allow_cloud: allowCloud, skill_id: skillId,
-      memory_proposal_ids: memoryProposalIds, attachment_ids: attachmentIds }), signal,
+      memory_proposal_ids: memoryProposalIds, attachment_ids: attachmentIds,
+      use_local_tools: useLocalTools }), signal,
     credentials: 'same-origin',
   });
   if (!response.ok) throw await responseError(response);

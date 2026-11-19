@@ -184,6 +184,30 @@ Mit **Lebensereignisse ab/bis** kannst du die gemeinsame Stichwortsuche und die 
 
 Für Kontakte in der gemeinsamen **Stichwortsuche** den Quelltyp **Kontakte** wählen oder **Alle Quellen** beibehalten. Die Suche berücksichtigt Name, unterscheidenden Kontext, Beziehung sowie je bis zu fünf zuletzt geänderte bestätigte Notizen, Vorhaben und bewusst verknüpfte Lebensereignisse. Sie prüft höchstens 2000 zuletzt geänderte Kontakte und zeigt höchstens zehn pro Quellart. Ein Treffer nennt die manuelle Quelle und öffnet die konkrete Kontakt-ID; gleichnamige Personen bleiben getrennt. Akzente und Großschreibung werden ignoriert. Es erfolgt kein Modellaufruf und keine automatische Übernahme in Chat oder Entwurf. Für **sinngemäße** Kontaktsuche den Kontakte-Bereich nutzen. Der Edge-Test `backend\.venv\Scripts\python.exe scripts/smoke_life_event_search_ui.py` prüft den direkten Sprung bei 390 Pixel. API: `GET /search/unified?q=...&kind=contact`.
 
+### Mit aktiven Modulen im Chat sprechen
+
+Bei lokalem Ollama ist im Chat **Aktive Module bei passenden Fragen lokal lesen**
+standardmäßig eingeschaltet. Frag zum Beispiel „Welche Tagesnotiz habe ich zum
+Gartenprojekt?“ oder „Was soll ich laut der Notiz am Samstag tun?“. Jarvis wählt
+aus den aktiven Modulen bei Bedarf ein passendes lesendes Werkzeug, ruft es über
+den normalen Werkzeuglauf auf und nutzt das aktuelle Ergebnis für seine Antwort.
+Bei allgemeinen Fragen kann das Modell ohne Werkzeug antworten. Unter der Antwort
+zeigt **Lokale Werkzeugbelege** den Werkzeugnamen, Lauf und Erfolg; der Beleg bleibt
+im Chatverlauf und im normalen Backup erhalten. Das Modul selbst muss installiert
+und aktiviert sein. Der [Modulstart](docs/MODULES.md) beschreibt die drei privaten
+Piloten. Bei deaktiviertem oder fehlendem Modul soll Jarvis fehlende aktuelle Daten
+benennen; Modellantworten bitte bei wichtigen Fragen anhand der Belege prüfen.
+
+Dieser erste Gesprächsschritt nutzt höchstens zwei **lesende** Modulwerkzeuge pro
+Frage und läuft nur mit Ollama. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
+werden nicht automatisch aus dem Chat gestartet. Bei einer Nachricht mit
+Dateianhang entfällt die Modulwerkzeugwahl vorerst; das normale Datei-Chatverfahren
+bleibt erhalten. Für OpenRouter sind lokale Chat-Werkzeuge gesperrt. Konten für
+Kalender und E-Mail sind noch nicht angeschlossen; die beiden Fragen sind derzeit
+nur mit einem tatsächlich installierten passenden Modul beantwortbar. Der echte
+Ollama-/Edge-Test mit Tagesnotizen liegt im privaten Modul-Repository unter
+`tests/smoke_conversation_ui.py` und wurde bei 390 Pixel geprüft.
+
 ### Eigene Dateien an eine Chatnachricht anhängen
 
 Unter „Chat“ bei lokalem Ollama bis zu drei TXT-, Markdown-, DOCX- oder Text-PDF-Dateien mit jeweils höchstens 512 KiB auswählen, eine konkrete Frage eingeben und „Senden“ drücken. PNG/JPEG/WebP sind ebenfalls möglich; pro Nachricht höchstens ein Bild. Alle ausgewählten Dateien erscheinen in ihrer Upload-Reihenfolge im Modellkontext und werden mit derselben Nachricht verknüpft. TXT und Markdown müssen UTF-8 sein; bei DOCX wird nur der lesbare Haupttext übernommen. Text-PDFs werden in einem auf acht Sekunden begrenzten Kindprozess gelesen; höchstens die ersten zwölf Seiten und 8.000 Zeichen gehen mit Seitenangaben in den Modellkontext. Gescannte, verschlüsselte oder beschädigte PDFs werden abgewiesen. Bei den anderen Textformaten ist die Textmenge je Datei ebenfalls auf 8.000 Zeichen begrenzt; alle Auszüge zusammen müssen in das eingestellte Kontextbudget passen. Jarvis zeigt die Auswahl vor dem Senden; im Chatverlauf stehen je Datei Name, Größe, SHA-256 und die zugehörige Nachricht. „Unveränderte Kopie herunterladen“ gibt die lokal gespeicherte Originaldatei zurück. Der Chat behält den Bezug nach einem Neustart, und das normale Backup/Restore nimmt alle Kopien mit. Das Löschen des Gesprächs entfernt auch seine Kopien.
