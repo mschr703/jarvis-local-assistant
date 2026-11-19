@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -57,6 +58,73 @@ def _safe_directory(path: Path, root: Path) -> bool:
             and path.resolve().parent == root.resolve())
 
 
+def checked_package(source: Path) -> ModuleManifest:
+    source = Path(source)
+    if not source.is_dir() or source.is_symlink() or source.is_junction():
+        raise ValueError("Modulquelle muss ein gewöhnlicher Ordner sein")
+    manifest = source / "jarvis-module.json"
+    entry = source / "module.py"
+    ui = source / "ui.js"
+    for path in (manifest, entry, ui):
+        if not path.is_file() or path.is_symlink() or path.is_junction():
+            raise ValueError("Manifest, module.py und ui.js müssen gewöhnliche Dateien sein")
+    if (manifest.stat().st_size > 16_384 or entry.stat().st_size > 2_000_000
+            or ui.stat().st_size > 200_000):
+        raise ValueError("Modulpaket ist zu groß")
+    parsed = ModuleManifest.model_validate(json.loads(manifest.read_text(encoding="utf-8")))
+    if parsed.id != source.name or parsed.api != MODULE_API:
+        raise ValueError("Modul-ID oder API-Version passt nicht")
+    return parsed
+
+
+def install_package(source: Path, data_dir: Path) -> str:
+    manifest = checked_package(source)
+    root = Path(data_dir) / "modules"
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("Modulverzeichnis darf kein Link sein")
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / manifest.id
+    if target.exists() or target.is_symlink() or target.is_junction():
+        raise ValueError("Modul ist bereits installiert; zuerst deaktivieren und entfernen")
+    target.mkdir()
+    try:
+        for name in ("jarvis-module.json", "module.py", "ui.js"):
+            shutil.copyfile(Path(source) / name, target / name)
+    except BaseException:
+        shutil.rmtree(target)
+        raise
+    return manifest.id
+
+
+def remove_package(module_id: str, data_dir: Path, db: Database) -> str:
+    if not MODULE_ID.fullmatch(module_id):
+        raise ValueError("Ungültige Modul-ID")
+    root = Path(data_dir) / "modules"
+    target = root / module_id
+    if (root.is_symlink() or root.is_junction() or not _safe_directory(target, root)):
+        raise ValueError("Modul ist nicht installiert")
+    if db.get_settings().get(f"module.{module_id}.enabled") == "1":
+        raise ValueError("Modul zuerst in Jarvis deaktivieren")
+    required = {"jarvis-module.json", "module.py", "ui.js"}
+    for child in target.iterdir():
+        if child.name == "__pycache__":
+            if not _safe_directory(child, target):
+                raise ValueError("Modulcache ist kein sicherer Ordner")
+            for cached in child.iterdir():
+                if (not cached.is_file() or cached.suffix != ".pyc"
+                        or cached.is_symlink() or cached.is_junction()):
+                    raise ValueError("Modulcache enthält zusätzliche Dateien")
+            continue
+        if child.name not in required or not child.is_file():
+            raise ValueError("Modulordner enthält zusätzliche Dateien; manuell prüfen")
+        if child.is_symlink() or child.is_junction():
+            raise ValueError("Modulordner enthält einen Link")
+    if not required.issubset({child.name for child in target.iterdir()}):
+        raise ValueError("Modulordner ist unvollständig")
+    shutil.rmtree(target)
+    return module_id
+
+
 class ModuleRegistry:
     def __init__(self, db: Database, directory: Path, engine: RunEngine | None = None):
         self.db = db
@@ -70,6 +138,20 @@ class ModuleRegistry:
         self._errors: dict[str, str] = {}
         self._manifests: dict[str, ModuleManifest] = {}
         self.refresh()
+
+    def install_from(self, source: Path) -> dict[str, Any]:
+        with self._lock:
+            module_id = install_package(source, self.directory.parent)
+            self.refresh()
+            return self._summary(module_id)
+
+    def remove_installed(self, module_id: str) -> dict[str, Any]:
+        with self._lock:
+            if module_id in self._apps:
+                raise ValueError("Modul zuerst deaktivieren")
+            remove_package(module_id, self.directory.parent, self.db)
+            self.refresh()
+            return {"id": module_id, "removed": True, "data_retained": True}
 
     def refresh(self) -> None:
         """Discover manifests without importing module code."""

@@ -12,6 +12,7 @@ export function ModuleManagerView({ modules, onChanged }: {
 }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [source, setSource] = useState('');
   async function toggle(item: InstalledModule) {
     setBusy(item.id); setError('');
     try {
@@ -21,10 +22,36 @@ export function ModuleManagerView({ modules, onChanged }: {
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(''); }
   }
+  async function install() {
+    if (!source.trim()) return;
+    setBusy('install'); setError('');
+    try {
+      await api('/modules/install', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: source.trim() }) });
+      setSource(''); onChanged();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(''); }
+  }
+  async function remove(item: InstalledModule) {
+    setBusy(item.id); setError('');
+    try {
+      await api(`/modules/${encodeURIComponent(item.id)}/remove`, { method: 'POST' });
+      onChanged();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(''); }
+  }
   return <>
     <h2>Module</h2>
     <p className="intro">Installierte Erweiterungen lassen sich hier aktivieren und deaktivieren. Deaktivieren behält ihre Daten.</p>
     {error && <p className="notice error" role="alert">{error}</p>}
+    <section className="card">
+      <h3>Lokales Paket installieren</h3>
+      <p>Nur selbst geprüfte Paketordner verwenden. Der installierte Code läuft mit Jarvis-Prozessrechten.</p>
+      <label htmlFor="module-source">Absoluter Pfad zum Paketordner</label>
+      <input id="module-source" value={source} onChange={(event) => setSource(event.target.value)} />
+      <button disabled={busy !== '' || !source.trim()} onClick={() => void install()}>Installieren</button>
+    </section>
     {!modules.length && <section className="card"><p>Keine Module installiert. Eine lokale Installation wird in der Startanleitung erklärt.</p></section>}
     {modules.map((item) => <section className="card" key={item.id}>
       <div className="card-heading"><h3>{item.name}</h3><span className={item.enabled ? 'badge ok' : 'badge pending'}>{item.enabled ? 'Aktiv' : 'Inaktiv'}</span></div>
@@ -32,6 +59,7 @@ export function ModuleManagerView({ modules, onChanged }: {
       <p>Vertrauenswürdiger lokaler Code mit Prozessrechten. Deklarierte Nutzung: {item.permissions.join(', ') || 'keine'}{item.dependencies.length ? ` · Benötigt: ${item.dependencies.join(', ')}` : ''}</p>
       {item.error && <p className="notice error" role="alert">{item.error}</p>}
       <button disabled={busy === item.id || item.api === 0} onClick={() => void toggle(item)}>{item.enabled ? 'Deaktivieren' : 'Aktivieren'}</button>
+      {!item.enabled && <button disabled={busy === item.id || item.api === 0} onClick={() => void remove(item)}>Entfernen (Daten behalten)</button>}
     </section>)}
   </>;
 }

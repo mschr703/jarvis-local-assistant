@@ -245,3 +245,24 @@ def test_module_tool_names_with_double_underscore_stay_separate(tmp_path):
         result = client.post("/runs", headers=headers,
                              json={"tool_name": "foo__bar__list_entries", "args": {}})
         assert result.status_code == 200 and result.json()["status"] == "succeeded"
+
+
+def test_module_can_be_installed_and_removed_through_local_api(tmp_path):
+    source_root = tmp_path / "source"
+    install_fixture(source_root)
+    source = source_root / "modules" / "sample_notes"
+    data_dir = tmp_path / "data"
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/install", json={"path": str(source)}).status_code == 403
+        assert client.post("/modules/install", headers=headers,
+                           json={"path": "relative/path"}).status_code == 422
+        installed = client.post("/modules/install", headers=headers,
+                                json={"path": str(source)})
+        assert installed.status_code == 200 and installed.json()["id"] == "sample_notes"
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert client.post("/modules/sample_notes/remove", headers=headers).status_code == 422
+        assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
+        removed = client.post("/modules/sample_notes/remove", headers=headers)
+        assert removed.status_code == 200 and removed.json()["data_retained"] is True
+        assert client.get("/modules").json() == []

@@ -26,6 +26,11 @@ den Eintrag wiederfinden. Unter **Module** deaktivieren: Navigationspunkt, API u
 ausgelieferter UI-Code sind sofort gesperrt. Beim erneuten Aktivieren sind die Notizen
 wieder da. Das Modul braucht weder OpenRouter noch Ollama für seine Einträge.
 
+Alternativ lässt sich das Paket direkt in **Module → Lokales Paket installieren**
+hinzufügen. Dort den absoluten Pfad zum Ordner `day_notes` eintragen. Mit PowerShell
+liefert `(Resolve-Path ..\jarvis-private-modules\day_notes).Path` den passenden Wert.
+Die Oberfläche zeigt die deklarierte Version, Datenversion und Abhängigkeiten an.
+
 Liegt das private Repository schon neben dem Hauptordner, den `git clone`-Schritt
 überspringen. `module_package.py` liest wie Jarvis den Datenordner aus `.env`
 oder `JARVIS_DATA_DIR`; ohne eigene Einstellung nutzt es
@@ -44,6 +49,8 @@ Der Befehl entfernt nur die drei installierten Paketdateien und ihren Python-Cac
 reguläre Jarvis-Backup sichert die Datenbank einschließlich Modultabellen, aber
 **nicht** den Modulcode. Nach einem Restore private Module aus einer vertrauten
 Quelle erneut installieren. Eine automatische Datenlöschung gibt es nicht.
+Der Knopf **Entfernen (Daten behalten)** in der Modulansicht führt denselben
+Vorgang aus; er ist erst nach Deaktivierung nutzbar.
 
 ## Paketvertrag (Modul-API 1)
 
@@ -100,4 +107,5 @@ werden im Modulstatus gezeigt, während der Kern weiterläuft.
 Der zweite Befehl startet einen isolierten Edge-Klicktest mit temporärem
 Datenprofil und benötigt freie Ports 8765/5173. Er prüft Installation,
 Aktivierung, privates UI-Bundle, Speichern, Reload, Deaktivierung, gesperrte
-API/UI-Routen und Werkzeuge, Reaktivierung und 390-Pixel-Ansicht.
+API/UI-Routen und Werkzeuge, Reaktivierung, Entfernen/Wiederinstallieren mit
+erhaltenen Daten und 390-Pixel-Ansicht.

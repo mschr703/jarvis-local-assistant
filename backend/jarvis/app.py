@@ -364,6 +364,12 @@ class RunInput(BaseModel):
     background: bool = False
 
 
+class ModuleInstallInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=2048)
+
+
 class DecisionInput(BaseModel):
     args_hash: str = Field(min_length=64, max_length=64)
     approved: bool
@@ -1093,6 +1099,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         modules.refresh()
         return modules.list()
 
+    @app.post("/modules/install")
+    async def module_install(data: ModuleInstallInput):
+        source = Path(data.path)
+        if not source.is_absolute() or str(source).startswith("\\\\"):
+            raise HTTPException(422, "Lokaler absoluter Modulpfad erforderlich")
+        try:
+            return await run_in_threadpool(modules.install_from, source)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, "Modulpaket konnte nicht kopiert werden") from exc
+
     @app.post("/modules/{module_id}/enable")
     async def module_enable(module_id: str):
         modules.refresh()
@@ -1109,6 +1127,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await run_in_threadpool(modules.disable, module_id)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/modules/{module_id}/remove")
+    async def module_remove(module_id: str):
+        try:
+            return await run_in_threadpool(modules.remove_installed, module_id)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, "Modulpaket konnte nicht entfernt werden") from exc
 
     @app.get("/backups/schedule")
     async def backup_schedule_status():

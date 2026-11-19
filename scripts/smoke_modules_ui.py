@@ -13,9 +13,6 @@ from smoke_code_project_ui import wait_ui
 from smoke_research_ui import overflow_nodes
 from smoke_ui import ROOT, port_free, stop_test_server
 
-sys.path.insert(0, str(ROOT / "backend"))
-from module_package import install
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,7 +23,6 @@ def main() -> None:
     with TemporaryDirectory(prefix="jarvis-module-ui-") as temporary:
         root = Path(temporary)
         data = root / "data"
-        install(args.module_source, data)
         environment = os.environ.copy()
         environment.update(JARVIS_DATA_DIR=str(data), JARVIS_PROVIDER="ollama")
         with (root / "server.log").open("w", encoding="utf-8") as log:
@@ -42,7 +38,12 @@ def main() -> None:
                         page.goto("http://127.0.0.1:5173/", wait_until="domcontentloaded",
                                   timeout=120000)
                         page.get_by_role("button", name="Module", exact=True).click()
+                        expect(page.get_by_text("Keine Module installiert.", exact=False)).to_be_visible()
+                        page.get_by_label("Absoluter Pfad zum Paketordner").fill(
+                            str(args.module_source.absolute()))
+                        page.get_by_role("button", name="Installieren").click()
                         expect(page.get_by_role("heading", name="Tagesnotizen")).to_be_visible()
+                        assert not overflow_nodes(page), overflow_nodes(page)
                         expect(page.get_by_role("button", name="Tagesnotizen")).to_have_count(0)
                         page.get_by_role("button", name="Aktivieren").click()
                         expect(page.get_by_role("button", name="Tagesnotizen")).to_be_visible()
@@ -80,11 +81,21 @@ def main() -> None:
                         page.get_by_role("button", name="Aktivieren").click()
                         page.get_by_role("button", name="Tagesnotizen").click()
                         expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
+                        page.get_by_role("button", name="Module", exact=True).click()
+                        page.get_by_role("button", name="Deaktivieren").click()
+                        page.get_by_role("button", name="Entfernen (Daten behalten)").click()
+                        expect(page.get_by_text("Keine Module installiert.", exact=False)).to_be_visible()
+                        page.get_by_label("Absoluter Pfad zum Paketordner").fill(
+                            str(args.module_source.absolute()))
+                        page.get_by_role("button", name="Installieren").click()
+                        page.get_by_role("button", name="Aktivieren").click()
+                        page.get_by_role("button", name="Tagesnotizen").click()
+                        expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
                         print(json.dumps({"module_ui": "private_bundle_loaded",
                                           "activation": "immediate",
                                           "disabled_api_and_ui": "blocked",
                                           "disabled_tool": "blocked",
-                                          "data_after_reactivation": "retained",
+                                          "data_after_reinstall": "retained",
                                           "mobile_width": "fits"}))
                     finally:
                         browser.close()
