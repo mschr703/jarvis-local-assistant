@@ -250,3 +250,50 @@ test('Fremde oder veraltete PDF-Fundstelle wird vor dem Chat abgewiesen', async 
     .rejects.toThrow('nicht geeignet');
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });
+
+test('Drei PDF-Fundstellen werden erst nach gemeinsamer Prüfung übergeben', async () => {
+  const sha256 = 'a'.repeat(64);
+  const path = 'C:\\Belege\\Bericht.pdf';
+  const passages = [1, 2, 3].map((passageId) => ({
+    documentId: 'doc-1', passageId, path, sha256,
+  }));
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }));
+  for (const passageId of [1, 2, 3])
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      document_id: 'doc-1', passage_id: passageId, filename: 'Bericht.pdf',
+      sha256, page: passageId, text: `Orion Seite ${passageId}`,
+    }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedPdfPassagesForLocalChat } = await import('./api');
+  const files = await verifiedPdfPassagesForLocalChat(passages);
+  expect(files.map((file) => file.name)).toEqual([
+    'Bericht-fundstelle-1.txt', 'Bericht-fundstelle-2.txt', 'Bericht-fundstelle-3.txt',
+  ]);
+  expect(await files[2].text()).toContain('=== Seite 3 ===\nOrion Seite 3');
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  await expect(verifiedPdfPassagesForLocalChat([...passages, passages[0]]))
+    .rejects.toThrow('Höchstens drei');
+  await expect(verifiedPdfPassagesForLocalChat([passages[0], passages[0]]))
+    .rejects.toThrow('verschiedene');
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+});
+
+test('Fehler bei zweiter PDF-Fundstelle verhindert eine Teilauswahl', async () => {
+  const sha256 = 'a'.repeat(64);
+  const path = 'C:\\Belege\\Bericht.pdf';
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      document_id: 'doc-1', passage_id: 1, filename: 'Bericht.pdf',
+      sha256, page: 1, text: 'Orion Seite 1',
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Original geändert' }),
+      { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { verifiedPdfPassagesForLocalChat } = await import('./api');
+  await expect(verifiedPdfPassagesForLocalChat([1, 2].map((passageId) => ({
+    documentId: 'doc-1', passageId, path, sha256,
+  })))).rejects.toThrow('Original geändert');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});

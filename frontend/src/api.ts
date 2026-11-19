@@ -175,6 +175,21 @@ export async function verifiedPdfPassageForLocalChat(documentId: string,
   return new File([content], chatFilename, { type: 'text/plain' });
 }
 
+export type PdfChatPassage = { documentId: string; passageId: number;
+  path: string; sha256: string };
+
+export async function verifiedPdfPassagesForLocalChat(
+  passages: PdfChatPassage[]): Promise<File[]> {
+  if (!passages.length || passages.length > 3
+      || new Set(passages.map((item) => item.passageId)).size !== passages.length)
+    throw new Error('Höchstens drei verschiedene PDF-Fundstellen auswählen.');
+  const files: File[] = [];
+  for (const item of passages)
+    files.push(await verifiedPdfPassageForLocalChat(
+      item.documentId, item.passageId, item.path, item.sha256));
+  return files;
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {

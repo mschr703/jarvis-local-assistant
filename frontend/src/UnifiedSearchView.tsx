@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, verifiedPdfPassageForLocalChat, verifiedSearchDocumentForLocalChat } from './api';
+import { api, verifiedPdfPassageForLocalChat, verifiedPdfPassagesForLocalChat,
+  verifiedSearchDocumentForLocalChat, type PdfChatPassage } from './api';
 import type { Source } from './DocumentView';
 
 type Kind = 'document' | 'memory' | 'project';
@@ -47,6 +48,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
   const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
   const [selectedChatDocuments, setSelectedChatDocuments] = useState<ChatDocument[]>([]);
+  const [selectedChatPassages, setSelectedChatPassages] = useState<PdfChatPassage[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [semantic, setSemantic] = useState<SemanticResult | null>(null);
   const [modelStatus, setModelStatus] = useState<SemanticStatus | null>(null);
@@ -81,7 +83,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   };
   useEffect(() => { void refreshCache(); }, []);
   const clearCache = async () => {
-    if (busy || cacheBusy) return;
+    if (busy || cacheBusy || preparingChat) return;
     setCacheBusy(true); setError('');
     try {
       setCacheStatus(await api<CacheStatus>('/search/semantic/cache', { method: 'DELETE' }));
@@ -99,17 +101,17 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   };
   const run = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy || cacheBusy) return;
+    if (busy || cacheBusy || preparingChat) return;
     setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
-    setSelectedDraftSources([]); setSelectedChatDocuments([]);
+    setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     try { await load(query.trim()); }
     catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
   const runSemantic = async () => {
-    if (busy || cacheBusy || query.trim().length < 2) return;
+    if (busy || cacheBusy || preparingChat || query.trim().length < 2) return;
     setBusy(true); setError(''); setNotice(''); setResult(null); setSemantic(null);
-    setSelectedDraftSources([]); setSelectedChatDocuments([]);
+    setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     try {
       const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
       if (folderId) params.set('folder_id', folderId);
@@ -128,7 +130,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         body: JSON.stringify({ query: result.query, document_id: documentId }) });
       await load(result.query);
       setPreferredId('');
-      setSelectedDraftSources([]); setSelectedChatDocuments([]);
+      setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(false); }
   };
@@ -154,22 +156,33 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     const passageKey = `${key}:${passageId}`;
     const canUsePassage = /\.pdf$/i.test(hit.source)
       && typeof passageId === 'number' && Number.isSafeInteger(passageId) && passageId > 0;
+    const selectedPassage = selectedChatPassages.some((item) => item.passageId === passageId);
     const document = { id: hit.document_id, path: hit.source, sha256: hit.sha256 };
     const selected = selectedChatDocuments.some((item) => item.id === document.id);
     return <div className="item-actions">{firstForDocument && <label><input type="checkbox"
       aria-label={`Dokument ${hit.title} für lokalen Chat auswählen`}
       checked={selected} disabled={!localChatReady || !!preparingChat
         || (!selected && selectedChatDocuments.length >= 3)}
-      onChange={() => setSelectedChatDocuments((current) => current.some(
+      onChange={() => { setSelectedChatPassages([]); setSelectedChatDocuments((current) => current.some(
         (item) => item.id === document.id) ? current.filter((item) => item.id !== document.id)
-        : current.length < 3 ? [...current, document] : current)} />Für lokalen Chat auswählen</label>}
+        : current.length < 3 ? [...current, document] : current); }} />Für lokalen Chat auswählen</label>}
+    {canUsePassage && <label><input type="checkbox"
+      aria-label={`PDF-Fundstelle ${passageId} für lokalen Chat auswählen`}
+      checked={selectedPassage} disabled={!localChatReady || !!preparingChat
+        || (!selectedPassage && selectedChatPassages.length >= 3)}
+      onChange={() => { setSelectedChatDocuments([]); setSelectedChatPassages((current) =>
+        current.some((item) => item.passageId === passageId)
+          ? current.filter((item) => item.passageId !== passageId)
+          : current.length < 3 ? [...current, { documentId: document.id,
+            passageId: passageId as number, path: document.path, sha256: document.sha256 }]
+            : current); }} />Fundstelle für lokalen Chat auswählen</label>}
     <button type="button" disabled={!localChatReady || !!preparingChat}
       title={!localChatReady ? 'Nur mit lokalem Ollama verfügbar' : undefined}
       onClick={async () => {
         setPreparingChat(key); setError('');
         try {
           const file = await verifiedSearchDocumentForLocalChat(document.id, document.path, document.sha256);
-          setSelectedChatDocuments([]); onLocalChat([file]);
+          setSelectedChatDocuments([]); setSelectedChatPassages([]); onLocalChat([file]);
         }
         catch (cause) { setError((cause as Error).message); }
         finally { setPreparingChat(''); }
@@ -182,7 +195,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
         try {
           const file = await verifiedPdfPassageForLocalChat(
             document.id, passageId, document.path, document.sha256);
-          setSelectedChatDocuments([]); onLocalChat([file]);
+          setSelectedChatDocuments([]); setSelectedChatPassages([]); onLocalChat([file]);
         } catch (cause) { setError((cause as Error).message); }
         finally { setPreparingChat(''); }
       }}>{preparingChat === passageKey ? 'Fundstelle wird geprüft…'
@@ -195,7 +208,16 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       const files: File[] = [];
       for (const item of selectedChatDocuments)
         files.push(await verifiedSearchDocumentForLocalChat(item.id, item.path, item.sha256));
-      setSelectedChatDocuments([]); onLocalChat(files);
+      setSelectedChatDocuments([]); setSelectedChatPassages([]); onLocalChat(files);
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setPreparingChat(''); }
+  };
+  const prepareSelectedPassages = async () => {
+    if (!localChatReady || preparingChat || !selectedChatPassages.length) return;
+    setPreparingChat('passage-selection'); setError('');
+    try {
+      const files = await verifiedPdfPassagesForLocalChat(selectedChatPassages);
+      setSelectedChatPassages([]); setSelectedChatDocuments([]); onLocalChat(files);
     } catch (cause) { setError((cause as Error).message); }
     finally { setPreparingChat(''); }
   };
@@ -206,7 +228,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       const updated = await api<{ outcome: 'indexed' | 'unchanged' | 'removed' | 'ocr_pending' | 'error';
         document: { error?: string } | null }>(`/documents/${encodeURIComponent(id)}/index`,
         { method: 'POST' });
-      setSelectedDraftSources([]); setSelectedChatDocuments([]);
+      setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
       if (semantic) setSemantic(null);
       if (result) setResult(null);
       setDocuments(await api<Document[]>('/documents'));
@@ -229,10 +251,11 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     <p className="intro">Die Stichwortsuche durchsucht lokal indexierte Dateien, Erinnerungen und Arbeitsstände ohne Modell. Die optionale sinngemäße Suche nutzt ein lokales Ollama-Modell für dieselben Quellarten. Nach Dateiänderungen kannst du veraltete Dateien direkt im Suchergebnis einzeln neu indexieren.</p>
     <section className="card"><form onSubmit={(event) => void run(event)}>
       <label>Quelltyp
-        <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy}
+        <select aria-label="Quelltyp der gemeinsamen Suche" value={sourceKind} disabled={busy || cacheBusy || !!preparingChat}
           onChange={(event) => { const next = event.target.value as SourceKind;
             setSourceKind(next); setResult(null); setSemantic(null);
-            setSelectedDraftSources([]); setSelectedChatDocuments([]); setNotice('');
+            setSelectedDraftSources([]); setSelectedChatDocuments([]);
+            setSelectedChatPassages([]); setNotice('');
             if (next === 'memory' || next === 'project') { setFolderId(''); setDocumentId(''); }
           }}>
           <option value="all">Alle Quellen</option>
@@ -245,23 +268,23 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           border: '1px solid #3b4b60', borderRadius: 8, padding: 9, color: '#e8ebef' }}
         maxLength={160} onChange={(event) => setQuery(event.target.value)}
         placeholder="Projektname, Thema oder Dokumenttitel" /></label>
-      <button className="primary" type="submit" disabled={busy || cacheBusy || query.trim().length < 2}>
+      <button className="primary" type="submit" disabled={busy || cacheBusy || !!preparingChat || query.trim().length < 2}>
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
         <select aria-label="Dokumentordner für sinngemäße Suche" value={folderId}
-          disabled={busy || sourceKind === 'memory' || sourceKind === 'project'}
+          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project'}
           onChange={(event) => { setFolderId(event.target.value); setDocumentId(''); }}>
           <option value="">Alle freigegebenen Ordner</option>
           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.path}</option>)}
         </select></label>
       <label>Einzelnes Dokument tief durchsuchen
         <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId}
-          disabled={busy || sourceKind === 'memory' || sourceKind === 'project'}
+          disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project'}
           onChange={(event) => setDocumentId(event.target.value)}>
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
         </select></label>
-      <button type="button" disabled={busy || cacheBusy || query.trim().length < 2}
+      <button type="button" disabled={busy || cacheBusy || !!preparingChat || query.trim().length < 2}
         onClick={() => void runSemantic()}>{busy ? 'Bitte warten…' : 'Sinngemäß lokal suchen'}</button>
       <div role="status"><small>{statusChecking ? 'Prüfe lokales Suchmodell…' :
         modelStatus?.message || 'Modellstatus noch nicht geprüft.'}</small>
@@ -301,6 +324,16 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           : `Mit ${selectedChatDocuments.length} Dokumenten lokalen Chat vorbereiten`}</button>
         <button type="button" disabled={!!preparingChat}
           onClick={() => setSelectedChatDocuments([])}>Auswahl entfernen</button></div>
+    </section>}
+    {selectedChatPassages.length > 0 && <section className="card" aria-label="PDF-Fundstellen für lokalen Chat">
+      <p>{selectedChatPassages.length} von höchstens drei verschiedenen PDF-Fundstellen ausgewählt. Jede wird vor dem lokalen Chat erneut gegen Original und Index geprüft. Der Klick startet noch kein Modell.</p>
+      <div className="item-actions"><button type="button" className="primary"
+        disabled={!localChatReady || !!preparingChat}
+        onClick={() => void prepareSelectedPassages()}>
+        {preparingChat === 'passage-selection' ? 'Fundstellen werden geprüft…'
+          : `Mit ${selectedChatPassages.length} PDF-Fundstellen lokalen Chat vorbereiten`}</button>
+        <button type="button" disabled={!!preparingChat}
+          onClick={() => setSelectedChatPassages([])}>Auswahl entfernen</button></div>
     </section>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>

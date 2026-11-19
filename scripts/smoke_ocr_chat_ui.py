@@ -97,7 +97,7 @@ def main() -> None:
 
                         page.get_by_role("button", name="Suche", exact=True).click()
                         choices = results.get_by_role(
-                            "checkbox", name=re.compile("für lokalen Chat auswählen"))
+                            "checkbox", name=re.compile("^Dokument .* für lokalen Chat auswählen$"))
                         expect(choices).to_have_count(3)
                         for index in range(3):
                             choices.nth(index).check()
@@ -197,10 +197,63 @@ def main() -> None:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 3
                             assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 5
                         assert not overflow_nodes(page), overflow_nodes(page)
+                        page.get_by_role("button", name="Suche", exact=True).click()
+                        page.get_by_label("Einzelnes Dokument tief durchsuchen").select_option(
+                            label=str(long_pdf))
+                        page.get_by_label("Gemeinsame Suche").fill("Galaxia")
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        semantic = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
+                        choices = semantic.get_by_role("checkbox", name=re.compile(
+                            "PDF-Fundstelle .* für lokalen Chat auswählen"))
+                        expect(choices.first).to_be_visible(timeout=120000)
+                        assert choices.count() >= 3
+                        for index in range(3):
+                            choices.nth(index).check()
+                        if choices.count() > 3:
+                            expect(choices.nth(3)).to_be_disabled()
+                        choices.nth(2).uncheck()
+                        passage_selection = page.get_by_role(
+                            "region", name="PDF-Fundstellen für lokalen Chat")
+                        expect(passage_selection).to_contain_text("2 von höchstens drei")
+                        long_pdf.write_bytes(long_original + b"\n")
+                        passage_selection.get_by_role(
+                            "button", name="Mit 2 PDF-Fundstellen lokalen Chat vorbereiten").click()
+                        expect(page.get_by_role("alert")).to_contain_text(
+                            "Originaldatei weicht vom Index ab")
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM chats").fetchone()[0] == 3
+                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 5
+                        long_pdf.write_bytes(long_original)
+                        passage_selection.get_by_role(
+                            "button", name="Mit 2 PDF-Fundstellen lokalen Chat vorbereiten").click()
+                        expect(page.get_by_role("heading", name="Chat", exact=True)).to_be_visible()
+                        expect(selected_files).to_contain_text("1. Langer Bericht-fundstelle-")
+                        expect(selected_files).to_contain_text("2. Langer Bericht-fundstelle-")
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 3
+                        page.get_by_label("Nachricht").fill(
+                            "Vergleiche die beiden Galaxia-Fundstellen mit ihren Seitenbelegen.")
+                        page.get_by_role("button", name="Senden", exact=True).click()
+                        expect(page.locator(".message.assistant .usage")).to_contain_text(
+                            "keine API-Gebühr", timeout=180000)
+                        with db.connect() as connection:
+                            assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 4
+                            assert connection.execute("SELECT COUNT(*) FROM chats").fetchone()[0] == 4
+                            assert connection.execute("SELECT COUNT(*) FROM chat_attachments").fetchone()[0] == 7
+                            latest_chat = connection.execute(
+                                "SELECT id FROM chats ORDER BY created_at DESC LIMIT 1"
+                            ).fetchone()[0]
+                            joint_texts = [row[0] for row in connection.execute(
+                                "SELECT text FROM chat_attachments WHERE chat_id=?", (latest_chat,))]
+                        assert len(joint_texts) == 2
+                        assert len({re.search(r"=== Seite (\d+) ===", text)[1]
+                                    for text in joint_texts}) == 2
+                        assert not overflow_nodes(page), overflow_nodes(page)
                         print(json.dumps({"scan_pdf_chat": "verified_index_text",
                                           "three_sources": "atomic_stale_then_sent",
                                           "long_pdf_passage": "verified_and_sent",
                                           "semantic_passage": "prepared_without_chat",
+                                          "two_passages": "stale_refused_then_sent",
                                           "pre_send_model_calls": 0, "page_evidence": 1,
                                           "provider": "ollama", "mobile_width": "fits"}))
                     finally:
