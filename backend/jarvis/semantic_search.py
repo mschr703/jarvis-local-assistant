@@ -13,7 +13,12 @@ from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
 from jarvis.semantic_cache import PersistentEmbeddingCache
-from jarvis.unified_search import PROJECT_RELATIONS, SOURCE_KINDS, validate_event_range
+from jarvis.unified_search import (
+    PROJECT_RELATIONS,
+    SOURCE_KINDS,
+    portable_basename,
+    validate_event_range,
+)
 
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
@@ -213,7 +218,7 @@ def _project_body(row: dict) -> str:
 
 def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict]:
     """Read bounded project links in stable order for corpus and post-model recheck."""
-    result = {project_id: {"people": [], "aliases": [], "tasks": []}
+    result = {project_id: {"people": [], "aliases": [], "tasks": [], "files": []}
               for project_id in project_ids}
     if not project_ids:
         return result
@@ -244,6 +249,15 @@ def _project_relationships(connection, project_ids: list[str]) -> dict[str, dict
                                project_ids)
     for task in tasks:
         result[task["state_id"]]["tasks"].append(dict(task))
+    files = connection.execute(f"""SELECT s.id AS state_id,
+        json_extract(link.value,'$.id') AS document_id,
+        json_extract(link.value,'$.path') AS saved_path,
+        json_extract(link.value,'$.sha256') AS saved_sha256
+        FROM work_states s JOIN json_each(s.documents_json) link
+        WHERE s.id IN ({placeholders}) ORDER BY s.id,CAST(link.key AS INTEGER)""",
+                               project_ids)
+    for file in files:
+        result[file["state_id"]]["files"].append(dict(file))
     return result
 
 
@@ -267,14 +281,19 @@ def _project_relationship_text(row: dict) -> str:
         else:
             tasks.append(f"Projektaufgabe: {current}"
                          f" · {'erledigt' if task['current_status'] == 'done' else 'offen'}")
+    files = [f"Projektdatei: {portable_basename(file['saved_path'])}"
+             " · Original und Freigabe im Arbeitsstand prüfen"
+             for file in links["files"][:MAX_PROJECT_RELATIONS_PER_KIND]]
     parts = []
-    for index in range(max(len(people), len(aliases), len(tasks))):
+    for index in range(max(len(people), len(aliases), len(tasks), len(files))):
         if index < len(people):
             parts.append(people[index])
         if index < len(aliases):
             parts.append(aliases[index])
         if index < len(tasks):
             parts.append(tasks[index])
+        if index < len(files):
+            parts.append(files[index])
     return " · ".join(parts)
 
 
@@ -411,7 +430,7 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS
                or any(len(row["relationships"][kind]) > MAX_PROJECT_RELATIONS_PER_KIND
                       for row in projects[:MAX_PROJECTS]
-                      for kind in ("people", "aliases", "tasks"))
+                      for kind in ("people", "aliases", "tasks", "files"))
                or any(len(_project_embedding_body(row)) > 1200
                       for row in projects[:MAX_PROJECTS]))
     freshness: dict[str, bool] = {}

@@ -1,5 +1,7 @@
 """Semantic retrieval keeps memory and work-state references current and local."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -187,6 +189,76 @@ def test_project_semantic_task_limit_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr("jarvis.semantic_search.embed_texts",
                         lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
     found = search(db, "Budgetaufgabe", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["limited"] and found["counts"]["project"] == 1
+
+
+def test_linked_project_filename_reaches_ollama_without_absolute_path(tmp_path, monkeypatch):
+    db, docs, _, _, project, source = sample(tmp_path)
+    document = docs.documents()[0]
+    states = WorkStateStore(db, docs, TaskStore(db))
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [document["id"]], [], [])
+    # A restored backup may contain Windows-style paths on another OS.
+    with db.connect() as connection:
+        connection.execute("UPDATE work_states SET documents_json=? WHERE id=?",
+                           (json.dumps([{"id": document["id"],
+                                         "path": r"C:\Users\private\Wohnung.md",
+                                         "sha256": document["sha256"]}]), project["id"]))
+    observed = []
+
+    def fake_embed(_url, texts, _cache_path=None):
+        observed.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", fake_embed)
+    found = search(db, "Welche Unterlage?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert "Projektdatei: Wohnung.md" in observed[1]
+    assert str(source.parent) not in observed[1]
+    assert r"C:\Users\private" not in observed[1]
+    assert "Projektdatei: Wohnung.md" in found["results"][0]["excerpt"]
+    assert str(source.parent) not in found["results"][0]["excerpt"]
+    assert r"C:\Users\private" not in found["results"][0]["excerpt"]
+    assert found["results"][0]["id"] == project["id"]
+
+
+def test_linked_project_file_removed_during_embedding_is_rejected(tmp_path, monkeypatch):
+    db, docs, _, _, project, _ = sample(tmp_path)
+    document = docs.documents()[0]
+    states = WorkStateStore(db, docs, TaskStore(db))
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [document["id"]], [], [])
+
+    def remove_link(_url, texts, _cache_path=None):
+        states.update(project["id"], project["version"], project["project"],
+                      project["confirmed"], project["open_questions"],
+                      project["next_step"], [], [], [])
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts", remove_link)
+    found = search(db, "Welche Unterlage?", "http://127.0.0.1:11434",
+                   source_kind="project")
+    assert found["counts"]["project"] == 0
+    assert found["changed_sources"] == [{"kind": "project", "id": project["id"]}]
+
+
+def test_project_semantic_filename_limit_is_reported(tmp_path, monkeypatch):
+    db, docs, folder, _, project, source = sample(tmp_path)
+    for index in range(2):
+        source.with_name(f"Anlage_{index}.md").write_text("Eigene Datei.", encoding="utf-8")
+    docs.index_folder(folder["id"])
+    states = WorkStateStore(db, docs, TaskStore(db))
+    ids = [item["id"] for item in docs.documents()]
+    states.update(project["id"], project["version"], project["project"],
+                  project["confirmed"], project["open_questions"],
+                  project["next_step"], ids, [], [])
+    monkeypatch.setattr("jarvis.semantic_search.MAX_PROJECT_RELATIONS_PER_KIND", 2)
+    monkeypatch.setattr("jarvis.semantic_search.embed_texts",
+                        lambda _url, texts, _path=None: [[1.0, 0.0] for _ in texts])
+    found = search(db, "Unterlagen", "http://127.0.0.1:11434",
                    source_kind="project")
     assert found["limited"] and found["counts"]["project"] == 1
 

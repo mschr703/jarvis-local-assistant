@@ -1,5 +1,7 @@
 """Unified local search returns current, cited records from local stores."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -178,6 +180,14 @@ def test_explicit_project_file_name_search_hides_path_and_tracks_unlink(tmp_path
     assert "Projektdatei: Vertrag_Orion.md" in hit["excerpt"]
     assert "Original und Freigabe im Arbeitsstand prüfen" in hit["excerpt"]
     assert str(file.parent) not in hit["excerpt"]
+    with db.connect() as connection:
+        connection.execute("UPDATE work_states SET documents_json=? WHERE id=?",
+                           (json.dumps([{"id": document["id"],
+                                         "path": r"C:\Users\private\Vertrag_Orion.md",
+                                         "sha256": document["sha256"]}]), project["id"]))
+    portable = search(db, "Vertrag_Orion", "project")["results"][0]
+    assert "Projektdatei: Vertrag_Orion.md" in portable["excerpt"]
+    assert r"C:\Users\private" not in portable["excerpt"]
     file.unlink()
     stale = search(db, "Vertrag_Orion", "project")
     assert stale["results"][0]["id"] == project["id"]

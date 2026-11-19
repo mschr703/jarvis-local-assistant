@@ -3,7 +3,7 @@
 import re
 import unicodedata
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from jarvis.db import Database
 from jarvis.documents import DocumentStore
@@ -50,6 +50,11 @@ def _score(query: str, terms: list[str], title: str, body: str) -> int:
 def _fold(value: str) -> str:
     return "".join(char for char in unicodedata.normalize("NFKD", value).casefold()
                    if not unicodedata.combining(char))
+
+
+def portable_basename(value: str) -> str:
+    """Display only a filename even when a backup came from another OS."""
+    return PureWindowsPath(value).name
 
 
 def validate_event_range(kind: str, from_date: str | None,
@@ -286,7 +291,7 @@ def search(db: Database, query: str, kind: str = "all",
     files_by_project: dict[str, list[str]] = {}
     for file in project_files[:MAX_PROJECT_FILE_ROWS]:
         files_by_project.setdefault(file["state_id"], []).append(
-            Path(file["saved_path"]).name)
+            portable_basename(file["saved_path"]))
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
