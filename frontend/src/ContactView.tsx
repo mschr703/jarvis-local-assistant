@@ -13,14 +13,18 @@ type ReminderLink = { task_id: string | null; task_title_snapshot: string;
   status: 'active' | 'fired' | 'cancelled' | 'task_changed' | 'task_completed' | 'task_deleted' | 'due_removed' };
 type TaskOption = { id: string; title: string; status: 'open' | 'done';
   due_utc: string | null; due_local: string | null; timezone: string | null };
+type LinkedEvent = { id: string; date_local: string; title: string; location: string;
+  version: number; source_kind: 'manual'; linked_at: string };
 type Contact = { id: string; name: string; context: string; relationship: string;
   version: number; created_at: string; updated_at: string; note_count?: number;
-  plan_count?: number; notes?: Note[]; plans?: Plan[] };
+  plan_count?: number; event_count?: number; notes?: Note[]; plans?: Plan[];
+  events?: LinkedEvent[] };
 type ContactForm = { name: string; context: string; relationship: string };
 const emptyForm = (): ContactForm => ({ name: '', context: '', relationship: '' });
 
-export default function ContactView({ visible, onPrepareTask }: {
+export default function ContactView({ visible, onPrepareTask, onOpenEvent }: {
   visible: boolean; onPrepareTask: (title: string) => void;
+  onOpenEvent: (eventId: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -105,7 +109,7 @@ export default function ContactView({ visible, onPrepareTask }: {
         onChange={(event) => setQuery(event.target.value)} placeholder="Name, Kontext, Beziehung oder Notiz" />
       <button disabled={busy} onClick={() => void reload().catch((error: Error) => setNotice(error.message))}>Suchen</button></div>
       <div className="item-list">{contacts.map((person) => <div className="item-row" key={person.id}>
-        <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen · {person.plan_count} Vorhaben</small></div>
+        <div><strong>{person.name}</strong><small>{person.context}{person.relationship ? ` · ${person.relationship}` : ''} · {person.note_count} Notizen · {person.plan_count} Vorhaben · {person.event_count} Lebensereignisse</small></div>
         <button onClick={() => void open(person.id)}>Öffnen</button></div>)}</div>
       {!contacts.length && <p>Keine passenden Kontakte.</p>}
     </section>
@@ -131,6 +135,15 @@ export default function ContactView({ visible, onPrepareTask }: {
           const done = await change(() => api(`/contacts/${encodeURIComponent(selected.id)}?expected_version=${selected.version}`, { method: 'DELETE' }), 'Kontakt gelöscht.', undefined);
           if (done) { setSelected(null); setForm(emptyForm()); await reload(query, undefined); }
         })()}>Kontakt löschen</button></div>
+      <h4>Gemeinsame Lebensereignisse ({selected.event_count || 0})</h4>
+      <p>Diese Zuordnungen wurden von dir bewusst bestätigt. Das Öffnen ändert weder Ereignis noch Kontakt.</p>
+      <div className="item-list">{selected.events?.map((event) => <div className="item-row" key={event.id}>
+        <div><strong>{event.date_local} · {event.title}</strong>
+          <small>{event.location || 'Ohne Ort'} · manuell bestätigt · Version {event.version}</small></div>
+        <button onClick={() => onOpenEvent(event.id)}>Ereignis öffnen</button></div>)}</div>
+      {!selected.events?.length && <p>Keine Lebensereignisse zugeordnet.</p>}
+      {(selected.event_count || 0) > (selected.events?.length || 0) &&
+        <small>Die 200 neuesten verknüpften Ereignisse werden angezeigt.</small>}
       <h4>Gemeinsame Vorhaben</h4>
       <p>Diese Pläne werden von dir eingetragen. „Erledigt“ ist eine bewusste Bestätigung; es wird keine Nachricht gesendet.</p>
       <div className="memory-form"><input aria-label={editingPlan ? 'Vorhaben-Titel bearbeiten' : 'Neues Vorhaben'} maxLength={160}

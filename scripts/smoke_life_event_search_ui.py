@@ -95,14 +95,35 @@ def main() -> None:
                         expect(opened).to_contain_text("Café in Lyon")
                         expect(opened).to_contain_text("Mit Alex am Fluss")
                         expect(opened).to_contain_text("Alex · Lyon privat · manuell bestätigt")
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        contact_list = page.locator("section.card").filter(
+                            has=page.get_by_role("heading", name="Kontakt suchen"))
+                        contact_list.locator(".item-row").filter(has_text="Lyon privat")\
+                            .get_by_role("button", name="Öffnen").click()
+                        contact_detail = page.locator("section.card").filter(
+                            has=page.get_by_role("heading", name="Alex · Lyon privat"))
+                        expect(contact_detail).to_contain_text("Gemeinsame Lebensereignisse (1)")
+                        expect(contact_detail).to_contain_text("Café in Lyon")
+                        contact_detail.get_by_role("button", name="Ereignis öffnen").click()
+                        expect(opened).to_contain_text("Café in Lyon")
                         opened.get_by_role("button", name="Zuordnung zu Alex (Lyon privat) lösen").click()
                         expect(opened).to_contain_text("Bewusst zugeordnete Kontakte: keine")
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        expect(contact_detail).to_contain_text("Gemeinsame Lebensereignisse (0)")
+                        page.reload(wait_until="domcontentloaded")
+                        page.get_by_role("button", name="Kontakte", exact=True).click()
+                        contact_list = page.locator("section.card").filter(
+                            has=page.get_by_role("heading", name="Kontakt suchen"))
+                        contact_list.locator(".item-row").filter(has_text="Lyon privat")\
+                            .get_by_role("button", name="Öffnen").click()
+                        expect(page.get_by_role("heading", name="Gemeinsame Lebensereignisse (0)"))\
+                            .to_be_visible()
                         assert not overflow_nodes(page), overflow_nodes(page)
                         db = Database(Path(environment["JARVIS_DATA_DIR"]) / "jarvis.db")
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"text": "accent_insensitive", "photo_name": "found",
-                                          "contact": "linked_searched_unlinked",
+                                          "contact": "linked_searched_opened_unlinked",
                                           "source": "opened", "model_usage": 0,
                                           "mobile_width": "fits"}))
                     finally:

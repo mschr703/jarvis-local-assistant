@@ -37,6 +37,9 @@ class ContactStore:
             rows = db.execute("SELECT * FROM contacts ORDER BY name_key,context_key,id").fetchall()
             notes = db.execute("SELECT contact_id,content FROM contact_notes").fetchall()
             plans = db.execute("SELECT contact_id,title,details FROM contact_plans").fetchall()
+            event_counts = {row["contact_id"]: row["count"] for row in db.execute(
+                "SELECT contact_id,COUNT(*) AS count FROM memory_event_contacts "
+                "GROUP BY contact_id")}
         by_contact: dict[str, list[str]] = {}
         for note in notes:
             by_contact.setdefault(note["contact_id"], []).append(note["content"])
@@ -57,6 +60,7 @@ class ContactStore:
                 continue
             person["note_count"] = len(contents)
             person["plan_count"] = plan_counts.get(person["id"], 0)
+            person["event_count"] = event_counts.get(person["id"], 0)
             results.append(person)
             if len(results) == 200:
                 break
@@ -83,9 +87,17 @@ class ContactStore:
                 LEFT JOIN tasks t ON t.id=l.task_id WHERE p.contact_id=?""",
                 (contact_id,)).fetchall()
             reminders = {link["plan_id"]: self._reminder_status(dict(link)) for link in links}
+            events = db.execute("SELECT e.id,e.date_local,e.title,e.location,e.version,"
+                                "l.source_kind,l.created_at AS linked_at FROM "
+                                "memory_event_contacts l JOIN memory_events e ON e.id=l.event_id "
+                                "WHERE l.contact_id=? ORDER BY e.date_local DESC,e.id DESC "
+                                "LIMIT 200", (contact_id,)).fetchall()
+            event_count = db.execute("SELECT COUNT(*) FROM memory_event_contacts "
+                                     "WHERE contact_id=?", (contact_id,)).fetchone()[0]
             return {**dict(row), "notes": [dict(note) for note in notes],
                     "plans": [{**dict(plan), "reminder": reminders.get(plan["id"])}
-                              for plan in plans]}
+                              for plan in plans], "events": [dict(event) for event in events],
+                    "event_count": event_count}
 
     @staticmethod
     def _reminder_status(link: dict) -> dict:
