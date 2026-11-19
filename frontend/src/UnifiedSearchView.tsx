@@ -14,10 +14,12 @@ type Preference = { document_id: string; path: string; saved_sha256: string;
 type Document = { id: string; path: string; folder_id: string; status: string; excluded: number };
 type Folder = { id: string; path: string };
 type SearchResult = { query: string; results: Hit[]; limited: boolean;
+  event_from_date: string | null; event_to_date: string | null;
   counts: Record<Kind, number>; preferences: Preference[];
   stale_sources: { document_id: string; path: string; index_sha256: string; status: 'needs_reindex' }[] };
 type SemanticHit = Omit<Hit, 'score'> & { similarity: number; preference_status?: 'current' | 'updated' | null };
 type SemanticResult = { query: string; results: SemanticHit[]; limited: boolean;
+  event_from_date: string | null; event_to_date: string | null;
   checked_passages: number; checked_memories: number; checked_projects: number;
   checked_events: number; counts: Record<Kind, number>; model: string;
   document_scope: { id: string; title: string } | null;
@@ -47,6 +49,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   onLocalChat: (files: File[]) => void; localChatReady: boolean }) {
   const [query, setQuery] = useState('');
   const [sourceKind, setSourceKind] = useState<SourceKind>('all');
+  const [eventFromDate, setEventFromDate] = useState('');
+  const [eventToDate, setEventToDate] = useState('');
   const [selectedDraftSources, setSelectedDraftSources] = useState<Source[]>([]);
   const [selectedChatDocuments, setSelectedChatDocuments] = useState<ChatDocument[]>([]);
   const [selectedChatPassages, setSelectedChatPassages] = useState<PdfChatPassage[]>([]);
@@ -93,6 +97,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
   };
   const load = async (value: string) => {
     const params = new URLSearchParams({ q: value, kind: sourceKind });
+    if (eventFromDate) params.set('from_date', eventFromDate);
+    if (eventToDate) params.set('to_date', eventToDate);
     const [found, available] = await Promise.all([
       api<SearchResult>(`/search/unified?${params}`),
       sourceKind === 'all' || sourceKind === 'document' ?
@@ -115,6 +121,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     setSelectedDraftSources([]); setSelectedChatDocuments([]); setSelectedChatPassages([]);
     try {
       const params = new URLSearchParams({ q: query.trim(), kind: sourceKind });
+      if (eventFromDate) params.set('from_date', eventFromDate);
+      if (eventToDate) params.set('to_date', eventToDate);
       if (folderId) params.set('folder_id', folderId);
       if (documentId) params.set('document_id', documentId);
       setSemantic(await api<SemanticResult>(`/search/semantic?${params}`));
@@ -258,6 +266,7 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
             setSelectedDraftSources([]); setSelectedChatDocuments([]);
             setSelectedChatPassages([]); setNotice('');
             if (next === 'memory' || next === 'project' || next === 'life_event') { setFolderId(''); setDocumentId(''); }
+            if (next !== 'all' && next !== 'life_event') { setEventFromDate(''); setEventToDate(''); }
           }}>
           <option value="all">Alle Quellen</option>
           <option value="document">Dokumente</option>
@@ -270,6 +279,15 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
           border: '1px solid #3b4b60', borderRadius: 8, padding: 9, color: '#e8ebef' }}
         maxLength={160} onChange={(event) => setQuery(event.target.value)}
         placeholder="Projektname, Thema oder Dokumenttitel" /></label>
+      <div className="item-actions"><label>Lebensereignisse ab
+        <input type="date" aria-label="Suchereignisse ab" value={eventFromDate}
+          disabled={busy || !!preparingChat || !!documentId || (sourceKind !== 'all' && sourceKind !== 'life_event')}
+          onChange={(event) => setEventFromDate(event.target.value)} /></label>
+        <label>Lebensereignisse bis
+          <input type="date" aria-label="Suchereignisse bis" value={eventToDate}
+            disabled={busy || !!preparingChat || !!documentId || (sourceKind !== 'all' && sourceKind !== 'life_event')}
+            onChange={(event) => setEventToDate(event.target.value)} /></label></div>
+      <small>Der Datumsbereich begrenzt nur Lebensereignisse. Andere Quellen bleiben bei „Alle Quellen“ unverändert.</small>
       <button className="primary" type="submit" disabled={busy || cacheBusy || !!preparingChat || query.trim().length < 2}>
         {busy ? 'Suche…' : 'Alle lokalen Quellen durchsuchen'}</button>
       <label>Dokumentordner für sinngemäße Suche
@@ -282,7 +300,8 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
       <label>Einzelnes Dokument tief durchsuchen
         <select aria-label="Einzelnes Dokument tief durchsuchen" value={documentId}
           disabled={busy || !!preparingChat || sourceKind === 'memory' || sourceKind === 'project' || sourceKind === 'life_event'}
-          onChange={(event) => setDocumentId(event.target.value)}>
+          onChange={(event) => { setDocumentId(event.target.value);
+            if (event.target.value) { setEventFromDate(''); setEventToDate(''); } }}>
           <option value="">Gemeinsame Suche, erste drei Fundstellen je Datei</option>
           {deepDocuments.map((document) => <option key={document.id} value={document.id}>{document.path}</option>)}
         </select></label>
@@ -340,6 +359,9 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     </section>}
     {semantic && <section className="card" aria-label="Sinngemäße Suchergebnisse">
       <h3>Sinngemäße Treffer für „{semantic.query}“</h3>
+      {(semantic.event_from_date || semantic.event_to_date) && <small>
+        Ereignisdatum: {semantic.event_from_date || 'Anfang offen'} bis {semantic.event_to_date || 'Ende offen'}
+      </small>}
       <p>{semantic.document_scope ?
         `${semantic.counts.document} Fundstellen aus ${semantic.document_scope.title}` :
         `${semantic.counts.document} Dokumente · ${semantic.counts.memory} Erinnerungen · ${semantic.counts.project} Arbeitsstände · ${semantic.counts.life_event} Lebensereignisse`}</p>
@@ -388,6 +410,9 @@ export default function UnifiedSearchView({ onDraft, onOpenSource, onLocalChat, 
     </section>}
     {result && <section className="card" aria-label="Suchergebnisse">
       <h3>Treffer für „{result.query}“</h3>
+      {(result.event_from_date || result.event_to_date) && <small>
+        Ereignisdatum: {result.event_from_date || 'Anfang offen'} bis {result.event_to_date || 'Ende offen'}
+      </small>}
       <p>{result.counts.document} Dokumente · {result.counts.memory} Erinnerungen · {result.counts.project} Arbeitsstände · {result.counts.life_event} Lebensereignisse</p>
       {result.stale_sources.length > 0 && <div className="notice" role="status">
         <strong>Originaldateien und Index weichen ab</strong><p>Die betroffene Datei einzeln neu indexieren. Danach aktualisiert Jarvis die Stichworttreffer. Alte Auszüge erscheinen nicht als aktuelle Treffer.</p>

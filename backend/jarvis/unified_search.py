@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from datetime import date
 from pathlib import Path
 
 from jarvis.db import Database
@@ -43,11 +44,31 @@ def _fold(value: str) -> str:
                    if not unicodedata.combining(char))
 
 
-def search(db: Database, query: str, kind: str = "all") -> dict:
+def validate_event_range(kind: str, from_date: str | None,
+                         to_date: str | None) -> tuple[str | None, str | None]:
+    if (from_date or to_date) and kind not in {"all", "life_event"}:
+        raise ValueError("Datumsbereich gilt nur für Lebensereignisse")
+    for value in (from_date, to_date):
+        if value is None:
+            continue
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("Ereignisdatum braucht das Format JJJJ-MM-TT")
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Ungültiges Ereignisdatum") from exc
+    if from_date and to_date and from_date > to_date:
+        raise ValueError("Von-Datum muss vor dem Bis-Datum liegen")
+    return from_date, to_date
+
+
+def search(db: Database, query: str, kind: str = "all",
+           from_date: str | None = None, to_date: str | None = None) -> dict:
     from jarvis.source_preferences import SourcePreferences
 
     if kind not in SOURCE_KINDS:
         raise ValueError("Unbekannter Such-Quelltyp")
+    from_date, to_date = validate_event_range(kind, from_date, to_date)
     cleaned, terms = query_terms(query)
     preferred = (SourcePreferences(db).list(cleaned)["preferences"]
                  if kind in {"all", "document"} else [])
@@ -92,8 +113,10 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
                     WHERE l.event_id=e.id) AS contact_names,
                    GROUP_CONCAT(a.name,' | ') AS photo_names
             FROM memory_events e LEFT JOIN photo_assets a ON a.event_id=e.id
+            WHERE (? IS NULL OR e.date_local>=?) AND (? IS NULL OR e.date_local<=?)
             GROUP BY e.id ORDER BY e.date_local DESC,e.id DESC LIMIT ?
-        """, (MAX_EVENT_ROWS + 1,))] if kind in {"all", "life_event"} else []
+        """, (from_date, from_date, to_date, to_date,
+              MAX_EVENT_ROWS + 1))] if kind in {"all", "life_event"} else []
 
     limited = (len(passages) > MAX_CANDIDATES or len(paths) > MAX_CANDIDATES
                or len(memories) > MAX_CANDIDATES or len(projects) > MAX_PROJECT_ROWS
@@ -209,7 +232,8 @@ def search(db: Database, query: str, kind: str = "all") -> dict:
         selected.extend(group[:MAX_PER_KIND])
     selected.sort(key=lambda item: (-item["score"], item["kind"], item["title"].casefold(),
                                     item["id"]))
-    return {"query": cleaned, "results": selected, "limited": limited,
+    return {"query": cleaned, "event_from_date": from_date,
+            "event_to_date": to_date, "results": selected, "limited": limited,
             "stale_sources": stale_sources,
             "preferences": preferred,
             "counts": {kind: sum(item["kind"] == kind for item in selected)

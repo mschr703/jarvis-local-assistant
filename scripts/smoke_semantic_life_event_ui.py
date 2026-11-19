@@ -76,12 +76,28 @@ def main() -> None:
                         results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
                         expect(results).to_contain_text("Abendessen mit Alex", timeout=120000)
                         assert "Sommerwochenende mit Alex" not in results.inner_text()
+                        page.get_by_label("Suchereignisse ab").fill("2024-08-01")
+                        page.get_by_label("Suchereignisse bis").fill("2024-08-31")
+                        page.get_by_role("button", name="Alle lokalen Quellen durchsuchen").click()
+                        lexical = page.get_by_role("region", name="Suchergebnisse")
+                        expect(lexical).to_contain_text("1 Lebensereignisse")
+                        expect(lexical).to_contain_text("Ereignisdatum: 2024-08-01 bis 2024-08-31")
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        results = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
+                        expect(results).to_contain_text("1 Lebensereignisse", timeout=120000)
+                        expect(results).to_contain_text("Ereignisdatum: 2024-08-01 bis 2024-08-31")
+                        page.get_by_label("Suchereignisse ab").fill("2030-01-01")
+                        page.get_by_label("Suchereignisse bis").fill("2030-12-31")
+                        page.get_by_role("button", name="Sinngemäß lokal suchen").click()
+                        expect(page.get_by_role("region", name="Sinngemäße Suchergebnisse"))\
+                            .to_contain_text("0 Lebensereignisse")
                         assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:
                             assert connection.execute("SELECT count(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"events": [event["id"], unrelated["id"]],
                                           "local_model": "embeddinggemma:300m",
                                           "source": "opened", "update": "fresh",
+                                          "date_scope": "lexical_and_semantic",
                                           "mobile_width": "fits", "cloud_calls": 0}))
                     finally:
                         browser.close()

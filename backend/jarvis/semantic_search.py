@@ -13,7 +13,7 @@ from jarvis.db import Database
 from jarvis.documents import DocumentStore
 from jarvis.semantic_cache import LIMIT as CACHE_LIMIT
 from jarvis.semantic_cache import PersistentEmbeddingCache
-from jarvis.unified_search import SOURCE_KINDS
+from jarvis.unified_search import SOURCE_KINDS, validate_event_range
 
 MODEL = "embeddinggemma:300m"
 MAX_PASSAGES = 100
@@ -261,12 +261,16 @@ def _preferences(db: Database, query: str) -> list[dict]:
 
 
 def search(db: Database, query: str, ollama_url: str, folder_id: str | None = None,
-           document_id: str | None = None, source_kind: str = "all") -> dict:
+           document_id: str | None = None, source_kind: str = "all",
+           from_date: str | None = None, to_date: str | None = None) -> dict:
     cleaned = " ".join(query.split())
     if not 2 <= len(cleaned) <= 160:
         raise ValueError("Suchfrage muss 2–160 Zeichen enthalten")
     if source_kind not in SOURCE_KINDS:
         raise ValueError("Unbekannter Such-Quelltyp")
+    from_date, to_date = validate_event_range(source_kind, from_date, to_date)
+    if document_id and (from_date or to_date):
+        raise ValueError("Einzeldokument und Ereignisdatum passen nicht zusammen")
     if source_kind in {"memory", "project", "life_event"} and (folder_id or document_id):
         raise ValueError("Dokumentfilter und Quelltyp passen nicht zusammen")
     preferences = ([] if document_id or source_kind in {"memory", "project", "life_event"}
@@ -316,8 +320,11 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
         """, (MAX_PROJECTS + 1,))]
         events = [] if document_id or source_kind not in {"all", "life_event"} else [
             dict(row) for row in connection.execute(
-                EVENT_SELECT + " ORDER BY e.updated_at DESC,e.id DESC LIMIT ?",
-                (MAX_EVENTS + 1,))]
+                EVENT_SELECT + " WHERE (? IS NULL OR e.date_local>=?) "
+                "AND (? IS NULL OR e.date_local<=?) "
+                + ("ORDER BY e.date_local DESC,e.id DESC LIMIT ?" if from_date or to_date
+                   else "ORDER BY e.updated_at DESC,e.id DESC LIMIT ?"),
+                (from_date, from_date, to_date, to_date, MAX_EVENTS + 1))]
     limited = (len(rows) > MAX_PASSAGES or len(memories) > MAX_MEMORIES
                or len(projects) > MAX_PROJECTS or len(events) > MAX_EVENTS)
     freshness: dict[str, bool] = {}
@@ -350,7 +357,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
     if not corpus:
         if stale:
             PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
-        return {"query": cleaned, "results": [], "stale_sources": stale,
+        return {"query": cleaned, "event_from_date": from_date,
+                "event_to_date": to_date, "results": [], "stale_sources": stale,
                 "changed_sources": [], "limited": limited, "model": MODEL,
                 "checked_passages": checked_passages, "checked_memories": 0,
                 "checked_projects": 0, "checked_events": 0, "document_scope": scope,
@@ -434,7 +442,8 @@ def search(db: Database, query: str, ollama_url: str, folder_id: str | None = No
                or len(events) > MAX_RESULTS)
     if stale or changed_sources:
         PersistentEmbeddingCache(db.path.parent / "semantic-embeddings.sqlite").clear()
-    return {"query": cleaned, "results": selected, "stale_sources": stale,
+    return {"query": cleaned, "event_from_date": from_date,
+            "event_to_date": to_date, "results": selected, "stale_sources": stale,
             "changed_sources": changed_sources, "limited": limited,
             "model": MODEL, "checked_passages": checked_passages,
             "checked_memories": len(memories), "checked_projects": len(projects),
