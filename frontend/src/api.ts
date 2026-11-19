@@ -112,6 +112,13 @@ export async function downloadDocumentPackage(documentIds: string[]): Promise<Bl
   return response.blob();
 }
 
+export async function downloadPdfIndexText(documentId: string): Promise<Blob> {
+  const response = await requestWithSession(
+    `/documents/${encodeURIComponent(documentId)}/index-text`, { cache: 'no-store' });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
+}
+
 export async function transcribeAudio(audio: Blob, signal: AbortSignal): Promise<{
   text: string; audio_seconds: number; stt_seconds: number; model: string;
 }> {

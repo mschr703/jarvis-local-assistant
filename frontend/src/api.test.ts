@@ -133,3 +133,18 @@ test('Unterlagenpaket zeigt einen veralteten Originalbeleg als Fehler', async ()
   const { downloadDocumentPackage } = await import('./api');
   await expect(downloadDocumentPackage(['a'])).rejects.toThrow('Originaldatei weicht');
 });
+
+test('PDF-Indextext wird nur bei aktuellem Original als Download angenommen', async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf: 'token' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response('=== Seite 1 ===\nOrion', { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Originaldatei weicht vom Index ab; zuerst neu indexieren',
+    }), { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const { downloadPdfIndexText } = await import('./api');
+  expect(await (await downloadPdfIndexText('id mit leerzeichen')).text()).toContain('Orion');
+  await expect(downloadPdfIndexText('id mit leerzeichen')).rejects.toThrow('neu indexieren');
+  expect(fetchMock.mock.calls[1][0]).toBe('/api/documents/id%20mit%20leerzeichen/index-text');
+  expect((fetchMock.mock.calls[1][1] as RequestInit).cache).toBe('no-store');
+});

@@ -1,5 +1,6 @@
 """Read a real scanned PDF locally through Edge and Tesseract."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -76,6 +77,16 @@ def main() -> None:
                             has_text="Scan-PDF lokal erkannt"))\
                             .to_be_visible(timeout=120000)
                         expect(row).to_contain_text("Indexstand:")
+                        with page.expect_download() as file_download:
+                            row.get_by_role("button", name="Geprüften PDF-Indextext herunterladen")\
+                                .click()
+                        downloaded = file_download.value
+                        assert downloaded.suggested_filename == "Vertrag-indextext.txt"
+                        exported = Path(downloaded.path()).read_text(encoding="utf-8")
+                        assert "Projekt Saturn Vertrag 2026" in exported
+                        assert "=== Seite 1 ===" in exported
+                        assert hashlib.sha256(pdf.read_bytes()).hexdigest() in exported
+                        assert str(allowed) not in exported
                         page.get_by_label("Dokumente durchsuchen").fill("Saturn")
                         page.get_by_role("button", name="Suchen", exact=True).click()
                         expect(page.get_by_text("Projekt Saturn Vertrag 2026", exact=False))\
@@ -90,13 +101,24 @@ def main() -> None:
                         semantic = page.get_by_role("region", name="Sinngemäße Suchergebnisse")
                         expect(semantic.locator("article").filter(has_text="Vertrag.pdf"))\
                             .to_contain_text("Seite 1", timeout=120000)
+                        write_scan(pdf, "Neptun")
+                        blocked = page.request.get(
+                            f"http://127.0.0.1:5173/api/documents/{original_id}/index-text")
+                        assert blocked.status == 409
+                        page.get_by_role("button", name="Dokumente", exact=True).click()
+                        row.get_by_role("button", name="Geprüften PDF-Indextext herunterladen")\
+                            .click()
+                        expect(page.get_by_role("status").filter(
+                            has_text="Originaldatei weicht vom Index ab"))\
+                            .to_be_visible()
                         assert documents.get_document(original_id)["status"] == "indexed"
                         assert not overflow_nodes(page), overflow_nodes(page)
                         with db.connect() as connection:
                             assert connection.execute("SELECT COUNT(*) FROM model_usage").fetchone()[0] == 0
                         print(json.dumps({"ocr": "real_tesseract", "page": 1,
                                           "semantic_search": "local_ollama",
-                                          "stale_original": "refused", "source_id": "preserved",
+                                          "stale_original": "refused", "index_text": "verified_download",
+                                          "source_id": "preserved",
                                           "model_usage": 0, "mobile_width": "fits"}))
                     finally:
                         browser.close()

@@ -254,6 +254,47 @@ class DocumentStore:
             raise ValueError("Dokumentfreigabe oder Index hat sich geändert")
         return item, contents
 
+    def indexed_pdf_text(self, document_id: str) -> tuple[dict, str]:
+        """Export only a currently verified PDF's page-numbered search text."""
+        item, _ = self.original_bytes(document_id)
+        if Path(item["path"]).suffix.lower() != ".pdf":
+            raise ValueError("Indextext-Export ist nur für PDF verfügbar")
+        with self.db.connect() as db:
+            current = db.execute("""SELECT d.*,f.path AS folder_path FROM documents d
+                                    JOIN folders f ON f.id=d.folder_id WHERE d.id=?""",
+                                 (document_id,)).fetchone()
+            if current is None or any(current[key] != item[key] for key in
+                                      ("folder_id", "folder_path", "path", "sha256",
+                                       "size", "status", "excluded", "policy", "indexed_at")):
+                raise ValueError("PDF-Index hat sich während des Exports geändert")
+            rows = db.execute("""SELECT page,ordinal,text FROM passages
+                                 WHERE document_id=? ORDER BY page,ordinal LIMIT 2001""",
+                              (document_id,)).fetchall()
+        if not rows:
+            raise ValueError("PDF enthält keinen indexierten Text")
+        if len(rows) > 2000:
+            raise ValueError("PDF hat zu viele Fundstellen für einen Textexport")
+        if not self.source_is_current(item):
+            raise ValueError("Originaldatei weicht vom Index ab; zuerst neu indexieren")
+        pages: dict[int, list[str]] = {}
+        for row in rows:
+            if not isinstance(row["page"], int) or row["page"] <= 0:
+                raise ValueError("PDF-Fundstelle ohne gültige Seite")
+            pages.setdefault(row["page"], []).append(row["text"])
+        lines = ["Jarvis Local · geprüfter PDF-Indextext",
+                 f"Originaldatei: {Path(item['path']).name}",
+                 f"Dokument-ID: {item['id']}",
+                 f"Original SHA-256: {item['sha256']}", ""]
+        for page, pieces in pages.items():
+            reconstructed = pieces[0]
+            for piece in pieces[1:]:
+                overlap = min(100, len(reconstructed), len(piece))
+                reconstructed += (piece[overlap:] if overlap
+                                  and reconstructed[-overlap:] == piece[:overlap]
+                                  else "\n" + piece)
+            lines.extend((f"=== Seite {page} ===", reconstructed, ""))
+        return item, "\n".join(lines)
+
     def set_folder_policy(self, folder_id: str, policy: str) -> dict:
         if policy not in {"local_only", "cloud_allowed"}:
             raise ValueError("Ungültige Cloud-Freigabe")

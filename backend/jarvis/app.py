@@ -1938,6 +1938,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                  "Cache-Control": "no-store",
                                  "X-Content-Type-Options": "nosniff"})
 
+    @app.get("/documents/{document_id}/index-text")
+    async def download_document_index_text(document_id: str):
+        try:
+            item, text = await run_in_threadpool(documents.indexed_pdf_text, document_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        filename = f"{Path(item['path']).stem}-indextext.txt"
+        return Response(text, media_type="text/plain; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 f"attachment; filename*=UTF-8''{quote(filename)}",
+                                 "Cache-Control": "no-store",
+                                 "X-Content-Type-Options": "nosniff"})
+
     @app.get("/documents/{document_id}/markdown")
     async def markdown_read(document_id: str):
         try:
