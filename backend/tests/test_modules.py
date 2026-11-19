@@ -23,7 +23,7 @@ class ListArgs(BaseModel):
 
 def migrate(connection, from_version):
     if from_version == 0:
-        connection.execute("CREATE TABLE fixture_module(value TEXT NOT NULL)")
+        connection.execute("CREATE TABLE IF NOT EXISTS fixture_module(value TEXT NOT NULL)")
 
 def create_app(db):
     app = FastAPI()
@@ -197,3 +197,51 @@ def test_module_package_install_and_remove_keeps_database(tmp_path):
     assert not (data_dir / "modules" / "sample_notes").exists()
     with Database(data_dir / "jarvis.db").connect() as connection:
         assert connection.execute("SELECT value FROM fixture_module").fetchone()[0] == "keep"
+
+
+def test_saved_dependencies_start_in_order_and_deactivate_when_missing(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir, "a_child", ["z_parent"])
+    install_fixture(data_dir, "z_parent")
+    Database(data_dir / "jarvis.db").set_settings({
+        "module.a_child.enabled": "1", "module.z_parent.enabled": "1"})
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert all(item["enabled"] for item in client.get("/modules").json())
+        assert client.post("/modules/z_parent/disable", headers=headers).status_code == 422
+        (data_dir / "modules" / "z_parent" / "jarvis-module.json").unlink()
+        items = client.get("/modules").json()
+        child = next(item for item in items if item["id"] == "a_child")
+        assert child["enabled"] is False
+        assert "nicht mehr aktiv" in child["error"]
+        assert client.get("/modules/a_child/entries").status_code == 404
+
+
+def test_cyclic_saved_dependencies_leave_core_available(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir, "cycle_one", ["cycle_two"])
+    install_fixture(data_dir, "cycle_two", ["cycle_one"])
+    Database(data_dir / "jarvis.db").set_settings({
+        "module.cycle_one.enabled": "1", "module.cycle_two.enabled": "1"})
+    with client_for(data_dir) as client:
+        csrf(client)
+        items = client.get("/modules").json()
+        assert all(not item["enabled"] and "Zyklische" in item["error"] for item in items)
+        assert client.get("/chats").status_code == 200
+
+
+def test_module_tool_names_with_double_underscore_stay_separate(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir, "foo")
+    install_fixture(data_dir, "foo__bar")
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/foo/enable", headers=headers).status_code == 200
+        assert client.post("/modules/foo__bar/enable", headers=headers).status_code == 200
+        assert client.post("/modules/foo/disable", headers=headers).status_code == 200
+        tools = {item["name"] for item in client.get("/tools").json()}
+        assert "foo__list_entries" not in tools
+        assert "foo__bar__list_entries" in tools
+        result = client.post("/runs", headers=headers,
+                             json={"tool_name": "foo__bar__list_entries", "args": {}})
+        assert result.status_code == 200 and result.json()["status"] == "succeeded"

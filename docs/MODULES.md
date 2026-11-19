@@ -62,6 +62,10 @@ ist gesperrt. `create_app` liefert eine FastAPI-App, deren Pfade unter
 laufende Anfragen können noch abschließen. Abhängigkeiten müssen aktiv sein,
 bevor ein Modul aktiviert wird. Die API- und UI-Routen werden bei Deaktivierung
 mit HTTP 404 gesperrt.
+Bei einem Neustart aktiviert Jarvis gespeicherte Module in Abhängigkeitsreihenfolge.
+Zyklen und fehlende Abhängigkeiten bleiben inaktiv mit sichtbarem Fehler; der Kern
+startet weiter. Wird ein benötigtes Paket während des Betriebs entfernt, werden
+seine aktiven abhängigen Pakete ebenfalls gesperrt, ohne deren Daten zu löschen.
 
 Optional stellt `module.py` `tool_definitions(db)` bereit und liefert höchstens
 16 `ToolDefinition`-Einträge. Jarvis stellt den Modulnamen voran

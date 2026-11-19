@@ -66,6 +66,7 @@ class ModuleRegistry:
         self._apps: dict[str, FastAPI] = {}
         self._tool_handlers: dict[str, Callable[..., dict]] = {}
         self._tool_specs: dict[str, tuple] = {}
+        self._tool_owners: dict[str, str] = {}
         self._errors: dict[str, str] = {}
         self._manifests: dict[str, ModuleManifest] = {}
         self.refresh()
@@ -114,10 +115,16 @@ class ModuleRegistry:
             self._errors.update(manifest_errors)
             for module_id in list(self._apps):
                 if module_id not in self._manifests:
-                    del self._apps[module_id]
-                    for name in list(self._tool_handlers):
-                        if name.startswith(f"{module_id}__"):
-                            del self._tool_handlers[name]
+                    self._deactivate(module_id)
+            changed = True
+            while changed:
+                changed = False
+                for module_id in list(self._apps):
+                    if any(dependency not in self._apps
+                           for dependency in self._manifests[module_id].dependencies):
+                        self._deactivate(module_id)
+                        self._errors[module_id] = "Benötigtes Modul ist nicht mehr aktiv"
+                        changed = True
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -140,12 +147,24 @@ class ModuleRegistry:
 
     def activate_saved(self) -> None:
         stored = self.db.get_settings()
-        for module_id in list(self._manifests):
-            if stored.get(f"module.{module_id}.enabled") == "1":
+        pending = {module_id for module_id in self._manifests
+                   if stored.get(f"module.{module_id}.enabled") == "1"}
+        while pending:
+            progressed = False
+            for module_id in sorted(pending):
+                dependencies = self._manifests[module_id].dependencies
+                if any(dependency in pending for dependency in dependencies):
+                    continue
+                pending.remove(module_id)
+                progressed = True
                 try:
                     self.enable(module_id)
                 except (ValueError, RuntimeError, OSError) as exc:
                     self._errors.setdefault(module_id, str(exc))
+            if not progressed:
+                for module_id in pending:
+                    self._errors[module_id] = "Zyklische Modulabhängigkeit"
+                break
 
     def enable(self, module_id: str) -> dict[str, Any]:
         with self._lock:
@@ -212,12 +231,15 @@ class ModuleRegistry:
             for dependent in self._manifests.values():
                 if dependent.id in self._apps and module_id in dependent.dependencies:
                     raise ValueError(f"Aktives Modul {dependent.id} benötigt dieses Modul")
-            self._apps.pop(module_id, None)
-            for name in list(self._tool_handlers):
-                if name.startswith(f"{module_id}__"):
-                    del self._tool_handlers[name]
+            self._deactivate(module_id)
             self.db.set_settings({f"module.{module_id}.enabled": "0"})
             return self._summary(module_id)
+
+    def _deactivate(self, module_id: str) -> None:
+        self._apps.pop(module_id, None)
+        for name in list(self._tool_handlers):
+            if self._tool_owners.get(name) == module_id:
+                del self._tool_handlers[name]
 
     def _summary(self, module_id: str) -> dict[str, Any]:
         result = self._manifests[module_id].model_dump()
@@ -248,6 +270,8 @@ class ModuleRegistry:
             spec = (definition.schema.model_json_schema(), definition.scope, definition.effect,
                     definition.timeout_s, definition.cancel_aware)
             if name in self._tool_specs:
+                if self._tool_owners[name] != module_id:
+                    raise ValueError("Modulwerkzeugname kollidiert mit anderem Modul")
                 if self._tool_specs[name] != spec:
                     raise ValueError("Modulwerkzeug-Schema wurde geändert; Jarvis neu starten")
             else:
@@ -258,12 +282,13 @@ class ModuleRegistry:
                     enabled=lambda _id=module_id: self.app_for(_id) is not None)
                 self.engine.register(registered)
                 self._tool_specs[name] = spec
+                self._tool_owners[name] = module_id
         for name, definition in planned.items():
             self._tool_handlers[name] = definition.handler
 
     def _dispatch_tool(self, name: str, *args: Any, **kwargs: Any) -> dict:
-        module_id = name.split("__", 1)[0]
         with self._lock:
+            module_id = self._tool_owners.get(name)
             handler = self._tool_handlers.get(name) if module_id in self._apps else None
         if handler is None:
             raise ToolUserError("Modulwerkzeug ist deaktiviert")
