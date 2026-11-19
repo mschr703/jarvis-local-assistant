@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 19.11.2026. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant); laufende Prüfungen stehen im nächsten Abschnitt. Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
+Stand: 19.11.2026. Der veröffentlichte Stand liegt auf [GitHub](https://github.com/mschr703/jarvis-local-assistant). Die technische Abnahme der MVP-Module steht in [ABNAHME.md](ABNAHME.md).
 
 ## Nutzbar
 
@@ -127,7 +127,7 @@ Stand: 19.11.2026. Der veröffentlichte Stand liegt auf [GitHub](https://github.
 ## Offene Arbeiten
 
 1. P00–P03, A79b, A36a/b und A37a–c sind mit öffentlichen Commits und Testbelegen in Trello auf „05 · Erledigt“ und `complete=true` gesetzt.
-2. Weitere fachliche Visionen auf dem Trello-Board sind in begrenzten Teilstufen zu implementieren; externe Konten/Geräte erfordern ihre eigenen Voraussetzungen.
+2. Nächster konkreter Schritt ist [N6z/A03](https://trello.com/c/l82IpNHy): ausdrücklich gepflegte Person-Aufgabe-Belege begrenzt in die lokale Ollama-Projektsuche aufnehmen, den Beziehungs-Snapshot nach dem Modellaufruf erneut prüfen und Änderungen veralteter Treffer verwerfen. Weitere fachliche Visionen auf dem Trello-Board folgen in begrenzten Teilstufen; externe Konten/Geräte erfordern ihre eigenen Voraussetzungen.
 3. Der nächste öffentliche Push soll den Guard `scripts/push_public.ps1` nutzen und nach CI-Erfolg in Trello dokumentiert werden.
 
 ## Betriebsgrenzen
