@@ -66,6 +66,12 @@ def main() -> None:
                         page.get_by_label("Neue Tagesnotiz").fill("Privater Modul-Pilot")
                         page.get_by_role("button", name="Notiz speichern").click()
                         expect(page.get_by_text("Privater Modul-Pilot")).to_be_visible()
+                        page.get_by_label("Neue Tagesnotiz").fill("Noch nicht gespeichert")
+                        page.get_by_role("button", name="Übersicht", exact=True).click()
+                        page.get_by_role("button", name="Tagesnotizen").click()
+                        expect(page.get_by_label("Neue Tagesnotiz")).to_have_value(
+                            "Noch nicht gespeichert")
+                        page.get_by_label("Neue Tagesnotiz").fill("")
                         tools = page.context.request.get("http://127.0.0.1:5173/api/tools").json()
                         assert any(item["name"] == "day_notes__list_notes" for item in tools)
                         token = page.context.request.get(

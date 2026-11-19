@@ -78,7 +78,7 @@ export function ModuleManagerView({ modules, onChanged, onUpgraded }: {
   </>;
 }
 
-export function ModuleHost({ module }: { module: InstalledModule }) {
+export function ModuleHost({ module, visible }: { module: InstalledModule; visible: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -98,6 +98,9 @@ export function ModuleHost({ module }: { module: InstalledModule }) {
     }).catch((cause: Error) => { if (!cancelled) setError(cause.message); });
     return () => { cancelled = true; container?.replaceChildren(); };
   }, [module.id, module.element]);
+  useEffect(() => {
+    if (visible) host.current?.firstElementChild?.dispatchEvent(new Event('jarvis:visible'));
+  }, [visible]);
   return <>
     <h2>{module.name}</h2>
     {error && <p className="notice error" role="alert">{error}</p>}

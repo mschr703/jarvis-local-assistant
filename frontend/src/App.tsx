@@ -40,6 +40,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('status');
   const [modules, setModules] = useState<InstalledModule[]>([]);
   const [moduleError, setModuleError] = useState('');
+  const [openedModules, setOpenedModules] = useState<string[]>([]);
   const [moduleReloadRequired, setModuleReloadRequired] = useState(false);
   const [documentsOpened, setDocumentsOpened] = useState(false);
   const [unifiedSearchOpened, setUnifiedSearchOpened] = useState(false);
@@ -112,6 +113,10 @@ export default function App() {
   const unreadRequest = useRef(0);
   const modelReady = Boolean(health?.configured) && !error;
   const navigate = (target: Page, fromSearchSource = false) => {
+    if (target.startsWith('module:')) {
+      const moduleId = target.slice(7);
+      setOpenedModules((current) => current.includes(moduleId) ? current : [...current, moduleId]);
+    }
     if (!fromSearchSource && (target === 'documents' || target === 'work_states'))
       setRequestedSource(null);
     if (target === 'documents') setDocumentsOpened(true);
@@ -249,7 +254,7 @@ export default function App() {
         <p className="notice error" role="alert">Modulstatus nicht erreichbar: {moduleError}</p>}
       {['chat', 'drafts', 'research', 'activity'].includes(page) &&
         <ModelChoiceBanner key={page} task={page === 'drafts' ? 'draft' : page === 'research' ? 'research' : page === 'activity' ? 'plan' : 'chat'} />}
-      {page === 'status' ? null : page === 'modules' ? <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page.startsWith('module:') ? (() => { const item = modules.find((candidate) => candidate.id === page.slice(7) && candidate.enabled); return item ? <ModuleHost key={item.id} module={item} /> : <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} />; })() : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
+      {page === 'status' ? null : page === 'modules' ? <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page.startsWith('module:') ? modules.some((candidate) => candidate.id === page.slice(7) && candidate.enabled) ? null : <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
         page === 'documents' ? null :
         page === 'unified_search' ? null :
         page === 'file_graph' ? null :
@@ -271,6 +276,10 @@ export default function App() {
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} requestedSource={requestedSource?.kind === 'document' || requestedSource?.kind === 'memory' ? requestedSource : null} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
+      {openedModules.map((moduleId) => {
+        const item = modules.find((candidate) => candidate.id === moduleId && candidate.enabled);
+        return item ? <div key={moduleId} hidden={page !== `module:${moduleId}`}><ModuleHost module={item} visible={page === `module:${moduleId}`} /></div> : null;
+      })}
       {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id, match) => { if (kind === 'life_event') { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); } else if (kind === 'contact') { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); } else { setRequestedSource(kind === 'project' ? { kind, id, match, serial: ++sourceOpenSequence.current } : { kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); } }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(files) => { setRequestedChatSource(null); setRequestedChatAttachments(files); navigate('chat'); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}

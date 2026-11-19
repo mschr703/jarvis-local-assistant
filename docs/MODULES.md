@@ -138,7 +138,11 @@ Werkzeuge dieses Aktivierungsversuchs zurückgenommen; der Kern bleibt nutzbar.
 erst, wenn das Modul aktiv und sein Navigationspunkt geöffnet ist. Er übergibt
 `element.jarvisApi` (dieselbe lokale, CSRF-geschützte API-Funktion wie in den
 eingebauten Ansichten) und `element.moduleId`. Der Modulcode kann die üblichen
-Jarvis-CSS-Klassen nutzen. Nach einem Code-Update den Browser neu laden.
+Jarvis-CSS-Klassen nutzen. Eine geöffnete aktive Modulansicht bleibt beim Wechsel
+in einen anderen Bereich verbunden; unfertige Formulareingaben bleiben so erhalten.
+Beim Zurückkehren erhält das Element ein `jarvis:visible`-Ereignis und kann seine
+Liste aktualisieren. Deaktivieren entfernt die Ansicht sofort. Nach einem
+Code-Update den Browser neu laden.
 
 **Vertrauensgrenze:** Installierter Python- und JavaScript-Code läuft mit den
 Rechten des lokalen Jarvis-Prozesses beziehungsweise Browsers. Das Manifest
