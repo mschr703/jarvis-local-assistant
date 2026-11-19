@@ -165,4 +165,4 @@ API/UI-Routen und Werkzeuge, Reaktivierung, direkten Paketwechsel,
 Entfernen/Wiederinstallieren mit erhaltenen Daten, die Neulade-Aufforderung nach dem
 Update und 390-Pixel-Ansicht. Die beiden letzten Befehle benötigen den privaten
 Checkout und prüfen Leselisten-Daten, die Freigabe des schreibenden Werkzeugs sowie
-beide Module gleichzeitig im echten Edge-Browser.
+beide Module gleichzeitig in der Jarvis-Übersicht und im echten Edge-Browser.

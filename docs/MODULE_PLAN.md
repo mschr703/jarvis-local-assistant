@@ -1,4 +1,4 @@
-# Jarvis-Module · Diskussionsentwurf
+# Jarvis-Module · Umsetzungsplan
 
 Stand: 19.11.2026. Die Trello-Karten bleiben die fachliche Quelle. Der Nutzer hat `mschr703CODEX` als neues Konto gewählt: [öffentliche Basis](https://github.com/mschr703CODEX/jarvis-local-assistant), [private Module](https://github.com/mschr703CODEX/jarvis-private-modules). Das bisherige Repository bleibt Archiv. **Alle optionalen Module bleiben vorerst privat.** Über eine spätere Veröffentlichung einzelner Module wird erst nach deren Prüfung entschieden.
 
@@ -26,11 +26,11 @@ Der bisherige Code ist noch überwiegend eine gemeinsame FastAPI-/React-Anwendun
 
 Die vom Nutzer ausgewählten GitHub-Ideen sind auf [G00](https://trello.com/c/jnNiKZI5) festgehalten: VoiceStudio, LiveKit, Agent Reach, browser-use, DeepTutor als Inspiration, Graphify/Obsidian, text-to-cad, Taste Skill/Impeccable und Letta als Inspirationsquelle. AnythingLLM, CrewAI, Hermes Agent, Superpowers, Firecrawl als Komplettstack und open-design-studio wurden nicht als Integration gewählt. Die einzelnen G-Karten belegen nur ihren jeweiligen umgesetzten Teilumfang, nicht den Vollausbau aller genannten Projekte.
 
-## Entscheidung, die noch offen ist
+## Veröffentlichungsstand
 
 Die privaten Piloten sind `day_notes` und `reading_list`. Die Entscheidung über eine spätere Veröffentlichung einzelner Module bleibt offen; bis dahin sind optionale Pakete privat. Die bereits veröffentlichte bisherige Codebasis wird nicht rückwirkend als modular dargestellt; sie dient bis zur Migration als Archiv und Referenz.
 
-## Nächster möglicher Schnitt: Abendplanung (noch offen)
+## Nächster Schnitt: Abendplanung
 
 Der Bereich ist fachlich optional und an klaren Stellen angebunden: Logik in
 `backend/jarvis/evening_plans.py`, API-Routen in `backend/jarvis/app.py`, Ansicht in
