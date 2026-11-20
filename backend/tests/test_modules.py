@@ -277,7 +277,7 @@ def test_chat_reads_active_module_and_persists_tool_receipt(tmp_path, monkeypatc
         assert "allgemeine Wissensfragen normal" in seen_messages[-1][0]["content"]
         assert temperatures[-1] is None
         failed_general = client.post(f"/chats/{chat_id}/stream", headers=headers,
-                                     json={"content": "Erkläre den Begriff Hypothese.",
+                                     json={"content": "Erkläre den Begriff Hypothese anhand meiner Notizen.",
                                            "use_local_tools": True})
         assert failed_general.status_code == 200
         assert "Allgemeine Wissensfragen beantworte auch dann normal" in seen_messages[-1][0]["content"]
@@ -635,8 +635,9 @@ def test_incomplete_installed_package_can_be_removed_without_losing_data(tmp_pat
     data_dir = tmp_path / "data"
     with client_for(data_dir) as client:
         headers = csrf(client)
-        assert client.post("/modules/install", headers=headers,
-                           json={"path": str(source)}).status_code == 200
+        installed = client.post("/modules/install", headers=headers,
+                                json={"path": str(source)})
+        assert installed.status_code == 200, installed.text
         assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
         assert client.post("/modules/sample_notes/entries", headers=headers,
                            json={"value": "retained"}).status_code == 200

@@ -21,13 +21,24 @@ from jarvis.provider import ProviderError
 MAX_TOOLS = 16
 MAX_CALLS = 2
 MAX_RESULT_CHARS = 3_000
-FOLLOW_UP_REFERENCE = re.compile(r"\b(?:dafür|dazu|dort|darüber|damit|dessen|davon|darauf|hierzu|hierfür)\b", re.IGNORECASE)
+FOLLOW_UP_REFERENCE = re.compile(r"\b(?:dafür|dazu|dort|darüber|damit|dessen|davon|darauf|danach|dabei|hierzu|hierfür)\b", re.IGNORECASE)
 HYPOTHETICAL_START = re.compile(r"^\s*(?:angenommen\b|hypothetisch\b|stell dir vor\b)", re.IGNORECASE)
+GENERAL_EXPLANATION_START = re.compile(
+    r"^\s*(?:was bedeutet\b|was ist (?:der |die |das )?unterschied\b|"
+    r"erkläre (?:den |die |das )?(?:begriff|unterschied)\b|"
+    r"definiere (?:das wort|den begriff)\b)", re.IGNORECASE,
+)
 PERSONAL_DATA_CUE = re.compile(
     r"\b(?:heute|morgen|gestern|jetzt|aktuell|tatsächlich|wirklich|kalender|termine?|"
     r"aufgaben?|notizen?|erinnerungen?|projekte?|mails?|gespeichert|meine?|meinen|"
     r"meinem|meiner|meines|unser(?:e|en|em|er|es)?)\b", re.IGNORECASE,
 )
+ADDITIONAL_SOURCE_CUE = re.compile(
+    r"\b(?:heute|morgen|kalender|termine?|uhrzeit|zeitfenster|zeiten?|frei|"
+    r"aufgaben?|mails?|e-?mails?|postfach|kontakte?|telefon|adresse|"
+    r"dokumente?|dateien?)\b", re.IGNORECASE,
+)
+NAMED_TOPIC = re.compile(r"\b(?:projekt|person|kontakt)\s+([\wÄÖÜäöüß-]+)", re.IGNORECASE)
 
 
 @dataclass
@@ -94,6 +105,10 @@ def prior_read_for_follow_up(db: Database, question: str, history: list[dict],
             except (KeyError, TypeError, ValueError):
                 continue
             if isinstance(args, dict):
+                named_topic = NAMED_TOPIC.search(question)
+                if named_topic and named_topic.group(1).casefold() not in json.dumps(
+                        args, ensure_ascii=False).casefold():
+                    return None
                 return name, args
         return None
     return None
@@ -150,7 +165,8 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
     """Ask Ollama what to read, run bounded tools, and return untrusted data context."""
     if settings.provider != "ollama":
         raise ValueError("Lokale Werkzeuge dürfen nur mit Ollama im Chat verwendet werden")
-    if (HYPOTHETICAL_START.search(question) and not FOLLOW_UP_REFERENCE.search(question)
+    if ((HYPOTHETICAL_START.search(question) or GENERAL_EXPLANATION_START.search(question))
+            and not FOLLOW_UP_REFERENCE.search(question)
             and not PERSONAL_DATA_CUE.search(question)):
         return ToolContext([], "", "not_needed")
     try:
@@ -165,27 +181,40 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
     follow_up_read = prior_read_for_follow_up(db, question, history, allowed)
     observations: list[dict] = []
     uses: list[dict[str, str]] = []
-    planner_messages = selection_messages(question, history, capabilities,
-                                          settings.timezone)
-    prompt_chars = sum(len(message["content"]) for message in planner_messages)
-    estimated_context = (prompt_chars // 2 + 512 + 1023) // 1024 * 1024
-    planner_settings = settings.model_copy(update={
-        "max_output_tokens": 128,
-        "ollama_context_tokens": min(settings.ollama_context_tokens,
-                                     max(4096, estimated_context)),
-    })
     planner_failed = False
-    try:
-        async with asyncio.timeout(150):
-            completion = await generate_text(
-                db, planner_settings, "chat_tool_select",
-                planner_messages,
-                ollama_format="json",
-            )
-        choices = parse_choices(completion.text, allowed)
-    except (ProviderError, ValueError, TypeError, TimeoutError):
-        choices = []
-        planner_failed = True
+    if follow_up_read and not ADDITIONAL_SOURCE_CUE.search(question):
+        # The last successful source already resolves this simple anaphoric question.
+        choices = [follow_up_read]
+    else:
+        planner_messages = selection_messages(question, history, capabilities,
+                                              settings.timezone)
+        prompt_chars = sum(len(message["content"]) for message in planner_messages)
+        estimated_context = (prompt_chars // 2 + 512 + 1023) // 1024 * 1024
+        planner_settings = settings.model_copy(update={
+            "max_output_tokens": 128,
+            "ollama_model": settings.ollama_planner_model or settings.ollama_model,
+            "ollama_context_tokens": min(settings.ollama_context_tokens,
+                                         max(4096, estimated_context)),
+        })
+        try:
+            async with asyncio.timeout(150):
+                try:
+                    completion = await generate_text(
+                        db, planner_settings, "chat_tool_select",
+                        planner_messages, ollama_format="json",
+                    )
+                except ProviderError as exc:
+                    if exc.code != "unavailable" or not settings.ollama_planner_model:
+                        raise
+                    # An optional planner model must not disable local tool access.
+                    completion = await generate_text(
+                        db, planner_settings.model_copy(update={"ollama_model": settings.ollama_model}),
+                        "chat_tool_select", planner_messages, ollama_format="json",
+                    )
+            choices = parse_choices(completion.text, allowed)
+        except (ProviderError, ValueError, TypeError, TimeoutError):
+            choices = []
+            planner_failed = True
     if follow_up_read:
         choices = [follow_up_read, *(choice for choice in choices
                                      if choice[0] != follow_up_read[0])][:MAX_CALLS]
@@ -198,8 +227,14 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
         status = str(run["status"])
         uses.append({"name": name, "run_id": str(run["id"]), "status": status})
         result = run.get("result_json") or ""
+        rendered_result: Any = result[:MAX_RESULT_CHARS]
+        if len(result) <= MAX_RESULT_CHARS:
+            try:
+                rendered_result = json.loads(result)
+            except (TypeError, ValueError):
+                pass
         observations.append({"tool": name, "status": status,
-                             "result": result[:MAX_RESULT_CHARS],
+                             "result": rendered_result,
                              "truncated": len(result) > MAX_RESULT_CHARS})
         if status != "succeeded":
             break
@@ -224,6 +259,9 @@ async def gather_tool_context(db: Database, settings: Settings, engine: RunEngin
                  if follow_up_read else "")
               + "Leere zusätzliche Listen aus anderen Quellbereichen ändern die konkreten "
               "Punkte zum Gesprächsthema nicht. "
+              "Bei Fragen nach offenen Punkten berücksichtige sowohl ausdrücklich als "
+              "offen markierte Statusangaben als auch genannte nächste Schritte. "
+              "Eine Statusangabe allein legt keine zuständige Person oder Handlung fest. "
               + ("Ein fehlgeschlagenes oder gekürztes Ergebnis beweist keine Vollständigkeit. "
                  if problem else "")
               + ("Eine weitere Werkzeugwahl schlug fehl; passende Quellen können fehlen. "

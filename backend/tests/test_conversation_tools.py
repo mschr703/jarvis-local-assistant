@@ -60,6 +60,7 @@ async def test_chat_selects_local_module_read_and_keeps_result_as_data(tmp_path,
     assert result.uses == [{"name": "calendar__list_today", "run_id": "run-1",
                             "status": "succeeded"}]
     assert "Zahnarzt" in result.prompt and "unvertrauenswürdige" in result.prompt
+    assert '"result": {"notes":' in result.prompt
     assert "fehlgeschlagenes" not in result.prompt
     assert "mail__send" not in prompts[0][1]["content"]
     assert "browser_read" not in prompts[0][1]["content"]
@@ -79,6 +80,115 @@ async def test_no_tool_choice_preserves_normal_general_chat(tmp_path, monkeypatc
         None, settings, engine, "Was bedeutet Hypothese?", [])
     assert result.state == "not_needed" and result.prompt == ""
     assert result.uses == [] and engine.calls == []
+
+
+@pytest.mark.asyncio
+async def test_general_explanation_without_personal_data_skips_planner(tmp_path, monkeypatch):
+    async def choose(*_args, **_kwargs):
+        raise AssertionError("Begriffserklärung braucht keine lokalen Werkzeugdaten")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    engine = FakeEngine([READ_TOOL])
+    previous_topic = [
+        {"role": "user", "content": "Was weißt du über Projekt Orion?", "status": "complete"},
+        {"role": "assistant", "content": "Bericht lesen", "status": "complete",
+         "tool_uses": [{"name": READ_TOOL["name"], "status": "succeeded",
+                        "run_id": "prior-project-run"}]},
+    ]
+    for question in ("Was bedeutet das Wort Hypothese?",
+                     "Was ist der Unterschied zwischen Wunsch und Annahme?",
+                     "Erkläre den Unterschied einfach."):
+        result = await conversation_tools.gather_tool_context(
+            None, settings, engine, question, previous_topic)
+        assert result.state == "not_needed" and result.uses == []
+
+
+@pytest.mark.asyncio
+async def test_general_wording_with_personal_data_still_uses_planner(tmp_path, monkeypatch):
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}}]}',
+                          None, None, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    result = await conversation_tools.gather_tool_context(
+        None, settings, FakeEngine([READ_TOOL]),
+        "Erkläre mir meine Termine heute.", [])
+    assert result.uses[0]["name"] == "calendar__list_today"
+
+
+@pytest.mark.asyncio
+async def test_explain_ambiguous_name_still_checks_local_sources(tmp_path, monkeypatch):
+    calls = []
+
+    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+        calls.append(ollama_format)
+        return Completion('{"tools":[]}', None, None, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    result = await conversation_tools.gather_tool_context(
+        None, settings, FakeEngine([READ_TOOL]), "Erkläre Orion", [])
+    assert calls == ["json"] and result.state == "not_needed"
+
+
+@pytest.mark.asyncio
+async def test_optional_local_planner_model_is_used_for_selection_only(tmp_path, monkeypatch):
+    seen = []
+
+    async def choose(_db, planner_settings, purpose, _messages, *, ollama_format):
+        seen.append((planner_settings.ollama_model, purpose, ollama_format))
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}}]}',
+                          None, None, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="answer-model",
+                        JARVIS_OLLAMA_PLANNER_MODEL="small-planner")
+    engine = FakeEngine([READ_TOOL])
+    result = await conversation_tools.gather_tool_context(
+        None, settings, engine, "Welche Termine habe ich?", [])
+    assert seen == [("small-planner", "chat_tool_select", "json")]
+    assert settings.ollama_model == "answer-model"
+    assert result.uses[0]["name"] == "calendar__list_today"
+
+
+@pytest.mark.asyncio
+async def test_missing_optional_planner_retries_default_locally(tmp_path, monkeypatch):
+    seen = []
+
+    async def choose(_db, planner_settings, _purpose, _messages, *, ollama_format):
+        seen.append(planner_settings.ollama_model)
+        if len(seen) == 1:
+            raise ProviderError("unavailable", "Planermodell nicht installiert")
+        return Completion('{"tools":[{"tool":"calendar__list_today","args":{}}]}',
+                          None, None, 0.0, "local_no_api_charge")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="answer-model",
+                        JARVIS_OLLAMA_PLANNER_MODEL="missing-planner")
+    engine = FakeEngine([READ_TOOL])
+    result = await conversation_tools.gather_tool_context(
+        None, settings, engine, "Welche Termine habe ich?", [])
+    assert seen == ["missing-planner", "answer-model"]
+    assert result.state == "used"
+
+
+@pytest.mark.asyncio
+async def test_broken_optional_planner_does_not_repeat_slow_failure(tmp_path, monkeypatch):
+    seen = []
+
+    async def choose(_db, planner_settings, _purpose, _messages, *, ollama_format):
+        seen.append(planner_settings.ollama_model)
+        raise ProviderError("timeout", "Planer zu langsam")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="answer-model",
+                        JARVIS_OLLAMA_PLANNER_MODEL="slow-planner")
+    result = await conversation_tools.gather_tool_context(
+        None, settings, FakeEngine([READ_TOOL]), "Welche Termine habe ich?", [])
+    assert seen == ["slow-planner"]
+    assert result.state == "failed"
 
 
 @pytest.mark.asyncio
@@ -244,6 +354,41 @@ def test_follow_up_does_not_skip_an_interrupted_last_answer():
         FakeRunDb(), "Was ist dazu bekannt?", history, {source}) is None
 
 
+def test_named_new_topic_does_not_reuse_previous_project_query():
+    source = "context_lookup__search_personal_context"
+    history = [{"role": "assistant", "content": "Projekt Orion", "status": "complete",
+                "tool_uses": [{"name": source, "status": "succeeded",
+                               "run_id": "prior-project-run"}]}]
+    assert conversation_tools.prior_read_for_follow_up(
+        FakeRunDb(), "Und was ist dort bei Projekt Andromeda offen?", history,
+        {source}) is None
+    assert conversation_tools.prior_read_for_follow_up(
+        FakeRunDb(), "Und was ist bei Projekt Orion dazu offen?", history,
+        {source}) == (source, {"query": "Projekt Orion", "kind": "project"})
+    assert conversation_tools.prior_read_for_follow_up(
+        FakeRunDb(), "Und was passiert danach?", history,
+        {source}) == (source, {"query": "Projekt Orion", "kind": "project"})
+
+
+@pytest.mark.asyncio
+async def test_simple_follow_up_refreshes_prior_read_without_a_planner(tmp_path, monkeypatch):
+    async def choose(*_args, **_kwargs):
+        raise AssertionError("Bekannte Themenquelle braucht keine erneute Werkzeugwahl")
+
+    monkeypatch.setattr(conversation_tools, "generate_text", choose)
+    source = "context_lookup__search_personal_context"
+    engine = FakeEngine([{**READ_TOOL, "name": source}])
+    history = [{"role": "assistant", "content": "Projekt Orion", "status": "complete",
+                "tool_uses": [{"name": source, "status": "succeeded",
+                               "run_id": "prior-project-run"}]}]
+    settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
+    result = await conversation_tools.gather_tool_context(
+        FakeRunDb(), settings, engine, "Was muss ich dafür als Nächstes tun?", history)
+    assert engine.calls == [(source, {"query": "Projekt Orion", "kind": "project"})]
+    assert result.state == "used"
+    assert "weitere Werkzeugwahl" not in result.prompt
+
+
 @pytest.mark.asyncio
 async def test_explicit_follow_up_refreshes_prior_read_even_if_planner_picks_generic_tools(
         tmp_path, monkeypatch):
@@ -268,7 +413,7 @@ async def test_explicit_follow_up_refreshes_prior_read_even_if_planner_picks_gen
     ]
     settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
     result = await conversation_tools.gather_tool_context(
-        FakeRunDb(), settings, engine, "Was muss ich dafür tun?", history)
+        FakeRunDb(), settings, engine, "Welche Aufgaben habe ich heute dafür?", history)
     assert engine.calls == [(source, {"query": "Projekt Orion", "kind": "project"}),
                             ("day_context__list_open_tasks", {})]
     assert [use["name"] for use in result.uses] == [source, "day_context__list_open_tasks"]
@@ -293,7 +438,7 @@ async def test_follow_up_runs_selected_prior_source_first_without_duplicate(tmp_
                                "run_id": "prior-project-run"}]}]
     settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
     await conversation_tools.gather_tool_context(
-        FakeRunDb(), settings, engine, "Was ist dazu offen?", history)
+        FakeRunDb(), settings, engine, "Welche Aufgaben sind dazu offen?", history)
     assert engine.calls == [(source, {"query": "Projekt Orion", "kind": "project"}),
                             ("day_context__list_open_tasks", {})]
 
@@ -331,7 +476,7 @@ async def test_follow_up_read_still_works_when_planner_fails(tmp_path, monkeypat
                                "run_id": "prior-project-run"}]}]
     settings = Settings(JARVIS_DATA_DIR=tmp_path, JARVIS_OLLAMA_MODEL="fixture")
     result = await conversation_tools.gather_tool_context(
-        FakeRunDb(), settings, engine, "Was ist dazu offen?", history)
+        FakeRunDb(), settings, engine, "Welche Termine habe ich heute dazu?", history)
     assert engine.calls == [(source, {"query": "Projekt Orion", "kind": "project"})]
     assert result.uses[0]["name"] == source
     assert "weitere Werkzeugwahl" in result.prompt

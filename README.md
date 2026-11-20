@@ -207,11 +207,15 @@ Dieser erste Gesprächsschritt nutzt höchstens zwei **lesende** Modulwerkzeuge 
 Frage und läuft nur mit Ollama. Eine lokale JSON-Wahl nutzt Werkzeugbeschreibungen
 und zwei kurze frühere Gesprächsrunden. Bei ausdrücklichen Rückfragen wie „Was muss
 ich dafür tun?“ wird die zuletzt erfolgreich genutzte lokale Quelle erneut gelesen,
-damit Jarvis beim Thema bleibt. Allgemeine Wissens- und Denkfragen brauchen keine
+damit Jarvis beim Thema bleibt. Wenn die Rückfrage keine weitere Datenart verlangt,
+entfällt eine zweite Modellwahl; bei Terminen, Zeiten, Aufgaben, Mails oder einem
+neu benannten Thema wird neu geprüft. Allgemeine Wissens- und Denkfragen brauchen keine
 persönlichen Werkzeugdaten; auch ein fehlgeschlagener Werkzeugplaner sollte sie nicht
 blockieren. Ausdrücklich hypothetische, selbstständige Beispiele ohne Bezug auf
 aktuelle persönliche Daten gehen direkt zur Antwort. Wenn dabei „heute“, Kalender,
 gespeicherte Aufgaben oder ein Rückbezug genannt werden, bleibt der Datenabruf möglich.
+Ebenso gehen reine Begriffs- und Unterschiedsfragen ohne persönlichen Datenbezug
+direkt zur Antwort, statt für `tools: []` erst ein lokales Modell abzuwarten.
 Die Antwort soll konkrete Projektangaben nicht durch eine leere allgemeine
 Liste ersetzen und belegte Zeit von freien Fenstern unterscheiden. Die Belege der
 tatsächlich verwendeten Werkzeuge stehen im Gespräch. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
@@ -229,6 +233,32 @@ Werkzeugwahl mit `qwen3:4b-instruct` etwa 50–150 Sekunden beanspruchen;
 die Antwortgenerierung kommt hinzu. Das Modell kann trotz dieser Leitplanken
 Fehler machen. Für wichtige Termine, Aufgaben und Entscheidungen die angezeigten
 lokalen Belege prüfen.
+
+Optional kann ein kleineres, lokal installiertes Modell nur die Werkzeugwahl
+übernehmen: `ollama pull qwen3:1.7b` ausführen, in `.env`
+`JARVIS_OLLAMA_PLANNER_MODEL=qwen3:1.7b` ergänzen und Jarvis neu starten.
+`JARVIS_OLLAMA_MODEL` erzeugt weiterhin die eigentliche Antwort. Fehlt das
+optionale Planermodell, versucht Jarvis die Werkzeugwahl einmal mit dem
+normalen Ollama-Modell; ein Planer-Timeout führt nicht zu einer zweiten langen
+Anfrage. Die Modellwahl wird im lokalen Nutzungsbeleg sichtbar. In einem
+synthetischen Zwei-Fragen-Test auf dem CPU-Laptop brauchte das kleine Modell
+für die Werkzeugwahl etwa 16–23 statt 46–68 Sekunden; die Dauer echter
+Gespräche hängt zusätzlich von Modellwechsel, Datenmenge und Antwortlänge ab.
+Das kleinere Modell kann die Werkzeugwahl schlechter treffen. Für persönliche
+Fakten die angezeigten Belege kontrollieren.
+
+Ein isolierter Echtmodelltest für allgemeines Schlussfolgern, eine Korrektur im
+selben Chat, einen Themenwechsel und eine mehrdeutige Formulierung läuft ohne
+private Module und ohne Cloud-Schlüssel:
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\smoke_reasoning_chat.py
+```
+
+Die [Messwerte und offenen Qualitätsfälle](docs/MODEL_EVAL.md) nennen auch die
+aktuell nicht bestandene Begriffseinordnung beim 4B-Standardmodell. Ein
+Fehlschlag dieser strengen Echtmodellprobe wird nicht als bestandener Test
+gewertet.
 
 ### Eigene Dateien an eine Chatnachricht anhängen
 
