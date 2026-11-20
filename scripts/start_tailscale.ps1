@@ -1,6 +1,7 @@
 param([ValidateRange(1, 65535)][int]$HttpsPort = 8443)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'tailscale_route.ps1')
 $state = tailscale status --json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or $state.BackendState -ne 'Running') {
     throw 'Tailscale ist auf diesem Laptop nicht verbunden.'
@@ -60,13 +61,8 @@ try {
         if (-not $gateway.HasExited) { Stop-Process -Id $gateway.Id -Force }
         throw "Jarvis-Tailscale-Gateway startete nicht. Log: $logDir\tailscale-error.log"
     }
-    & tailscale serve --bg "--https=$HttpsPort" 'http://127.0.0.1:8770'
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Process -Id $gateway.Id -Force
-        throw "Tailscale Serve konnte Port $HttpsPort nicht einrichten."
-    }
-    @{gateway_pid=$gateway.Id; host=$tailHost; port=$HttpsPort} | ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'JarvisLocal\tailscale-gateway.json')
+    Start-JarvisServeRoute -TailHost $tailHost -HttpsPort $HttpsPort -GatewayPid $gateway.Id `
+        -RecordPath (Join-Path $env:LOCALAPPDATA 'JarvisLocal\tailscale-gateway.json')
     Write-Output "Jarvis im privaten Tailnet: https://${tailHost}:$HttpsPort/"
     Write-Output 'Zugriff nur mit der Tailscale-Nutzeridentität dieses Laptop-Eigentümers.'
     } catch {
