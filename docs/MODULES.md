@@ -183,6 +183,10 @@ bewusst einen Run und gibt Schreibwirkungen in **Aktivität** nochmals für den
 konkreten Argument-Hash frei. Fehlendes Werkzeug oder eine Frage ohne klare
 Aktion lässt die Vorschau leer. Nach einem erfolgreichen Modullauf führt
 **Modul öffnen** unter **Aktivität → Aufträge** in die aktive Modulansicht.
+Bei Anschlussbitten sieht Ollama höchstens sechs gekürzte frühere Beiträge
+desselben Chats. Diese dienen nur zur Auflösung von Bezügen; ausschließlich die
+letzte Nutzerbitte kann eine neue Aktion auslösen. Bei mehrdeutigen Angaben
+soll Jarvis nachfragen, statt Empfänger oder andere Argumente zu erfinden.
 Dieser erste Schritt bleibt unter
 [Trello P10](https://trello.com/c/D0v0Cw32) in Arbeit; insbesondere
 mehrstufige Abläufe und gezielte Rückfragen bei unvollständigen Angaben folgen.

@@ -1715,9 +1715,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         answer = messages[-1]
         if answer["id"] != data.message_id:
             raise HTTPException(409, "Chatantwort wurde zwischenzeitlich geändert")
-        question = next((item["content"] for item in reversed(messages[:-1])
-                         if item["role"] == "user"), "")
-        if not question:
+        question_index = next((index for index in range(len(messages) - 2, -1, -1)
+                               if messages[index]["role"] == "user"), None)
+        question = messages[question_index]["content"] if question_index is not None else ""
+        if question_index is None or not question:
             raise HTTPException(422, "Keine zugehörige Nutzerbitte vorhanden")
         try:
             actions = available_actions(engine)
@@ -1730,7 +1731,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async with asyncio.timeout(150):
                 completion = await generate_text(
                     db, local_config, "chat_action_proposal",
-                    proposal_messages(question, answer["content"], actions),
+                    proposal_messages(question, answer["content"], actions,
+                                      messages[max(0, question_index - 6):question_index]),
                     ollama_format="json",
                 )
         except TimeoutError as exc:

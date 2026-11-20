@@ -260,3 +260,31 @@ def test_local_open_is_only_invoked_after_user_starts_run(tmp_path, monkeypatch)
             "tool_name": action["tool_name"], "args": action["args"],
             "client_request_id": "chat-open-test-001"}).json()
         assert repeated["id"] == run["id"] and opened == ["alpha"]
+
+
+def test_proposal_uses_bounded_same_chat_context_for_follow_up(tmp_path, monkeypatch):
+    app, db, _chat_id, _answer_id, effects = prepared(tmp_path)
+    chat = db.create_chat()
+    db.add_message(chat["id"], "user", "An ada@example.org: Treffen morgen.")
+    db.add_message(chat["id"], "assistant", "Adresse und Thema sind bekannt.")
+    db.add_message(chat["id"], "user", "Schreib daraus einen Entwurf: Bis morgen.")
+    answer = db.add_message(chat["id"], "assistant", "Ich kann einen Entwurf vorbereiten.")
+    seen = []
+
+    async def generate(_db, _settings, _purpose, messages, **_kwargs):
+        seen.append(json.loads(messages[-1]["content"]))
+        return Completion('{"action":null}', 1, 1, 0, "local_no_api_charge")
+
+    monkeypatch.setattr("jarvis.app.generate_text", generate)
+    with TestClient(app) as client:
+        response = client.post(f"/chats/{chat['id']}/action-proposal",
+                               headers=csrf(client), json={"message_id": answer["id"]})
+        assert response.status_code == 200, response.text
+        assert response.json()["action"] is None
+        assert client.get("/runs").json() == []
+    assert seen[0]["last_user_request"] == "Schreib daraus einen Entwurf: Bis morgen."
+    assert seen[0]["recent_conversation"] == [
+        {"role": "user", "content": "An ada@example.org: Treffen morgen."},
+        {"role": "assistant", "content": "Adresse und Thema sind bekannt."},
+    ]
+    assert effects == []
