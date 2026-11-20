@@ -86,6 +86,13 @@ def create_app(*, host: str | None = None, login: str | None = None,
 
         response_headers = {key: value for key, value in upstream.headers.items()
                             if key.lower() in RESPONSE_HEADERS}
+        location = response_headers.get("location")
+        if location:
+            local_prefix = backend.rstrip("/") + "/"
+            if location.startswith(local_prefix):
+                response_headers["location"] = expected_origin + "/api/" + location[len(local_prefix):]
+            elif location.startswith("/") and not location.startswith("//"):
+                response_headers["location"] = expected_origin + "/api" + location
         return StreamingResponse(response_body(), status_code=upstream.status_code,
                                  headers=response_headers)
 

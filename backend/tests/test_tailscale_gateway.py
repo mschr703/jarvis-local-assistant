@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,10 @@ def test_tailnet_gateway_identity_static_and_session_proxy(tmp_path, monkeypatch
                        "body": await request.json()})
         return {"saved": True}
 
+    @backend.get("/redirect")
+    def redirect():
+        return RedirectResponse("http://127.0.0.1:8765/session")
+
     original_client = httpx.AsyncClient
 
     def mock_client(*_args, **_kwargs):
@@ -62,6 +67,9 @@ def test_tailnet_gateway_identity_static_and_session_proxy(tmp_path, monkeypatch
         assert session_response.status_code == 200
         assert session_response.json() == {"csrf": "test-token"}
         assert "jarvis_session=" in session_response.headers["set-cookie"]
+        redirected = client.get("/api/redirect", headers=headers, follow_redirects=False)
+        assert redirected.status_code == 307
+        assert redirected.headers["location"] == "https://maxim.example.ts.net:8443/api/session"
         sent = client.post("/api/update", headers={**headers,
                                                    "origin": "https://maxim.example.ts.net:8443",
                                                    "x-jarvis-csrf": "test-token"},
