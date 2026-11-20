@@ -32,3 +32,7 @@ browser-profile/
 chat-attachments/
 backups/
 .jarvis-dev.json
+.kangentic/
+.claude/settings.local.json
+kangentic.json
+kangentic.local.json
