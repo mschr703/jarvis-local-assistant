@@ -20,6 +20,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from starlette.background import BackgroundTask
 
+from jarvis.action_proposals import (
+    available_actions,
+    parse_action,
+    parse_clarification,
+    proposal_messages,
+)
 from jarvis.cad import HolderProposalArgs, register_cad_tools, validate_dimension_proposal
 from jarvis.chat_attachments import (
     IMAGE_FORMATS,
@@ -1692,6 +1698,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (TypeError, ValueError) as exc:
             raise HTTPException(502, str(exc)) from exc
         return {"message_id": data.message_id, "suggestions": proposals}
+
+    @app.post("/chats/{chat_id}/action-proposal")
+    async def chat_action_proposal(chat_id: str, data: ChatSuggestionInput):
+        if config.provider != "ollama":
+            raise HTTPException(422, "Aktionsvorschläge benötigen lokales Ollama")
+        chat_item = db.get_chat(chat_id)
+        if chat_item is None:
+            raise HTTPException(404, "Gespräch nicht gefunden")
+        if chat_item["archived_at"] is not None:
+            raise HTTPException(409, "Archiviertes Gespräch zuerst wiederherstellen")
+        messages = db.list_messages(chat_id)
+        if (not messages or messages[-1]["role"] != "assistant"
+                or messages[-1]["status"] != "complete"):
+            raise HTTPException(422, "Keine fertige Chatantwort vorhanden")
+        answer = messages[-1]
+        if answer["id"] != data.message_id:
+            raise HTTPException(409, "Chatantwort wurde zwischenzeitlich geändert")
+        question = next((item["content"] for item in reversed(messages[:-1])
+                         if item["role"] == "user"), "")
+        if not question:
+            raise HTTPException(422, "Keine zugehörige Nutzerbitte vorhanden")
+        try:
+            actions = available_actions(engine)
+        except Exception as exc:
+            raise HTTPException(503, "Aktive Modulaktionen konnten nicht geladen werden") from exc
+        if not actions:
+            return {"message_id": data.message_id, "action": None, "clarification": None}
+        local_config = config.model_copy(update={"provider": "ollama", "max_output_tokens": 256})
+        try:
+            async with asyncio.timeout(150):
+                completion = await generate_text(
+                    db, local_config, "chat_action_proposal",
+                    proposal_messages(question, answer["content"], actions),
+                    ollama_format="json",
+                )
+        except TimeoutError as exc:
+            raise HTTPException(504, "Lokaler Aktionsvorschlag überschritt 150 Sekunden") from exc
+        except ProviderError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        latest = db.list_messages(chat_id)
+        current = db.get_chat(chat_id)
+        if (current is None or current["archived_at"] is not None or not latest
+                or latest[-1]["id"] != data.message_id):
+            raise HTTPException(409, "Chatantwort wurde zwischenzeitlich geändert")
+        try:
+            action = parse_action(completion.text, engine, actions)
+            clarification = parse_clarification(completion.text, question)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(502, str(exc)) from exc
+        if action is not None:
+            sources = []
+            for use in answer.get("tool_uses", [])[:2]:
+                if (not isinstance(use, dict) or use.get("status") != "succeeded"
+                        or not isinstance(use.get("run_id"), str)):
+                    continue
+                run = db.get_run(use["run_id"])
+                if (run and run["effect"] == "read" and run["status"] == "succeeded"
+                        and run["tool_name"] == use.get("name")):
+                    sources.append({"name": run["tool_name"], "run_id": run["id"]})
+            action["source_uses"] = sources
+        return {"message_id": data.message_id, "action": action,
+                "clarification": clarification}
 
     @app.patch("/chats/{chat_id}/archive")
     async def chat_archive(chat_id: str, data: ChatArchiveInput):

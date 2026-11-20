@@ -174,9 +174,16 @@ Die Modellwahl wird als JSON angefordert und danach auf angebotene Namen, höchs
 zwei verschiedene Aufrufe und begrenzte Argumente geprüft. Modulwerkzeuge können
 eine `description` bis 500 Zeichen angeben, damit der Chat ihren Zweck erkennt.
 Fehlende oder deaktivierte Module liefern keine alten Ergebnisse. Schreib-,
-Browser- und Desktopwerkzeuge sind für diesen Chatpfad nicht auswählbar. Weitere
-Schritte zu vorbereiteten Schreibaktionen verfolgen wir separat in
-[Trello P05](https://trello.com/c/9q0uJldq).
+Browser- und Desktopwerkzeuge sind für diesen **Leseantwortpfad** nicht auswählbar.
+Der gesonderte Knopf **Aktion vorschlagen** kann aus einer fertigen Chatbitte
+höchstens ein aktives Modulwerkzeug mit `effect="write"` oder `"local_open"`
+vorschlagen. Der Kern prüft Namen, aktuelle Aktivierung und Pydantic-Argumente;
+ein Vorschlag führt nichts aus. Der Nutzer prüft die Argumente, startet danach
+bewusst einen Run und gibt Schreibwirkungen in **Aktivität** nochmals für den
+konkreten Argument-Hash frei. Fehlendes Werkzeug oder eine Frage ohne klare
+Aktion lässt die Vorschau leer. Dieser erste Schritt bleibt unter
+[Trello P10](https://trello.com/c/D0v0Cw32) in Arbeit; insbesondere
+mehrstufige Abläufe und gezielte Rückfragen bei unvollständigen Angaben folgen.
 Jarvis prüft alle Werkzeugdefinitionen vor der Registrierung. Scheitert ein Paket
 an einem ungültigen oder kollidierenden Werkzeug, werden bereits registrierte
 Werkzeuge dieses Aktivierungsversuchs zurückgenommen; der Kern bleibt nutzbar.
