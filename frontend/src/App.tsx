@@ -234,7 +234,9 @@ export default function App() {
           <div className="card-heading"><h3>Verbindung</h3><span className={error || health?.status === 'degraded' ? 'badge error' : health?.configured ? 'badge ok' : 'badge pending'}>{error ? 'Offline' : health?.status === 'degraded' ? 'Dienst gestört' : health?.configured ? 'Modell bereit' : health ? 'Einrichtung nötig' : 'Prüfe…'}</span></div>
           {error ? <p>Backend nicht erreichbar: {error}. Starte Jarvis mit dem Befehl aus der README.</p> :
             health ? <><p>{health.message}</p><dl><dt>Provider</dt><dd>{health.provider}</dd><dt>Modell</dt><dd>{health.model ?? 'Nicht eingerichtet'}</dd></dl></> : <p>Verbindung wird geprüft.</p>}
-          <div className="item-actions"><button onClick={refreshHealth}>Status prüfen</button></div>
+          <div className="item-actions"><button onClick={refreshHealth}>Status prüfen</button>
+            {health?.provider === 'openrouter' && !health.configured && <button onClick={() => navigate('vault')}>OpenRouter-Schlüssel einrichten</button>}
+          </div>
         </section>
         <section className="card" aria-live="polite">
           <div className="card-heading"><h3>Module</h3><span className={moduleError || modules.some((item) => item.error) ? 'badge error' : 'badge ok'}>{modules.filter((item) => item.enabled).length} aktiv</span></div>
