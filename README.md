@@ -64,6 +64,21 @@ Zum Stoppen im Startterminal `Ctrl+C` drücken. Falls ein Terminal unerwartet en
 
 Das Skript stoppt nur die verifizierten Jarvis-Prozesse, die tatsächlich auf den erwarteten localhost-Ports 8765 und 5173 lauschen. Eine fehlende oder veraltete PID-Datei kann dadurch keinen anderen Jarvis-Prozess auf einem abweichenden Port beenden. Ein zweiter Start meldet belegte Ports, bevor neue Prozesse angelegt werden.
 
+Optionaler Zugriff vom eigenen Tailscale-Gerät: Jarvis wie oben lokal starten und
+in einer zweiten PowerShell im Repository ausführen:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_tailscale.ps1
+```
+
+Das Skript baut die Oberfläche, prüft den Tailscale-Eigentümer und gibt einen
+privaten HTTPS-Link mit Port 8443 aus. Dieser erste Zugang erlaubt das eigene
+Tailscale-Nutzerkonto; Gerätefreigaben kommen aus den Tailnet-Regeln. Die
+bereits vorhandene Weiterleitung auf Port 443 bleibt erhalten. Zum Stoppen
+dieses Zugangs `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop_tailscale.ps1`
+ausführen. Die [Sicherheitsgrenzen](docs/SECURITY.md#optionaler-privater-tailscale-zugang)
+gelten zusätzlich zur lokalen Startanleitung.
+
 ## Die vier MVP-Abläufe
 
 1. **Dokument → Entwurf:** Unter „Dokumente“ einen absoluten Ordnerpfad freigeben, „Index aktualisieren“ wählen, nach einem Begriff suchen und Fundstellen auswählen. Suche, Fundstellenauswahl und angefangene Eingaben bleiben beim Wechsel in einen anderen Bereich innerhalb der geöffneten Oberfläche erhalten. Ein laufender Indexauftrag bleibt gesperrt, bis er endet. Unter „Entwürfe“ Schreibauftrag, optional eine eingefügte Nachricht, Stilprofil und Schreibproben angeben. Angaben zum neuen Entwurf und ungespeicherte Bearbeitungen eines erzeugten Entwurfs bleiben beim Wechsel zwischen den Bereichen innerhalb der geöffneten Oberfläche erhalten. Eine laufende Erzeugung bleibt nach dem Seitenwechsel gesperrt, bis sie endet. Mit denselben Eingaben lassen sich weitere Varianten als getrennte Entwürfe erzeugen; ausgewählte Fundstellen bleiben bis zum Entfernen oder einer Index-/Freigabeänderung sichtbar. Der Entwurf zeigt seine verwendeten Quellen mit Pfad, Seite, Ausschnitt und Datei-Hash. Den Entwurf prüfen, Änderungen zuerst speichern und dann als TXT, Markdown oder bei E-Mail als EML exportieren. Der Export verlangt die angezeigte Entwurfsversion, damit keine unbemerkt geänderte Fassung gespeichert wird. Es wird keine Nachricht versendet.
@@ -816,7 +831,7 @@ Für diesen Ablauf ist **kein OpenRouter-Key** nötig: `.env` mit `JARVIS_PROVID
 
 ## Grenzen und Status
 
-Kein verbundenes Postfach, kein verbundener Kalender, kein Versand, keine allgemeine Browsersteuerung und kein Fernzugriff. OCR ist auf ausdrücklich ausgewählte PDFs und höchstens zehn Seiten ohne extrahierbare Textschicht je Aktion begrenzt. Das bewusste Lesen öffentlicher JavaScript-Seiten ist über `browser_dynamic_read` verfügbar. Die Mehrschrittplanung verwendet nur die registrierten Werkzeuge und verarbeitet Ergebnisse nicht automatisch zu neuen Schritten; der Plan wird vor Ausführung festgelegt. Die Nachweise pro Trello-Karte stehen in [docs/ABNAHME.md](docs/ABNAHME.md); aktueller Teststand, offene Punkte und nächster Schritt in [docs/STATUS.md](docs/STATUS.md).
+Kein verbundenes Postfach, kein verbundener Kalender, kein Versand und keine allgemeine Browsersteuerung. Ein optionaler Zugriff über das eigene Tailscale-Nutzerkonto auf den laufenden Laptop ist in [SECURITY.md](docs/SECURITY.md#optionaler-privater-tailscale-zugang) beschrieben; öffentlicher Serverbetrieb ist nicht eingerichtet. OCR ist auf ausdrücklich ausgewählte PDFs und höchstens zehn Seiten ohne extrahierbare Textschicht je Aktion begrenzt. Das bewusste Lesen öffentlicher JavaScript-Seiten ist über `browser_dynamic_read` verfügbar. Die Mehrschrittplanung verwendet nur die registrierten Werkzeuge und verarbeitet Ergebnisse nicht automatisch zu neuen Schritten; der Plan wird vor Ausführung festgelegt. Die Nachweise pro Trello-Karte stehen in [docs/ABNAHME.md](docs/ABNAHME.md); aktueller Teststand, offene Punkte und nächster Schritt in [docs/STATUS.md](docs/STATUS.md).
 
 ## Lizenz
 

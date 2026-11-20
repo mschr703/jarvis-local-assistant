@@ -279,6 +279,7 @@ class ModuleRegistry:
         self._lock = threading.RLock()
         self._apps: dict[str, FastAPI] = {}
         self._tool_handlers: dict[str, Callable[..., dict]] = {}
+        self._tool_guards: dict[str, Callable[[], bool] | None] = {}
         self._tool_specs: dict[str, tuple] = {}
         self._tool_owners: dict[str, str] = {}
         self._errors: dict[str, str] = {}
@@ -323,12 +324,14 @@ class ModuleRegistry:
                 self._errors = {}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._tool_guards.clear()
                 self._mark_missing_requested()
                 return
             if self.directory.is_symlink() or self.directory.is_junction():
                 self._errors = {"_directory": "Modulverzeichnis darf kein Link sein"}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._tool_guards.clear()
                 self._mark_missing_requested()
                 return
             try:
@@ -337,6 +340,7 @@ class ModuleRegistry:
                 self._errors = {"_directory": f"Modulverzeichnis nicht lesbar: {type(exc).__name__}"}
                 self._apps.clear()
                 self._tool_handlers.clear()
+                self._tool_guards.clear()
                 self._mark_missing_requested()
                 return
             for path in paths:
@@ -508,6 +512,7 @@ class ModuleRegistry:
         for name in list(self._tool_handlers):
             if self._tool_owners.get(name) == module_id:
                 del self._tool_handlers[name]
+                self._tool_guards.pop(name, None)
 
     def _summary(self, module_id: str) -> dict[str, Any]:
         result = self._manifests[module_id].model_dump()
@@ -600,7 +605,8 @@ class ModuleRegistry:
                     definition, name=name,
                     handler=lambda *args, _name=name, **kwargs: self._dispatch_tool(
                         _name, *args, **kwargs),
-                    enabled=lambda _id=module_id: self.app_for(_id) is not None)
+                    enabled=lambda _id=module_id, _name=name: (
+                        self.app_for(_id) is not None and self._tool_allowed(_name)))
                 self.engine.register(registered)
                 self._tool_specs[name] = specs[name]
                 self._tool_owners[name] = module_id
@@ -613,11 +619,18 @@ class ModuleRegistry:
             raise
         for name, definition in planned.items():
             self._tool_handlers[name] = definition.handler
+            self._tool_guards[name] = definition.enabled
+
+    def _tool_allowed(self, name: str) -> bool:
+        with self._lock:
+            guard = self._tool_guards.get(name)
+            return name in self._tool_handlers and (guard is None or guard())
 
     def _dispatch_tool(self, name: str, *args: Any, **kwargs: Any) -> dict:
         with self._lock:
             module_id = self._tool_owners.get(name)
-            handler = self._tool_handlers.get(name) if module_id in self._apps else None
+            handler = (self._tool_handlers.get(name)
+                       if module_id in self._apps and self._tool_allowed(name) else None)
         if handler is None:
             raise ToolUserError("Modulwerkzeug ist deaktiviert")
         return handler(*args, **kwargs)

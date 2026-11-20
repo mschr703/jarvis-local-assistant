@@ -70,6 +70,31 @@ Die Einrichtung und Deaktivierung der Backup-Planung sind lokale POST-Aktionen m
 `backend/tests/test_document_index_text.py` und der erweiterte `scripts/smoke_document_ocr_ui.py` prüfen den tatsächlichen Indextext-Download, Seitenbeleg, fehlende absolute Pfade, Entfernung von Chunk-Überlappung, Text-PDF, veraltetes Original und Ausschluss. `frontend/src/api.test.ts` und `scripts/smoke_ocr_chat_ui.py` prüfen die begrenzte lokale Chat-Übernahme, Hash-/Headerbindung, Stale-Abbruch ohne Teilchat, drei Quellen und echten Ollama-Aufruf.
 `backend/tests/test_doctor.py` prüft Versions- und URL-Grenzen, erforderliche/optionale Modelle, ungültige Konfiguration und das Ausbleiben geheimer Werte im Ergebnis. Ein frischer öffentlicher Clone wird für Setup und Start separat geprüft.
 
-## Vor einem Fernzugriff
+## Optionaler privater Tailscale-Zugang
 
-Der lokale Host-/Cookie-Vertrag reicht dafür nicht. A80/C00 müssen Authentifizierung, Gerätezulassung, Transport, Proxyeinstellungen, Rate Limits je Identität, Secret-Rotation, Logging und Host-Firewall separat festlegen und testen. Öffentliche Portfreigabe ist kein unterstützter Startmodus.
+`scripts/start_tailscale.ps1` baut die Oberfläche und startet ein separates Gateway
+auf `127.0.0.1:8770`. Tailscale Serve stellt es ausschließlich im privaten Tailnet
+über HTTPS-Port 8443 bereit. Die vorhandene Tailscale-Weiterleitung auf Port 443
+bleibt erhalten. Jeder Gateway-Request braucht den exakten Host und den von
+Tailscale Serve gesetzten `Tailscale-User-Login` des Laptop-Eigentümers. Serve
+entfernt eingehende Identitäts-Header vor dem Setzen seines eigenen Headers;
+Geräte ohne Nutzeridentität, etwa getaggte Knoten, werden abgewiesen. Ein fremder
+Origin wird ebenfalls abgewiesen. Das Gateway reicht nur ausgewählte Header zur
+lokalen API weiter und behält deren Sitzung, CSRF- und 1-MiB-Schreibgrenze bei.
+Es bleibt selbst an Loopback gebunden; [Tailscale beschreibt diese
+Identitäts-Header](https://tailscale.com/docs/features/tailscale-serve) für Serve.
+
+Dieser erste Zugang autorisiert **ein Tailscale-Nutzerkonto**, nicht jedes Gerät
+einzeln. Die Tailnet-Zugriffsregeln bestimmen, welche Geräte die Adresse erreichen;
+ein zusätzlicher Geräte-Widerruf in Jarvis existiert noch nicht. Lokale Programme
+unter demselben Windows-Benutzer können den Header nachbilden und haben ohnehin
+Zugriff auf die lokale Instanz. Bei ausgeschaltetem Laptop ist der Dienst nicht
+erreichbar. `tailscale funnel` und öffentliche Portfreigaben werden nicht verwendet.
+A80 bleibt für Gerätezulassung, Widerruf und breitere Fernzugriffsabnahme offen.
+
+Start: erst `python scripts\dev.py`, danach in einer zweiten PowerShell
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_tailscale.ps1`.
+Der Befehl gibt die HTTPS-Adresse aus. Stopp nur des Jarvis-Tailscale-Zugangs:
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop_tailscale.ps1`.
+Der lokale Jarvis-Prozess läuft danach weiter. Änderungen an der Oberfläche
+erfordern einen neuen Build und Gateway-Neustart.

@@ -456,6 +456,32 @@ def test_module_tool_names_with_double_underscore_stay_separate(tmp_path):
         assert result.status_code == 200 and result.json()["status"] == "succeeded"
 
 
+def test_module_tool_preserves_its_own_dynamic_enabled_guard(tmp_path):
+    data_dir = tmp_path / "data"
+    install_fixture(data_dir)
+    entry = data_dir / "modules" / "sample_notes" / "module.py"
+    guarded = SAMPLE_MODULE.replace(
+        'scope="local_module", effect="read")]',
+        'scope="local_module", effect="read",\n'
+        '                           enabled=lambda: db.get_settings().get("fixture.tool_enabled") == "1")]',
+    )
+    assert guarded != SAMPLE_MODULE
+    entry.write_text(guarded, encoding="utf-8")
+    with client_for(data_dir) as client:
+        headers = csrf(client)
+        assert client.post("/modules/sample_notes/enable", headers=headers).status_code == 200
+        assert "sample_notes__list_entries" not in {
+            item["name"] for item in client.get("/tools").json()}
+        args = {"tool_name": "sample_notes__list_entries", "args": {}}
+        assert client.post("/runs", headers=headers, json=args).status_code == 422
+        Database(data_dir / "jarvis.db").set_settings({"fixture.tool_enabled": "1"})
+        assert "sample_notes__list_entries" in {
+            item["name"] for item in client.get("/tools").json()}
+        assert client.post("/runs", headers=headers, json=args).json()["status"] == "succeeded"
+        Database(data_dir / "jarvis.db").set_settings({"fixture.tool_enabled": "0"})
+        assert client.post("/runs", headers=headers, json=args).status_code == 422
+
+
 def test_invalid_module_tool_does_not_leave_partial_registration(tmp_path):
     source_root = tmp_path / "source"
     install_fixture(source_root)

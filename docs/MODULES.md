@@ -36,6 +36,23 @@ git clone https://github.com/mschr703CODEX/jarvis-private-modules.git ..\jarvis-
 python scripts\dev.py
 ```
 
+Für eine vorhandene Installation von `mail_compose` vor dem Update Jarvis stoppen,
+das Modul unter **Module** deaktivieren und dann im Hauptordner ausführen:
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\module_package.py upgrade ..\jarvis-private-modules\mail_compose
+python scripts\dev.py
+```
+
+Danach unter **Module** „Mail-Entwürfe“ wieder aktivieren. In seiner Ansicht kann
+„Gmail-Entwürfe im Browser öffnen erlauben“ eingeschaltet werden. Der neue Knopf
+„In Gmail öffnen“ fordert einen vorbefüllten Gmail-Tab im Standardbrowser an;
+der Browser muss bereits bei Gmail angemeldet sein. Der Link enthält den
+vollständigen Entwurf und kann im Browserverlauf stehen. Jarvis prüft die
+Entwurfsversion vor dem Öffnen, bestätigt aber weder ein sichtbares Fenster
+noch den Versand. Die Einstellung ist standardmäßig aus. Gesendet wird nur
+manuell in Gmail.
+
 Dann `http://127.0.0.1:5173` öffnen, unter **Module** „Tagesnotizen“, „Leseliste“,
 „Abendplanung“, „Tageskontext“, „Kontextsuche“ und „Mail-Entwürfe“ aktivieren und die neuen Navigationspunkte öffnen. Eine Notiz,
 einen HTTP(S)-Link oder einen Abendplan speichern, die Seite neu laden und den
