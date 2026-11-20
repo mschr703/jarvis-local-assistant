@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     provider: Literal["ollama", "openrouter"] = Field(default="ollama", alias="JARVIS_PROVIDER")
     ollama_url: str = Field(default="http://127.0.0.1:11434", alias="JARVIS_OLLAMA_URL")
     ollama_model: str = Field(default="qwen3:4b-instruct", alias="JARVIS_OLLAMA_MODEL")
+    ollama_planner_model: str | None = Field(default=None, min_length=1, max_length=120,
+                                              alias="JARVIS_OLLAMA_PLANNER_MODEL")
     ollama_vision_model: str = Field(default="moondream:1.8b", min_length=1, max_length=120,
                                      alias="JARVIS_OLLAMA_VISION_MODEL")
     voicestudio_url: str = Field(default="http://127.0.0.1:3900",
@@ -71,6 +73,13 @@ class Settings(BaseSettings):
     @classmethod
     def valid_model_routes(cls, value: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
         return validate_model_routes(value)
+
+    @field_validator("ollama_planner_model")
+    @classmethod
+    def valid_planner_model(cls, value: str | None) -> str | None:
+        if value is not None and (value != value.strip() or not value.isprintable()):
+            raise ValueError("Planermodell muss druckbar und ohne Randleerzeichen sein")
+        return value
 
     @field_validator("timezone")
     @classmethod

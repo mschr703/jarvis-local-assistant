@@ -1256,6 +1256,8 @@ class Database:
             for row in rows:
                 row["memory_context"] = memory_uses.get(row["id"], [])
                 row["attachments"] = attachments.get(row["id"], [])
+                row["tool_uses"] = (json.loads(row["citations_json"])
+                                    if row["citations_json"] else [])
                 row["usage_duration_seconds"] = (
                     max(0.0, (datetime.fromisoformat(row["usage_finished_at"])
                               - datetime.fromisoformat(row["usage_started_at"])).total_seconds())
@@ -1387,7 +1389,9 @@ class Database:
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (message_id, chat_id, role, content, status, now, usage.get("provider"),
                  usage.get("model"), usage.get("input_tokens"), usage.get("output_tokens"),
-                 usage.get("cost_usd"), usage.get("cost_kind"), usage.get("citations_json"),
+                 usage.get("cost_usd"), usage.get("cost_kind"),
+                 json.dumps(usage["tool_uses"], ensure_ascii=False)
+                 if usage.get("tool_uses") else usage.get("citations_json"),
                  usage.get("rule_version"), usage.get("usage_id"), usage.get("skill_id"),
                  usage.get("skill_version"), usage.get("skill_hash"),
                  usage.get("compaction_version"), usage.get("context_estimated_tokens"),
@@ -1417,7 +1421,7 @@ class Database:
                 )
         return {"id": message_id, "chat_id": chat_id, "role": role, "content": content,
                 "status": status, "created_at": now, **usage,
-                "memory_context": memory_context or []}
+                "memory_context": memory_context or [], "tool_uses": usage.get("tool_uses", [])}
 
     def log(self, kind: str, detail: str) -> None:
         with self.connect() as db:

@@ -2,6 +2,7 @@
 
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,3 +64,40 @@ def test_synthetic_token_patterns():
     assert PATTERNS["OpenRouter key"].search(b"sk-or-v1-" + b"x" * 30)
     assert PATTERNS["GitHub token"].search(b"ghp_" + b"x" * 35)
     assert PATTERNS["private key block"].search(b"-----BEGIN " + b"PRIVATE KEY-----")
+
+
+def test_missing_tracked_file_fails_cleanly_before_staging_deletion(tmp_path, monkeypatch,
+                                                                   capsys):
+    repo = tmp_path / "missing"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "README.md").write_text("safe\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.test", "-c",
+                    "user.name=Synthetic Test", "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "safe"], cwd=repo, check=True)
+    (repo / "README.md").unlink()
+    monkeypatch.setattr(audit, "ROOT", repo)
+    monkeypatch.setattr(sys, "argv", ["audit_public.py"])
+    assert audit.main() == 1
+    assert "tracked file missing or unreadable" in capsys.readouterr().out
+
+
+def test_staged_secret_is_caught_even_if_worktree_was_cleaned(tmp_path, monkeypatch,
+                                                               capsys):
+    repo = tmp_path / "staged"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    path = repo / "README.md"
+    path.write_text("safe\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.test", "-c",
+                    "user.name=Synthetic Test", "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "safe"], cwd=repo, check=True)
+    path.write_bytes(b"key=sk-or-v1-" + b"x" * 30)
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    path.write_text("safe again\n", encoding="utf-8")
+    monkeypatch.setattr(audit, "ROOT", repo)
+    monkeypatch.setattr(sys, "argv", ["audit_public.py"])
+    assert audit.main() == 1
+    assert "Git index: README.md: OpenRouter key" in capsys.readouterr().out

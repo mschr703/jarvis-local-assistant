@@ -17,6 +17,7 @@ MAX_PROJECT_TASK_ROWS = 2000
 MAX_PROJECT_FILE_ROWS = 2000
 MAX_PROJECT_MEMORY_ROWS = 2000
 MAX_PROJECT_PERSON_TASK_ROWS = 2000
+MAX_PROJECT_SESSION_ROWS = 2000
 MAX_EVENT_ROWS = 2000
 MAX_CONTACT_ROWS = 2000
 MAX_CONTACT_DETAILS = 5
@@ -32,7 +33,7 @@ PROJECT_RELATIONS = {"lead": "Leitung", "contributor": "Mitwirkung",
 PERSON_TASK_RELATIONS = {"responsible": "Verantwortlich", "involved": "Beteiligt",
                          "reviewer": "Prüfend"}
 PROJECT_MATCH_PRIORITY = {"document": 0, "task": 1, "alias": 2, "person": 3,
-                          "memory": 4, "person_task": 5}
+                          "memory": 4, "person_task": 5, "session": 6}
 
 
 def query_terms(query: str) -> tuple[str, list[str]]:
@@ -184,6 +185,15 @@ def search(db: Database, query: str, kind: str = "all",
             ORDER BY link.updated_at DESC,link.id DESC LIMIT ?
         """, (MAX_PROJECT_ROWS, MAX_PROJECT_PERSON_TASK_ROWS + 1))] if kind in {
             "all", "project"} else []
+        project_sessions = [dict(row) for row in connection.execute("""
+            SELECT note.id,note.state_id,note.result,note.open_questions,
+                   note.next_step,note.created_at
+            FROM work_sessions note JOIN
+                (SELECT id FROM work_states ORDER BY updated_at DESC,id DESC LIMIT ?) s
+                ON s.id=note.state_id
+            ORDER BY note.created_at DESC,note.id DESC LIMIT ?
+        """, (MAX_PROJECT_ROWS, MAX_PROJECT_SESSION_ROWS + 1))] if kind in {
+            "all", "project"} else []
         events = [dict(row) for row in connection.execute("""
             SELECT e.id,e.date_local,e.title,e.description,e.location,e.version,
                    (SELECT GROUP_CONCAT(c.name||' ('||c.context||')',' | ')
@@ -238,6 +248,7 @@ def search(db: Database, query: str, kind: str = "all",
                or len(project_files) > MAX_PROJECT_FILE_ROWS
                or len(project_memories) > MAX_PROJECT_MEMORY_ROWS
                or len(project_person_tasks) > MAX_PROJECT_PERSON_TASK_ROWS
+               or len(project_sessions) > MAX_PROJECT_SESSION_ROWS
                or len(events) > MAX_EVENT_ROWS or len(contacts) > MAX_CONTACT_ROWS
                or contact_details_limited)
     by_document: dict[str, dict] = {}
@@ -328,6 +339,9 @@ def search(db: Database, query: str, kind: str = "all",
     person_tasks_by_project: dict[str, list[dict]] = {}
     for link in project_person_tasks[:MAX_PROJECT_PERSON_TASK_ROWS]:
         person_tasks_by_project.setdefault(link["state_id"], []).append(link)
+    sessions_by_project: dict[str, list[dict]] = {}
+    for note in project_sessions[:MAX_PROJECT_SESSION_ROWS]:
+        sessions_by_project.setdefault(note["state_id"], []).append(note)
     for row in projects[:MAX_PROJECT_ROWS]:
         body = " · ".join(part for part in
                           (row["confirmed"], row["open_questions"], row["next_step"]) if part)
@@ -397,8 +411,21 @@ def search(db: Database, query: str, kind: str = "all",
         matching_person_tasks.sort(key=lambda item: (-item[0], item[1]["id"]))
         if matching_person_tasks:
             score += matching_person_tasks[0][0]
+        matching_sessions = []
+        for note in sessions_by_project.get(row["id"], []):
+            note_body = " · ".join((note["result"], note["open_questions"], note["next_step"]))
+            note_score = _score(folded_query, folded_terms, "", _fold(note_body))
+            if note_score:
+                matching_sessions.append((note_score, note))
+        matching_sessions.sort(key=lambda item: (item[1]["created_at"], item[1]["id"]),
+                               reverse=True)
+        matching_sessions.sort(key=lambda item: -item[0])
+        if matching_sessions:
+            score += matching_sessions[0][0]
         if score:
             relation_matches = (
+                [(value, "session", item["id"]) for value, item in matching_sessions[:1]]
+                +
                 [(value, "person_task", item["id"]) for value, item, _
                  in matching_person_tasks[:1]]
                 +
@@ -451,9 +478,16 @@ def search(db: Database, query: str, kind: str = "all",
                                + (" · Dateibeleg im Arbeitsstand prüfen"
                                   if person["source_document_id"] else " · eigene Angabe")
                                for _, person, role in matching_people[:2]]
+            session_excerpts = [
+                f"Sitzungsnotiz vom {note['created_at'][:10]}: "
+                f"Erreicht: {note['result'][:120]}"
+                + (f" · Offen: {note['open_questions'][:90]}" if note["open_questions"] else "")
+                + f" · Weiter: {note['next_step'][:90]}"
+                for _, note in matching_sessions[:2]]
             project_items.append({"kind": "project", "id": row["id"],
                                   "title": row["project"],
-                                  "excerpt": " · ".join([*person_task_excerpts,
+                                  "excerpt": " · ".join([*session_excerpts,
+                                                         *person_task_excerpts,
                                                          *memory_excerpts, *file_excerpts,
                                                          *task_excerpts,
                                                          *alias_excerpts,

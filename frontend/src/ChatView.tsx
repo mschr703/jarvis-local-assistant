@@ -11,12 +11,17 @@ type Props = {
   focusOnCapture?: number;
   selectedSkillId: string; setSelectedSkillId: (id: string) => void; onSkills: () => void;
   onPrepareTask: (title: string) => void; onPrepareResearch: (question: string) => void;
+  onActivity: () => void;
   requestedChatSource?: { chatId: string; messageId: string } | null;
   onSourceOpened?: () => void;
   requestedAttachments?: File[] | null;
   onAttachmentsPrepared?: () => void;
 };
 type FollowUpSuggestion = { kind: 'task' | 'research'; text: string };
+type ActionProposal = { tool_name: string; args: Record<string, unknown>;
+  effect: 'write' | 'local_open'; description: string; args_hash: string;
+  source_uses: { name: string; run_id: string }[] };
+type ActionRun = { id: string; status: string; error?: string | null };
 type MemoryChoice = { id: string; status: string; decided_text: string | null;
   current_memory_text: string | null; source_quote: string; validity_state: string };
 type AnswerCase = { message_id: string; chat_id: string; question: string | null; answer: string;
@@ -64,6 +69,7 @@ function CompactionState({ snapshot, onRemove }: { snapshot: ChatCompaction;
 export default function ChatView({ configured, setupMessage, provider, draft, setDraft,
   focusOnCapture = 0, selectedSkillId, setSelectedSkillId, onSkills,
   onPrepareTask, onPrepareResearch, requestedChatSource, onSourceOpened,
+  onActivity,
   requestedAttachments, onAttachmentsPrepared }: Props) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [searchText, setSearchText] = useState('');
@@ -77,6 +83,13 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [suggestionMessageId, setSuggestionMessageId] = useState('');
   const [suggestionBusy, setSuggestionBusy] = useState(false);
   const [suggestionNotice, setSuggestionNotice] = useState('');
+  const [actionProposal, setActionProposal] = useState<ActionProposal | null>(null);
+  const [actionMessageId, setActionMessageId] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionNotice, setActionNotice] = useState('');
+  const [actionRun, setActionRun] = useState<ActionRun | null>(null);
+  const actionSubmission = useRef(false);
+  const actionRequestId = useRef('');
   const [memoryChoices, setMemoryChoices] = useState<MemoryChoice[]>([]);
   const [selectedMemoryIds, setSelectedMemoryIds] = useState<string[]>([]);
   const [compactions, setCompactions] = useState<ChatCompaction[]>([]);
@@ -86,6 +99,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const [active, setActive] = useState<Chat | null>(null);
   const [focusMessageId, setFocusMessageId] = useState('');
   const [streamed, setStreamed] = useState('');
+  const [liveToolUses, setLiveToolUses] = useState<{ name: string; run_id: string; status: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -119,6 +133,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   const voiceAbort = useRef<AbortController | null>(null);
   const voiceEpoch = useRef(0);
   const [allowCloud, setAllowCloud] = useState(false);
+  const [useLocalTools, setUseLocalTools] = useState(true);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedAnswerId, setSelectedAnswerId] = useState('');
   const [verdict, setVerdict] = useState('unclear');
@@ -139,6 +154,10 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     (message.attachments?.length ?? 0) > 0) || false;
   const latestAnswer = latestMessage?.role === 'assistant' && latestMessage.status === 'complete'
     ? latestMessage : null;
+  useEffect(() => {
+    setActionProposal(null); setActionMessageId(''); setActionNotice(''); setActionRun(null);
+    actionRequestId.current = '';
+  }, [active?.id, latestAnswer?.id]);
   useEffect(() => {
     ++speechRequest.current;
     audioRef.current?.pause(); setSpeechActiveId(''); setSpeechUrl('');
@@ -258,7 +277,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     setChats(await api<ChatSummary[]>(`/chats?q=${encodeURIComponent(query)}&archived=${archived}`));
   const refreshCases = async () => setCases(await api<AnswerCase[]>('/chat-evaluation-cases'));
   const load = async (id: string, matchMessageId = '') => {
-    if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || compactionBusy) return;
+    if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || actionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id !== id) stopVoiceSession();
     navigationRef.current = true; setNavigating(true); setError('');
     try { const [chat, states] = await Promise.all([api<Chat>(`/chats/${id}`),
@@ -316,7 +335,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   }, [requestedAttachments]);
 
   const create = async () => {
-    if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || compactionBusy) return;
+    if (navigationRef.current || controller.current || evaluationAction.current || suggestionBusy || actionBusy || compactionBusy) return;
     if (voiceEnabled) stopVoiceSession();
     navigationRef.current = true; setNavigating(true); setError('');
     try {
@@ -344,7 +363,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     finally { setArchiveBusy(false); }
   };
   const changeArchive = async (item: ChatSummary) => {
-    if (busy || navigating || managingChat || controller.current || suggestionBusy || compactionBusy) return;
+    if (busy || navigating || managingChat || controller.current || suggestionBusy || actionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id === item.id) stopVoiceSession();
     setManagingChat(item.id); setError(''); setDeleteCandidate(null);
     try {
@@ -371,7 +390,7 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
     finally { setManagingChat(''); }
   };
   const deleteChat = async () => {
-    if (!deleteCandidate || busy || navigating || managingChat || controller.current || suggestionBusy || compactionBusy) return;
+    if (!deleteCandidate || busy || navigating || managingChat || controller.current || suggestionBusy || actionBusy || compactionBusy) return;
     if (voiceEnabled && active?.id === deleteCandidate.id) stopVoiceSession();
     const id = deleteCandidate.id;
     setManagingChat(id); setError('');
@@ -398,6 +417,40 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       if (!result.suggestions.length) setSuggestionNotice('Keine passende Folgeaktion gefunden.');
     } catch (cause) { setSuggestionNotice((cause as Error).message); }
     finally { setSuggestionBusy(false); }
+  };
+  const proposeAction = async () => {
+    if (!active || !latestAnswer || actionBusy || busy || navigating || provider !== 'ollama') return;
+    setActionBusy(true); setActionNotice(''); setActionProposal(null); setActionRun(null);
+    actionRequestId.current = crypto.randomUUID();
+    try {
+      const result = await api<{ message_id: string; action: ActionProposal | null;
+        clarification: string | null }>(
+        `/chats/${active.id}/action-proposal`, {
+          method: 'POST', body: JSON.stringify({ message_id: latestAnswer.id }),
+        });
+      setActionMessageId(result.message_id);
+      setActionProposal(result.action);
+      if (!result.action) setActionNotice(result.clarification
+        ? `Rückfrage von Ollama: ${result.clarification}`
+        : 'Für diese Bitte ist keine eindeutig unterstützte Aktion verfügbar.');
+    } catch (cause) { setActionNotice((cause as Error).message); }
+    finally { setActionBusy(false); }
+  };
+  const prepareActionRun = async () => {
+    if (!actionProposal || !active || !latestAnswer || actionMessageId !== latestAnswer.id
+        || actionSubmission.current || busy || actionBusy) return;
+    actionSubmission.current = true; setActionBusy(true); setActionNotice('');
+    try {
+      const run = await api<ActionRun>('/runs', { method: 'POST', body: JSON.stringify({
+        tool_name: actionProposal.tool_name, args: actionProposal.args,
+        client_request_id: actionRequestId.current,
+      }) });
+      setActionRun(run);
+      setActionNotice(run.status === 'waiting_approval'
+        ? 'Auftrag ist vorbereitet. Die genaue Schreibaktion muss unter Aktivität freigegeben werden.'
+        : `Auftrag ${run.status}${run.error ? `: ${run.error}` : ''}. Details stehen unter Aktivität.`);
+    } catch (cause) { setActionNotice((cause as Error).message); }
+    finally { actionSubmission.current = false; setActionBusy(false); }
   };
   const compactChat = async () => {
     if (!active || !latestMessage || !canCompact || compactionBusy || busy || suggestionBusy
@@ -456,14 +509,15 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
   };
 
   const send = async (fromVoice = false) => {
-    if (!draft.trim() || busy || suggestionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')) return;
+    if (!draft.trim() || busy || suggestionBusy || actionBusy || compactionBusy || navigating || navigationRef.current || controller.current || evaluationAction.current || !configured || active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')) return;
     const content = draft.trim();
     const voiceGenerationEpoch = voiceEpoch.current;
     const memoryIds = [...selectedMemoryIds];
     const previousMessageIds = new Set(active?.messages.map((message) => message.id) || []);
-    setDraft(''); setStreamed(''); setError(''); setBusy(true);
+    setDraft(''); setStreamed(''); setLiveToolUses([]); setError(''); setBusy(true);
     setSelectedMemoryIds([]);
     setSuggestions([]); setSuggestionMessageId(''); setSuggestionNotice('');
+    setActionProposal(null); setActionMessageId(''); setActionNotice(''); setActionRun(null);
     const abort = new AbortController(); controller.current = abort;
     let chat = active;
     let streamCompleted = false;
@@ -484,7 +538,10 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       }] });
       await streamChat(chat.id, content, abort.signal, allowCloud, (name, payload) => {
         if (name === 'delta') setStreamed((previous) => previous + String(payload.text || ''));
-      }, selectedSkillId || null, memoryIds, uploadedAttachmentIds);
+        if (name === 'tools' && Array.isArray(payload.uses))
+          setLiveToolUses(payload.uses as { name: string; run_id: string; status: string }[]);
+      }, selectedSkillId || null, memoryIds, uploadedAttachmentIds,
+      useLocalTools && provider === 'ollama' && selectedFiles.length === 0);
       streamCompleted = true;
       setSelectedFiles([]);
       const updated = await api<Chat>(`/chats/${chat.id}`);
@@ -520,11 +577,11 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           catch { /* Ein ungesendeter Anhang bleibt im lokalen Chat, bis der Chat gelöscht wird. */ }
         }
       }
-    } finally { setBusy(false); setStreamed(''); controller.current = null; }
+    } finally { setBusy(false); setStreamed(''); setLiveToolUses([]); controller.current = null; }
   };
 
   return <div className="chat-layout">
-    <div className="chat-list"><button onClick={() => void create()} className="primary" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}>Neues Gespräch</button>
+    <div className="chat-list"><button onClick={() => void create()} className="primary" disabled={busy || suggestionBusy || actionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}>Neues Gespräch</button>
       <div className="chat-search"><input aria-label="Gespräche suchen" value={searchText} maxLength={200}
         onChange={(event) => setSearchText(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Enter') setAppliedSearch(searchText.trim()); }}
@@ -541,10 +598,10 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
           disabled={!!managingChat} /><div className="item-actions"><button onClick={() => void renameChat(item.id)}
             disabled={!!managingChat || !renameText.trim()}>Speichern</button><button onClick={() => { setRenamingChat(''); setRenameText(''); }}
             disabled={!!managingChat}>Abbrechen</button></div></div> :
-          <button className={active?.id === item.id ? 'selected' : ''} disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
+          <button className={active?.id === item.id ? 'selected' : ''} disabled={busy || suggestionBusy || actionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat}
             onClick={() => void load(item.id)}>{item.title}</button>}
         {item.match_preview && <small>Treffer: {item.match_preview}</small>}
-        {item.match_message_id && <button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
+        {item.match_message_id && <button className="chat-action" disabled={busy || suggestionBusy || actionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
           onClick={() => void load(item.id, item.match_message_id || '')}>Treffer anzeigen</button>}
         <div className="item-actions"><button className="chat-action" disabled={busy || suggestionBusy || compactionBusy || navigating || evaluationBusy || !!managingChat || !!renamingChat}
           onClick={() => { setDeleteCandidate(null); setRenamingChat(item.id); setRenameText(item.title); }}>Umbenennen</button>
@@ -574,8 +631,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       {!configured && <div className="notice">{setupMessage}. Der Chat ist bis dahin deaktiviert.</div>}
       <div className="messages" aria-live="polite">
         {!active?.messages.length && <p className="empty">Beginne ein Gespräch. Der Verlauf wird lokal gespeichert.</p>}
-        {active?.messages.map((message) => <article id={`chat-message-${message.id}`} key={message.id} className={`message ${message.role}`}><strong>{message.role === 'user' ? 'Du' : 'Jarvis'}</strong><p>{message.content || (message.status !== 'complete' ? '(keine Ausgabe)' : '')}</p><Usage message={message} />{(message.memory_context?.length ?? 0) > 0 && <details><summary>Bewusst verwendete Erinnerungen ({message.memory_context?.length})</summary><ul>{message.memory_context?.map((item) => <li key={item.proposal_id}>{item.text_snapshot} · Originalstelle: „{item.source_quote}“</li>)}</ul></details>}{message.role === 'assistant' && <><div className="item-actions"><button onClick={() => selectEvaluation(message)}>Antwort bewerten</button>{message.status === 'complete' && message.content.trim() && <button onClick={() => void readAnswer(message)} disabled={!!speechBusyId}>{speechBusyId === message.id ? 'VoiceStudio erzeugt Audio…' : speechActiveId === message.id ? 'Wiedergeben' : 'Vorlesen'}</button>}{message.evaluation && <small>Bewertung: {verdictLabels[message.evaluation.verdict]} · {sourceLabels[message.evaluation.source_quality]}</small>}</div>{speechActiveId === message.id && speechUrl && <div className="speech-player"><small>Stimme: {speechVoice}</small><audio ref={audioRef} controls autoPlay src={speechUrl} aria-label="Jarvis-Antwort als Audio" /><button onClick={stopSpeech}>Stoppen</button></div>}{speechBusyId === message.id && <small role="status">Lokale Audioerzeugung läuft. Der Antworttext bleibt erhalten.</small>}</>}{speechError && message.id === speechErrorId && <p className="notice error" role="alert">{speechError}</p>}</article>)}
-        {busy && <article className="message assistant"><strong>Jarvis · antwortet</strong><p>{streamed || 'Warte auf Modell…'}</p></article>}
+        {active?.messages.map((message) => <article id={`chat-message-${message.id}`} key={message.id} className={`message ${message.role}`}><strong>{message.role === 'user' ? 'Du' : 'Jarvis'}</strong><p>{message.content || (message.status !== 'complete' ? '(keine Ausgabe)' : '')}</p><Usage message={message} />{(message.tool_uses?.length ?? 0) > 0 && <details><summary>Lokale Werkzeugbelege ({message.tool_uses?.length})</summary><ul>{message.tool_uses?.map((tool) => <li key={tool.run_id}>{tool.name.replace('__', ' · ')} · {tool.status === 'succeeded' ? 'erfolgreich' : tool.status} · Lauf {tool.run_id.slice(0, 8)}</li>)}</ul></details>}{(message.memory_context?.length ?? 0) > 0 && <details><summary>Bewusst verwendete Erinnerungen ({message.memory_context?.length})</summary><ul>{message.memory_context?.map((item) => <li key={item.proposal_id}>{item.text_snapshot} · Originalstelle: „{item.source_quote}“</li>)}</ul></details>}{message.role === 'assistant' && <><div className="item-actions"><button onClick={() => selectEvaluation(message)}>Antwort bewerten</button>{message.status === 'complete' && message.content.trim() && <button onClick={() => void readAnswer(message)} disabled={!!speechBusyId}>{speechBusyId === message.id ? 'VoiceStudio erzeugt Audio…' : speechActiveId === message.id ? 'Wiedergeben' : 'Vorlesen'}</button>}{message.evaluation && <small>Bewertung: {verdictLabels[message.evaluation.verdict]} · {sourceLabels[message.evaluation.source_quality]}</small>}</div>{speechActiveId === message.id && speechUrl && <div className="speech-player"><small>Stimme: {speechVoice}</small><audio ref={audioRef} controls autoPlay src={speechUrl} aria-label="Jarvis-Antwort als Audio" /><button onClick={stopSpeech}>Stoppen</button></div>}{speechBusyId === message.id && <small role="status">Lokale Audioerzeugung läuft. Der Antworttext bleibt erhalten.</small>}</>}{speechError && message.id === speechErrorId && <p className="notice error" role="alert">{speechError}</p>}</article>)}
+        {busy && <article className="message assistant"><strong>Jarvis · antwortet</strong><p>{streamed || 'Prüfe lokale Werkzeuge und Modell…'}</p>{liveToolUses.length > 0 && <small>Lokale Werkzeuge: {liveToolUses.map((tool) => tool.name.replace('__', ' · ')).join(', ')}</small>}</article>}
       </div>
       {active?.messages.some((message) => (message.attachments?.length ?? 0) > 0) &&
         <section className="card" aria-label="Dateianhänge im Gespräch"><h3>Dateianhänge im Gespräch</h3>
@@ -612,6 +669,25 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
             <div className="item-actions"><button onClick={() => suggestion.kind === 'task' ? onPrepareTask(suggestion.text) : onPrepareResearch(suggestion.text)}>{suggestion.kind === 'task' ? 'Aufgabe vorbereiten' : 'Recherche vorbereiten'}</button>
               <button onClick={() => setSuggestions((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Ausblenden</button></div></div>)}</div>}
       </section>}
+      {latestAnswer && !active?.archived_at && provider === 'ollama' && <section className="card chat-suggestions" aria-label="Aktion aus Gespräch vorbereiten">
+        <h3>Aktion aus dem Gespräch</h3>
+        <p>Jarvis kann aus deiner letzten Bitte ein aktives lokales Werkzeug auswählen. Prüfe Werkzeug und Argumente. Eine Schreibaktion braucht danach eine eigene Freigabe unter Aktivität.</p>
+        <button onClick={() => void proposeAction()} disabled={actionBusy || busy || navigating || !configured}>{actionBusy && !actionRun ? 'Ollama prüft die Bitte…' : 'Aktion vorschlagen'}</button>
+        {actionMessageId === latestAnswer.id && actionProposal && <div className="item-row"><div>
+          <strong>{actionProposal.tool_name.replace('__', ' · ')} · {actionProposal.effect === 'write' ? 'Schreiben' : 'Lokal öffnen'}</strong>
+          {actionProposal.description && <p>{actionProposal.description}</p>}
+          <pre>{JSON.stringify(actionProposal.args, null, 2)}</pre>
+          <small>{actionProposal.source_uses.length
+            ? `Kontext der letzten Antwort: ${actionProposal.source_uses.map((source) => `${source.name.replace('__', ' · ')} (${source.run_id.slice(0, 8)})`).join(', ')}. Die Quellen wurden für diesen Vorschlag nicht neu gelesen.`
+            : 'Kontext: letzte Nutzerbitte und Antwort; keine aktuelle persönliche Lesequelle für den Vorschlag.'}</small>
+          <small>Diese Vorschau führt noch nichts aus.</small>
+        </div><div className="item-actions">
+          {!actionRun && <button onClick={() => void prepareActionRun()} disabled={actionBusy}>{actionProposal.effect === 'write' ? 'Zur Freigabe vorbereiten' : 'Jetzt lokal öffnen'}</button>}
+          <button onClick={() => { setActionProposal(null); setActionRun(null); setActionNotice(''); }}>Verwerfen</button>
+        </div></div>}
+        {actionNotice && <p className="notice" role="status">{actionNotice}</p>}
+        {actionRun && <button onClick={onActivity}>Auftrag unter Aktivität ansehen</button>}
+      </section>}
       {error && <p className="notice error" role="alert">{error}</p>}
       <div className="item-actions skill-selector"><label>Chat-Skill <select aria-label="Chat-Skill" value={selectedSkillId} onChange={(event) => setSelectedSkillId(event.target.value)} disabled={busy || navigating}>
         <option value="">Kein Skill</option>{skills.filter((skill) => skill.active_version != null).map((skill) => <option key={skill.id} value={skill.id}>{skill.name} · v{skill.active_version}</option>)}
@@ -619,6 +695,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
       {selectedSkillId && !skills.some((skill) => skill.id === selectedSkillId && skill.active_version != null) && <p className="notice">Der zuvor ausgewählte Skill ist nicht mehr aktiv. Wähle „Kein Skill“ oder einen aktiven Skill.</p>}
       {provider === 'ollama' && memoryChoices.some((item) => item.status === 'accepted' && item.current_memory_text === item.decided_text && item.validity_state === 'current') && <section className="card chat-memory-choice"><h3>Erinnerungen für diese Antwort</h3><p>Wähle höchstens drei bestätigte Erinnerungen. Sie gehen nur in die nächste lokale Ollama-Anfrage und werden danach abgewählt.</p><div className="item-list">{memoryChoices.filter((item) => item.status === 'accepted' && item.current_memory_text === item.decided_text && item.validity_state === 'current').map((item) => <label key={item.id}><input type="checkbox" checked={selectedMemoryIds.includes(item.id)} disabled={busy || (selectedMemoryIds.length >= 3 && !selectedMemoryIds.includes(item.id))} onChange={(event) => setSelectedMemoryIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> {item.current_memory_text}</label>)}</div></section>}
       {provider === 'openrouter' && <label><input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} /> Diese Nachricht und den bisherigen Chatverlauf an OpenRouter senden</label>}
+      {provider === 'ollama' && <label><input type="checkbox" checked={useLocalTools} onChange={(event) => setUseLocalTools(event.target.checked)} disabled={busy} /> Aktive Module bei passenden Fragen lokal lesen</label>}
+      {provider === 'ollama' && selectedFiles.length > 0 && useLocalTools && <small>Bei Nachrichten mit Dateianhang werden Modulwerkzeuge vorerst nicht genutzt.</small>}
       <section className="card voice-session" aria-label="Sprachmodus">
         <div className="item-actions"><strong>Sprachmodus</strong>
           {!voiceEnabled ? <button onClick={() => void enableVoiceSession()} disabled={!configured || !!active?.archived_at || voiceStatus.startsWith('Prüfe')}>Sprachmodus starten</button>
@@ -659,8 +737,8 @@ export default function ChatView({ configured, setupMessage, provider, draft, se
         {selectedFiles.length > 0 && provider !== 'ollama' && <p>Chatanhänge können nur an lokales Ollama gesendet werden.</p>}
         {hasChatAttachments && provider === 'openrouter' && <p>Dieses Gespräch enthält lokale Dateianhänge. Für OpenRouter ein neues Gespräch ohne Anhang beginnen.</p>}
       </section>
-      <div className="composer"><textarea ref={composerRef} aria-label="Nachricht" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} disabled={!configured || busy || suggestionBusy || compactionBusy || navigating || !!active?.archived_at} placeholder="Schreibe eine Nachricht…" />
-        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')}>Senden</button>}
+      <div className="composer"><textarea ref={composerRef} aria-label="Nachricht" value={draft} onChange={(event) => { setDraft(event.target.value); if (actionProposal) { setActionProposal(null); setActionRun(null); setActionNotice(''); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} disabled={!configured || busy || suggestionBusy || actionBusy || compactionBusy || navigating || !!active?.archived_at} placeholder="Schreibe eine Nachricht…" />
+        {busy ? <button onClick={() => controller.current?.abort()}>Stoppen</button> : <button className="primary" onClick={() => void send()} disabled={!draft.trim() || !configured || suggestionBusy || actionBusy || compactionBusy || navigating || !!active?.archived_at || (provider === 'openrouter' && (!allowCloud || hasChatAttachments)) || (selectedFiles.length > 0 && provider !== 'ollama')}>Senden</button>}
       </div>
       {selectedAnswerId && <section className="card"><h3>Antwort bewerten</h3><p>Prüfe den Antworttext und mögliche Quellen selbst. Die Quellenbewertung ist deine Einschätzung.</p>
         <div className="memory-form"><label>Aufgabenerfolg <select aria-label="Erfolg der Antwort" value={verdict} onChange={(event) => setVerdict(event.target.value)}><option value="achieved">Ziel erreicht</option><option value="partial">Teilweise erreicht</option><option value="failed">Ziel verfehlt</option><option value="unclear">Unklar</option></select></label>

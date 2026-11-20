@@ -3,6 +3,7 @@ import { api, type Health } from './api';
 import type { Source } from './DocumentView';
 import type { Draft, DraftComposer, StyleForm } from './DraftView';
 import SettingsPanel, { type Settings } from './SettingsPanel';
+import { ModuleHost, ModuleManagerView, type InstalledModule } from './ModuleView';
 
 const ChatView = lazy(() => import('./ChatView'));
 const DocumentView = lazy(() => import('./DocumentView'));
@@ -11,7 +12,6 @@ const TaskView = lazy(() => import('./TaskView'));
 const ActivityView = lazy(() => import('./ActivityView'));
 const WorkStateView = lazy(() => import('./WorkStateView'));
 const TimeModelView = lazy(() => import('./TimeModelView'));
-const EveningPlanView = lazy(() => import('./EveningPlanView'));
 const ResearchView = lazy(() => import('./ResearchView'));
 const VaultView = lazy(() => import('./VaultView'));
 const ChatRulesView = lazy(() => import('./ChatRulesView'));
@@ -25,18 +25,22 @@ const UnifiedSearchView = lazy(() => import('./UnifiedSearchView'));
 const ContactView = lazy(() => import('./ContactView'));
 const MemoryTimelineView = lazy(() => import('./MemoryTimelineView'));
 
-type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'life_events' | 'time_model' | 'evening_plans' | 'work_states' | 'activity' | 'plan_rules' | 'vault';
+type Page = 'status' | 'chat' | 'chat_rules' | 'skills' | 'documents' | 'unified_search' | 'file_graph' | 'code_projects' | 'learning' | 'memory_review' | 'drafts' | 'draft_rules' | 'research' | 'tasks' | 'contacts' | 'life_events' | 'time_model' | 'work_states' | 'activity' | 'plan_rules' | 'vault' | 'modules' | `module:${string}`;
 type QuickCapture = { text: string; files: string[]; notice: string };
 type SearchSourceRequest =
   | { kind: 'project'; id: string; serial: number;
-      match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task'; id: string } }
+      match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task' | 'session'; id: string } }
   | { kind: 'document' | 'memory'; id: string; serial: number };
 type ReminderCount = { read_at: string | null; focus_suppressed: boolean; focus_deferred_at: string | null; priority: number };
 type FocusStatus = { active: boolean };
-const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['life_events', 'Lebenschronik'], ['time_model', 'Zeitmodell'], ['evening_plans', 'Abendplanung'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge']];
+const pages: [Page, string][] = [['status', 'Übersicht'], ['chat', 'Chat'], ['chat_rules', 'Chat-Regeln'], ['skills', 'Chat-Skills'], ['documents', 'Dokumente'], ['unified_search', 'Suche'], ['file_graph', 'Datei-Graph'], ['code_projects', 'Codeprojekte'], ['learning', 'Lernen'], ['memory_review', 'Gedächtnis'], ['drafts', 'Entwürfe'], ['draft_rules', 'Entwurfsregeln'], ['research', 'Recherche'], ['tasks', 'Aufgaben'], ['contacts', 'Kontakte'], ['life_events', 'Lebenschronik'], ['time_model', 'Zeitmodell'], ['work_states', 'Arbeitsstände'], ['activity', 'Aktivität'], ['plan_rules', 'Planregeln'], ['vault', 'Zugänge'], ['modules', 'Module']];
 
 export default function App() {
   const [page, setPage] = useState<Page>('status');
+  const [modules, setModules] = useState<InstalledModule[]>([]);
+  const [moduleError, setModuleError] = useState('');
+  const [openedModules, setOpenedModules] = useState<string[]>([]);
+  const [moduleReloadRequired, setModuleReloadRequired] = useState(false);
   const [documentsOpened, setDocumentsOpened] = useState(false);
   const [unifiedSearchOpened, setUnifiedSearchOpened] = useState(false);
   const [fileGraphOpened, setFileGraphOpened] = useState(false);
@@ -52,7 +56,6 @@ export default function App() {
   const [requestedResearchReport, setRequestedResearchReport] = useState('');
   const [workStatesOpened, setWorkStatesOpened] = useState(false);
   const [timeModelOpened, setTimeModelOpened] = useState(false);
-  const [eveningPlansOpened, setEveningPlansOpened] = useState(false);
   const [vaultOpened, setVaultOpened] = useState(false);
   const [chatRulesOpened, setChatRulesOpened] = useState(false);
   const [skillsOpened, setSkillsOpened] = useState(false);
@@ -108,6 +111,10 @@ export default function App() {
   const unreadRequest = useRef(0);
   const modelReady = Boolean(health?.configured) && !error;
   const navigate = (target: Page, fromSearchSource = false) => {
+    if (target.startsWith('module:')) {
+      const moduleId = target.slice(7);
+      setOpenedModules((current) => current.includes(moduleId) ? current : [...current, moduleId]);
+    }
     if (!fromSearchSource && (target === 'documents' || target === 'work_states'))
       setRequestedSource(null);
     if (target === 'documents') setDocumentsOpened(true);
@@ -122,7 +129,6 @@ export default function App() {
     if (target === 'research') setResearchOpened(true);
     if (target === 'work_states') setWorkStatesOpened(true);
     if (target === 'time_model') setTimeModelOpened(true);
-    if (target === 'evening_plans') setEveningPlansOpened(true);
     if (target === 'vault') setVaultOpened(true);
     if (target === 'chat_rules') setChatRulesOpened(true);
     if (target === 'skills') setSkillsOpened(true);
@@ -142,6 +148,12 @@ export default function App() {
       if (request === healthRequest.current) setError(cause.message);
     });
   }, []);
+  const refreshModules = useCallback(() => {
+    void api<InstalledModule[]>('/modules').then((items) => {
+      setModules(items);
+      setModuleError('');
+    }).catch((cause: Error) => setModuleError(cause.message));
+  }, []);
   const refreshUnreadReminders = useCallback(() => {
     const request = ++unreadRequest.current;
     void Promise.all([api<ReminderCount[]>('/notifications'), api<FocusStatus>('/focus')])
@@ -159,6 +171,12 @@ export default function App() {
     const timer = window.setInterval(refreshHealth, 10_000);
     return () => { ++healthRequest.current; window.clearInterval(timer); };
   }, [refreshHealth]);
+
+  useEffect(() => {
+    refreshModules();
+    const timer = window.setInterval(refreshModules, 10_000);
+    return () => window.clearInterval(timer);
+  }, [refreshModules]);
 
   useEffect(() => {
     refreshUnreadReminders();
@@ -188,9 +206,12 @@ export default function App() {
     <aside className="sidebar">
       <h1>Jarvis</h1>
       <p>Persönlicher Assistent · lokal</p>
-      <nav aria-label="Bereiche">{pages.map(([id, label]) => <button key={id} className={page === id ? 'selected' : ''} onClick={() => navigate(id)}>{label}{id === 'tasks' && unreadReminders > 0 ? ` · ${unreadReminders} neu` : ''}</button>)}</nav>
+      <nav aria-label="Bereiche">{pages.map(([id, label]) => <button key={id} className={page === id ? 'selected' : ''} onClick={() => navigate(id)}>{label}{id === 'tasks' && unreadReminders > 0 ? ` · ${unreadReminders} neu` : ''}</button>)}
+        {modules.filter((item) => item.enabled).map((item) => <button key={item.id} className={page === `module:${item.id}` ? 'selected' : ''} onClick={() => navigate(`module:${item.id}`)}>{item.navigation}</button>)}
+      </nav>
     </aside>
     <main>
+      {moduleReloadRequired && <section className="card" role="status"><strong>Modul aktualisiert.</strong> Lade Jarvis neu, damit die neue Moduloberfläche verwendet wird. <button onClick={() => window.location.reload()}>Jarvis neu laden</button></section>}
       {page === 'chat' && (quickCapture || captureError) && <section className="card" role="status">
         <div className="card-heading"><h3>Hotkey-Auswahl</h3><button onClick={() => { setQuickCapture(null); setCaptureError(''); }}>Schließen</button></div>
         {captureError && <p className="notice error">{captureError}</p>}
@@ -215,13 +236,22 @@ export default function App() {
             health ? <><p>{health.message}</p><dl><dt>Provider</dt><dd>{health.provider}</dd><dt>Modell</dt><dd>{health.model ?? 'Nicht eingerichtet'}</dd></dl></> : <p>Verbindung wird geprüft.</p>}
           <div className="item-actions"><button onClick={refreshHealth}>Status prüfen</button></div>
         </section>
+        <section className="card" aria-live="polite">
+          <div className="card-heading"><h3>Module</h3><span className={moduleError || modules.some((item) => item.error) ? 'badge error' : 'badge ok'}>{modules.filter((item) => item.enabled).length} aktiv</span></div>
+          {moduleError ? <p className="notice error">Modulstatus nicht erreichbar: {moduleError}</p> :
+            modules.length ? <ul>{modules.map((item) => <li key={item.id}>{item.name}: {item.enabled ? 'aktiv' : 'inaktiv'}{item.error ? ` · ${item.error}` : ''}</li>)}</ul> :
+              <p>Keine optionalen Module installiert.</p>}
+          <button onClick={() => navigate('modules')}>Module verwalten</button>
+        </section>
         <section className="card muted"><h3>Einrichtung</h3><p>Der Chat antwortet erst, wenn ein lokales Ollama-Modell läuft oder OpenRouter mit Schlüssel und Modell eingerichtet ist. Es werden keine Beispielantworten als echte Ergebnisse gezeigt.</p></section>
         <SettingsPanel healthStatus={health?.status || 'starting'} visible={page === 'status'} onSaved={refreshHealth} settings={settingsDraft} setSettings={setSettingsDraft} />
       </div>
       <Suspense fallback={<section className="card" role="status">Bereich wird geladen…</section>}>
+      {moduleError && (page === 'modules' || page.startsWith('module:')) &&
+        <p className="notice error" role="alert">Modulstatus nicht erreichbar: {moduleError}</p>}
       {['chat', 'drafts', 'research', 'activity'].includes(page) &&
         <ModelChoiceBanner key={page} task={page === 'drafts' ? 'draft' : page === 'research' ? 'research' : page === 'activity' ? 'plan' : 'chat'} />}
-      {page === 'status' ? null : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
+      {page === 'status' ? null : page === 'modules' ? <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page.startsWith('module:') ? modules.some((candidate) => candidate.id === page.slice(7) && candidate.enabled) ? null : <ModuleManagerView modules={modules} onChanged={refreshModules} onUpgraded={() => setModuleReloadRequired(true)} /> : page === 'chat' ? <ChatView configured={modelReady} setupMessage={error || health?.message || 'Verbindung wird geprüft'} provider={health?.provider || 'ollama'} draft={chatDraft} setDraft={setChatDraft} focusOnCapture={captureFocus} selectedSkillId={selectedSkillId} setSelectedSkillId={setSelectedSkillId} onSkills={() => navigate('skills')} onActivity={() => navigate('activity')} onPrepareTask={(title) => { setSuggestedTaskTitle(title); navigate('tasks'); }} onPrepareResearch={(question) => { setSuggestedResearchQuestion(question); navigate('research'); }} requestedChatSource={requestedChatSource} onSourceOpened={() => setRequestedChatSource(null)} requestedAttachments={requestedChatAttachments} onAttachmentsPrepared={() => setRequestedChatAttachments(null)} /> :
         page === 'documents' ? null :
         page === 'unified_search' ? null :
         page === 'file_graph' ? null :
@@ -237,12 +267,15 @@ export default function App() {
         page === 'contacts' ? null :
         page === 'life_events' ? <MemoryTimelineView requestedEvent={requestedLifeEvent} onOpenContact={(id) => { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); }} onPrepareDraft={(contactId, eventId, version, title) => { setSelectedSources([]); setDraftComposer((current) => ({ ...current, kind: 'text', brief: `Schreibe eine persönliche Nachricht über „${title}“.`, inputText: '', selectedSamples: [], allowCloud: false, recipientContactId: contactId, recipientExpectedVersion: null, recipientNoteIds: [], recipientEvents: [{ event_id: eventId, expected_version: version }] })); navigate('drafts'); }} /> :
         page === 'time_model' ? null :
-        page === 'evening_plans' ? null :
         page === 'work_states' ? null :
         page === 'activity' ? null :
         page === 'vault' ? null :
         <><h2>{pages.find(([id]) => id === page)?.[1]}</h2><p className="intro">Dieser Bereich wird derzeit implementiert. Es sind noch keine Daten oder Aktionen verfügbar.</p></>}
       {documentsOpened && <div hidden={page !== 'documents'}><DocumentView visible={page === 'documents'} requestedSource={requestedSource?.kind === 'document' || requestedSource?.kind === 'memory' ? requestedSource : null} onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onLearn={(sources) => { setSelectedSources(sources); navigate('learning'); }} onSourcesInvalidated={() => setSelectedSources([])} /></div>}
+      {openedModules.map((moduleId) => {
+        const item = modules.find((candidate) => candidate.id === moduleId && candidate.enabled);
+        return item ? <div key={moduleId} hidden={page !== `module:${moduleId}`}><ModuleHost module={item} visible={page === `module:${moduleId}`} /></div> : null;
+      })}
       {unifiedSearchOpened && <div hidden={page !== 'unified_search'}><UnifiedSearchView onDraft={(sources) => { setSelectedSources(sources); navigate('drafts'); }} onOpenSource={(kind, id, match) => { if (kind === 'life_event') { setRequestedLifeEvent({ id, serial: ++sourceOpenSequence.current }); navigate('life_events', true); } else if (kind === 'contact') { setRequestedContact({ id, serial: ++sourceOpenSequence.current }); navigate('contacts'); } else { setRequestedSource(kind === 'project' ? { kind, id, match, serial: ++sourceOpenSequence.current } : { kind, id, serial: ++sourceOpenSequence.current }); navigate(kind === 'project' ? 'work_states' : 'documents', true); } }} localChatReady={modelReady && health?.provider === 'ollama'} onLocalChat={(files) => { setRequestedChatSource(null); setRequestedChatAttachments(files); navigate('chat'); }} /></div>}
       {fileGraphOpened && <div hidden={page !== 'file_graph'}><FileGraphView visible={page === 'file_graph'} onDocuments={() => navigate('documents')} /></div>}
       {codeProjectsOpened && <div hidden={page !== 'code_projects'}><CodeProjectView visible={page === 'code_projects'} onDocuments={() => navigate('documents')} /></div>}
@@ -251,9 +284,8 @@ export default function App() {
       {researchOpened && <div hidden={page !== 'research'}><ResearchView visible={page === 'research'} configured={modelReady} provider={health?.provider || 'ollama'} requestedReportId={requestedResearchReport} onReportLoaded={() => setRequestedResearchReport('')} suggestedQuestion={suggestedResearchQuestion} onSuggestionTaken={() => setSuggestedResearchQuestion('')} /></div>}
       {tasksOpened && <div hidden={page !== 'tasks'}><TaskView visible={page === 'tasks'} onNotificationsChanged={refreshUnreadReminders} suggestedTitle={suggestedTaskTitle} onSuggestionTaken={() => setSuggestedTaskTitle('')} /></div>}
       {timeModelOpened && <div hidden={page !== 'time_model'}><TimeModelView visible={page === 'time_model'} /></div>}
-      {eveningPlansOpened && <div hidden={page !== 'evening_plans'}><EveningPlanView visible={page === 'evening_plans'} /></div>}
       {workStatesOpened && <div hidden={page !== 'work_states'}><WorkStateView visible={page === 'work_states'} requestedSource={requestedSource?.kind === 'project' ? requestedSource : null} onTasks={() => navigate('tasks')} onResearch={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
-      {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} onChatEvidence={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} onResearchEvidence={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} /></div>}
+      {activityOpened && <div hidden={page !== 'activity'}><ActivityView provider={health?.provider || 'ollama'} visible={page === 'activity'} onChatEvidence={(chatId, messageId) => { setRequestedChatSource({ chatId, messageId }); navigate('chat'); }} onResearchEvidence={(reportId) => { setRequestedResearchReport(reportId); navigate('research'); }} onOpenModule={(moduleId) => navigate(modules.some((item) => item.id === moduleId && item.enabled) ? `module:${moduleId}` as Page : 'modules')} /></div>}
       {vaultOpened && <div hidden={page !== 'vault'}><VaultView visible={page === 'vault'} onChanged={refreshHealth} /></div>}
       {chatRulesOpened && <div hidden={page !== 'chat_rules'}><ChatRulesView visible={page === 'chat_rules'} /></div>}
       {skillsOpened && <div hidden={page !== 'skills'}><SkillView visible={page === 'skills'} /></div>}

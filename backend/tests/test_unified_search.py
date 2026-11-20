@@ -17,6 +17,7 @@ from jarvis.project_person_tasks import ProjectPersonTaskStore
 from jarvis.source_preferences import SourcePreferences
 from jarvis.tasks import TaskStore
 from jarvis.unified_search import search
+from jarvis.work_sessions import WorkSessionStore
 from jarvis.work_states import WorkStateStore
 
 
@@ -87,6 +88,46 @@ def test_explicit_project_memory_search_keeps_saved_provenance(tmp_path):
     assert search(db, "Wohnungsunterlagen", "project")["results"][0]["match_id"] == link["id"]
     links.delete(project["id"], link["id"], project["version"], link["version"])
     assert search(db, "Wohnungsunterlagen", "project")["results"] == []
+
+
+def test_manual_session_note_is_local_project_hit_without_file_path(tmp_path):
+    db, _docs, states, _, document, _, project, file = sample(tmp_path)
+    project = states.update(project["id"], project["version"], project["project"],
+                            project["confirmed"], project["open_questions"],
+                            project["next_step"], [document["id"]], [], [])
+    notes = WorkSessionStore(db, states)
+    note = notes.create(project["id"], project["version"], "Steuerplan abgeglichen",
+                        "Frist beim Finanzamt offen", "Maria wegen Bescheid fragen",
+                        [document["id"]], [], [])
+    hit = search(db, "Steuerplan", "project")["results"][0]
+    assert hit["id"] == project["id"] and hit["match_kind"] == "session"
+    assert hit["match_id"] == note["id"]
+    assert "Sitzungsnotiz vom" in hit["excerpt"]
+    assert "Erreicht: Steuerplan abgeglichen" in hit["excerpt"]
+    assert str(file.parent) not in hit["excerpt"]
+    assert "Mietvertrag" not in hit["excerpt"]
+    assert search(db, "Finanzamt", "all")["counts"]["project"] == 1
+    assert search(db, "Steuerplan", "document")["counts"]["document"] == 0
+    states.update(project["id"], project["version"], "Orion neu", "", "", "Weiter",
+                  [document["id"]], [], [])
+    assert search(db, "Steuerplan", "project")["results"][0]["match_id"] == note["id"]
+    notes.delete(project["id"], note["id"])
+    assert search(db, "Steuerplan", "project")["results"] == []
+
+
+def test_session_search_prefers_latest_equal_match_and_reports_limit(tmp_path, monkeypatch):
+    db, _docs, states, _, _, _, project, _ = sample(tmp_path)
+    notes = WorkSessionStore(db, states)
+    first = notes.create(project["id"], project["version"], "Protokoll gesichtet",
+                         "", "Weiter", [], [], [])
+    latest = notes.create(project["id"], project["version"], "Protokoll gesichtet",
+                          "", "Weiter", [], [], [])
+    assert search(db, "Protokoll", "project")["results"][0]["match_id"] == latest["id"]
+    monkeypatch.setattr("jarvis.unified_search.MAX_PROJECT_SESSION_ROWS", 1)
+    result = search(db, "Protokoll", "project")
+    assert result["limited"] and result["counts"]["project"] == 1
+    assert result["results"][0]["match_id"] == latest["id"]
+    assert first["id"] != latest["id"]
 
 
 def test_project_memory_search_reports_bounded_candidates(tmp_path, monkeypatch):

@@ -25,20 +25,33 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
 const taskStatus: Record<string, string> = { open: 'Offen', done: 'Erledigt',
   geloescht: 'Gelöscht' };
 
-export default function WorkSessionView({ state }: { state: State }) {
+export default function WorkSessionView({ state, highlightId }: {
+  state: State; highlightId?: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState<Form>(emptyForm);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
   const endpoint = `/work-states/${state.id}/sessions`;
-  const load = async () => setSessions(await api<Session[]>(endpoint));
+  const load = async () => { setSessions(await api<Session[]>(endpoint)); setLoaded(true); };
   useEffect(() => {
     let current = true;
-    void api<Session[]>(endpoint).then((items) => { if (current) setSessions(items); })
+    void api<Session[]>(endpoint).then((items) => { if (current) { setSessions(items); setLoaded(true); } })
       .catch((error: Error) => { if (current) setNotice(error.message); });
     return () => { current = false; };
   }, [endpoint, state.version]);
+  useEffect(() => {
+    if (!highlightId || !loaded) return;
+    if (!sessions.some((item) => item.id === highlightId)) {
+      setNotice('Die gesuchte Sitzungsnotiz wurde inzwischen entfernt. Suche aktualisieren.');
+      return;
+    }
+    const frame = window.requestAnimationFrame(() =>
+      window.document.getElementById(`project-session-${highlightId}`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightId, loaded, sessions]);
   const toggle = (field: 'document_ids' | 'task_ids' | 'links', id: string) =>
     setForm((previous) => ({ ...previous, [field]: previous[field].includes(id)
       ? previous[field].filter((item) => item !== id) : [...previous[field], id] }));
@@ -101,7 +114,8 @@ export default function WorkSessionView({ state }: { state: State }) {
     </div>
     <h4>Gespeicherte Sitzungen</h4>
     {sessions.length === 0 ? <p>Noch keine Sitzungsnotiz.</p> : <div className="item-list">{sessions.map((item) =>
-      <article className="item-row" key={item.id}><div>
+      <article className={`item-row${highlightId === item.id ? ' source-opened' : ''}`}
+        id={`project-session-${item.id}`} key={item.id}><div>
         <strong>{new Date(item.created_at).toLocaleString('de-DE')} · {item.project_snapshot}</strong>
         <small>Arbeitsstand-Fassung {item.state_version}{item.state_changed ? ' · Arbeitsstand inzwischen geändert' : ''}</small>
         <p><strong>Erreicht:</strong> {item.result}</p>

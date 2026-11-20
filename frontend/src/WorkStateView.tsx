@@ -147,7 +147,7 @@ const fileStatus: Record<string, string> = { unveraendert: 'Unverändert', geaen
 export default function WorkStateView({ visible, onTasks, onResearch, requestedSource }: {
   visible: boolean; onTasks: () => void; onResearch: (reportId: string) => void;
   requestedSource: { kind: 'project'; id: string; serial: number;
-    match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task'; id: string } } | null }) {
+    match?: { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task' | 'session'; id: string } } | null }) {
   const [items, setItems] = useState<WorkSummary[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -615,7 +615,9 @@ export default function WorkStateView({ visible, onTasks, onResearch, requestedS
         <div className="item-row" key={item.id}><div><strong>{item.project}</strong><small>Weiter: {item.next_step} · {new Date(item.updated_at).toLocaleString('de-DE')}</small></div>
           <button disabled={busy} onClick={() => select(item.id)}>Öffnen</button></div>)}</div>}
     </section>
-    {active && !editingId && <WorkSessionView key={active.id} state={active} />}
+    {active && !editingId && <WorkSessionView key={active.id} state={active}
+      highlightId={requestedSource?.id === active.id && requestedSource.match?.kind === 'session'
+        ? requestedSource.match.id : undefined} />}
     {active && !editingId && <section id={`search-source-project-${active.id}`}
       className={`card${requestedSource?.id === active.id ? ' source-opened' : ''}`}>
       <div className="card-heading"><h3>{active.project}</h3><small>Stand {active.version}</small></div>

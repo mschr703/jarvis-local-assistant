@@ -6,7 +6,7 @@ import type { Source } from './DocumentView';
 type Kind = 'document' | 'memory' | 'project' | 'life_event' | 'contact';
 type SemanticKind = Exclude<Kind, 'contact'>;
 type SourceKind = 'all' | Kind;
-type ProjectMatch = { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task'; id: string };
+type ProjectMatch = { kind: 'document' | 'task' | 'alias' | 'person' | 'memory' | 'person_task' | 'session'; id: string };
 type Hit = { kind: Kind; id: string; title: string; excerpt: string; source: string;
   score: number; policy?: string; document_id?: string; passage_id?: number | null;
   page?: number | null; sha256?: string; version?: number; preferred?: boolean;

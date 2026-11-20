@@ -1,6 +1,6 @@
 # Jarvis Local
 
-Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, Abendplanung, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Ohne OpenRouter-Key verwendet Jarvis das lokale Ollama-Modell `qwen3:4b-instruct`. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein.
+Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Die Abendplanung ist ein optionales [privates Modul](docs/MODULES.md). Ohne OpenRouter-Key verwendet Jarvis das lokale Ollama-Modell `qwen3:4b-instruct`. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Die [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; weitere bislang eingebaute Bereiche werden schrittweise ausgelagert.
 
 ## Voraussetzungen
 
@@ -13,7 +13,7 @@ Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, En
 PowerShell öffnen und den Quellcode laden:
 
 ```powershell
-git clone https://github.com/mschr703/jarvis-local-assistant.git
+git clone https://github.com/mschr703CODEX/jarvis-local-assistant.git
 Set-Location jarvis-local-assistant
 ```
 
@@ -184,6 +184,82 @@ Mit **Lebensereignisse ab/bis** kannst du die gemeinsame Stichwortsuche und die 
 
 Für Kontakte in der gemeinsamen **Stichwortsuche** den Quelltyp **Kontakte** wählen oder **Alle Quellen** beibehalten. Die Suche berücksichtigt Name, unterscheidenden Kontext, Beziehung sowie je bis zu fünf zuletzt geänderte bestätigte Notizen, Vorhaben und bewusst verknüpfte Lebensereignisse. Sie prüft höchstens 2000 zuletzt geänderte Kontakte und zeigt höchstens zehn pro Quellart. Ein Treffer nennt die manuelle Quelle und öffnet die konkrete Kontakt-ID; gleichnamige Personen bleiben getrennt. Akzente und Großschreibung werden ignoriert. Es erfolgt kein Modellaufruf und keine automatische Übernahme in Chat oder Entwurf. Für **sinngemäße** Kontaktsuche den Kontakte-Bereich nutzen. Der Edge-Test `backend\.venv\Scripts\python.exe scripts/smoke_life_event_search_ui.py` prüft den direkten Sprung bei 390 Pixel. API: `GET /search/unified?q=...&kind=contact`.
 
+### Mit aktiven Modulen im Chat sprechen
+
+Bei lokalem Ollama ist im Chat **Aktive Module bei passenden Fragen lokal lesen**
+standardmäßig eingeschaltet. Frag zum Beispiel „Welche Tagesnotiz habe ich zum
+Gartenprojekt?“ oder „Was soll ich laut der Notiz am Samstag tun?“. Jarvis wählt
+aus den aktiven Modulen bei Bedarf ein passendes lesendes Werkzeug, ruft es über
+den normalen Werkzeuglauf auf und nutzt das aktuelle Ergebnis für seine Antwort.
+Mit den optionalen Paketen `day_context` und `context_lookup` sind auch Fragen nach
+lokal gespeicherten Zeitfenstern oder einem bestätigten Projektstand möglich.
+Eine Anschlussfrage wie „Und was muss ich dafür als Nächstes tun?“ kann die
+Projektquelle erneut abrufen. Das ist eine dynamische Werkzeugwahl anhand der
+Frage und des Gesprächs, keine fest eingebaute Projekt- oder Kalenderabfolge.
+Bei allgemeinen Fragen kann das Modell ohne Werkzeug antworten. Unter der Antwort
+zeigt **Lokale Werkzeugbelege** den Werkzeugnamen, Lauf und Erfolg; der Beleg bleibt
+im Chatverlauf und im normalen Backup erhalten. Das Modul selbst muss installiert
+und aktiviert sein. Der [Modulstart](docs/MODULES.md) beschreibt die privaten
+Piloten. Bei deaktiviertem oder fehlendem Modul soll Jarvis fehlende aktuelle Daten
+benennen; Modellantworten bitte bei wichtigen Fragen anhand der Belege prüfen.
+
+Dieser erste Gesprächsschritt nutzt höchstens zwei **lesende** Modulwerkzeuge pro
+Frage und läuft nur mit Ollama. Eine lokale JSON-Wahl nutzt Werkzeugbeschreibungen
+und zwei kurze frühere Gesprächsrunden. Bei ausdrücklichen Rückfragen wie „Was muss
+ich dafür tun?“ wird die zuletzt erfolgreich genutzte lokale Quelle erneut gelesen,
+damit Jarvis beim Thema bleibt. Wenn die Rückfrage keine weitere Datenart verlangt,
+entfällt eine zweite Modellwahl; bei Terminen, Zeiten, Aufgaben, Mails oder einem
+neu benannten Thema wird neu geprüft. Allgemeine Wissens- und Denkfragen brauchen keine
+persönlichen Werkzeugdaten; auch ein fehlgeschlagener Werkzeugplaner sollte sie nicht
+blockieren. Ausdrücklich hypothetische, selbstständige Beispiele ohne Bezug auf
+aktuelle persönliche Daten gehen direkt zur Antwort. Wenn dabei „heute“, Kalender,
+gespeicherte Aufgaben oder ein Rückbezug genannt werden, bleibt der Datenabruf möglich.
+Ebenso gehen reine Begriffs- und Unterschiedsfragen ohne persönlichen Datenbezug
+direkt zur Antwort, statt für `tools: []` erst ein lokales Modell abzuwarten.
+Die Antwort soll konkrete Projektangaben nicht durch eine leere allgemeine
+Liste ersetzen und belegte Zeit von freien Fenstern unterscheiden. Die Belege der
+tatsächlich verwendeten Werkzeuge stehen im Gespräch. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
+werden nicht automatisch aus dem Chat gestartet. Bei einer Nachricht mit
+Dateianhang entfällt die Modulwerkzeugwahl vorerst; das normale Datei-Chatverfahren
+bleibt erhalten. Für OpenRouter sind lokale Chat-Werkzeuge gesperrt. Konten für
+Kalender und E-Mail sind noch nicht angeschlossen; die beiden Fragen sind derzeit
+nur mit einem tatsächlich installierten passenden Modul beantwortbar. Der echte
+Ollama-/Edge-Test mit Tagesnotizen liegt im privaten Modul-Repository unter
+`tests/smoke_conversation_ui.py` und wurde bei 390 Pixel geprüft.
+Der zusätzliche echte Projekt-Folgechat liegt unter
+`tests/smoke_context_lookup_chat.py`; der Mehrturn-Qualitätstest liegt unter
+`tests/smoke_multi_turn_chat.py`. Auf dem getesteten CPU-Laptop kann schon die
+Werkzeugwahl mit `qwen3:4b-instruct` etwa 50–150 Sekunden beanspruchen;
+die Antwortgenerierung kommt hinzu. Das Modell kann trotz dieser Leitplanken
+Fehler machen. Für wichtige Termine, Aufgaben und Entscheidungen die angezeigten
+lokalen Belege prüfen.
+
+Optional kann ein kleineres, lokal installiertes Modell nur die Werkzeugwahl
+übernehmen: `ollama pull qwen3:1.7b` ausführen, in `.env`
+`JARVIS_OLLAMA_PLANNER_MODEL=qwen3:1.7b` ergänzen und Jarvis neu starten.
+`JARVIS_OLLAMA_MODEL` erzeugt weiterhin die eigentliche Antwort. Fehlt das
+optionale Planermodell, versucht Jarvis die Werkzeugwahl einmal mit dem
+normalen Ollama-Modell; ein Planer-Timeout führt nicht zu einer zweiten langen
+Anfrage. Die Modellwahl wird im lokalen Nutzungsbeleg sichtbar. In einem
+synthetischen Zwei-Fragen-Test auf dem CPU-Laptop brauchte das kleine Modell
+für die Werkzeugwahl etwa 16–23 statt 46–68 Sekunden; die Dauer echter
+Gespräche hängt zusätzlich von Modellwechsel, Datenmenge und Antwortlänge ab.
+Das kleinere Modell kann die Werkzeugwahl schlechter treffen. Für persönliche
+Fakten die angezeigten Belege kontrollieren.
+
+Ein isolierter Echtmodelltest für allgemeines Schlussfolgern, eine Korrektur im
+selben Chat, einen Themenwechsel und eine mehrdeutige Formulierung läuft ohne
+private Module und ohne Cloud-Schlüssel:
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\smoke_reasoning_chat.py
+```
+
+Die [Messwerte und offenen Qualitätsfälle](docs/MODEL_EVAL.md) nennen auch die
+aktuell nicht bestandene Begriffseinordnung beim 4B-Standardmodell. Ein
+Fehlschlag dieser strengen Echtmodellprobe wird nicht als bestandener Test
+gewertet.
+
 ### Eigene Dateien an eine Chatnachricht anhängen
 
 Unter „Chat“ bei lokalem Ollama bis zu drei TXT-, Markdown-, DOCX- oder Text-PDF-Dateien mit jeweils höchstens 512 KiB auswählen, eine konkrete Frage eingeben und „Senden“ drücken. PNG/JPEG/WebP sind ebenfalls möglich; pro Nachricht höchstens ein Bild. Alle ausgewählten Dateien erscheinen in ihrer Upload-Reihenfolge im Modellkontext und werden mit derselben Nachricht verknüpft. TXT und Markdown müssen UTF-8 sein; bei DOCX wird nur der lesbare Haupttext übernommen. Text-PDFs werden in einem auf acht Sekunden begrenzten Kindprozess gelesen; höchstens die ersten zwölf Seiten und 8.000 Zeichen gehen mit Seitenangaben in den Modellkontext. Gescannte, verschlüsselte oder beschädigte PDFs werden abgewiesen. Bei den anderen Textformaten ist die Textmenge je Datei ebenfalls auf 8.000 Zeichen begrenzt; alle Auszüge zusammen müssen in das eingestellte Kontextbudget passen. Jarvis zeigt die Auswahl vor dem Senden; im Chatverlauf stehen je Datei Name, Größe, SHA-256 und die zugehörige Nachricht. „Unveränderte Kopie herunterladen“ gibt die lokal gespeicherte Originaldatei zurück. Der Chat behält den Bezug nach einem Neustart, und das normale Backup/Restore nimmt alle Kopien mit. Das Löschen des Gesprächs entfernt auch seine Kopien.
@@ -240,6 +316,12 @@ Unter „Chat“ lassen sich bestehende Gespräche mit „Gespräche suchen“ n
 ### Nächste Schritte aus einer Chatantwort vorbereiten
 
 Unter der letzten fertig gespeicherten Chatantwort startet „Nächste Schritte vorschlagen“ auf Wunsch **einen lokalen Ollama-Aufruf**. Jarvis zeigt höchstens zwei kurze Vorschläge: eine Aufgabe oder eine öffentliche Recherche. Den Modelltext prüfen; „Ausblenden“ entfernt einen Vorschlag aus der aktuellen Ansicht. „Aufgabe vorbereiten“ beziehungsweise „Recherche vorbereiten“ öffnet das jeweilige vorhandene Formular mit editierbarem Text. Erst „Aufgabe speichern“ legt die Aufgabe an; erst „Recherche starten“ sucht und liest öffentliche Quellen. Bestehende Formulareingaben werden vor einer Übernahme geschützt und können bewusst beibehalten werden. Neue Chatnachrichten verwerfen ältere Vorschläge. Es gibt keinen automatischen Werkzeugaufruf, keine automatische Websuche und keinen OpenRouter-Aufruf für diese Vorschläge. Ohne laufendes Ollama ist die Funktion nicht verfügbar.
+
+### Aktion aus einer freien Bitte vorschlagen
+
+Nach einer fertigen Antwort im Chat „Aktion vorschlagen“ wählen. Jarvis gibt die letzte Bitte und die verfügbaren aktiven lokalen Schreib- und Öffnungswerkzeuge an Ollama. Der öffentliche Kern hat keine festen Regeln für einzelne Privatmodule. Wenn die Bitte nur eine Frage ist oder kein passendes Werkzeug existiert, wird keine Aktion vorgeschlagen. Bei fehlenden oder mehrdeutigen Angaben kann Ollama stattdessen eine kurze Rückfrage anzeigen. Ein konkreter Vorschlag zeigt Werkzeug, Wirkung, vollständig geprüfte Argumente und die Lesequellen der letzten Chatantwort, falls diese solche Quellen benutzt hat; für den Vorschlag werden sie nicht neu gelesen. „Verwerfen“ beendet die Vorschau ohne Lauf. Bei „Zur Freigabe vorbereiten“ wird ein schreibender Auftrag angelegt; unter **Aktivität → Aufträge** müssen die unveränderten Argumente ausdrücklich freigegeben oder abgelehnt werden. Nach einem erfolgreichen Modullauf führt „Modul öffnen“ direkt zu dessen Ansicht. „Jetzt lokal öffnen“ startet ein Öffnungswerkzeug erst nach diesem Klick. Die Modellwahl selbst öffnet nichts, speichert nichts und sendet keine Nachricht.
+
+Dieses erste Teilstück erzeugt maximal **eine** Aktion aus der letzten Bitte. Für Bezüge wie „mach daraus einen Entwurf“ erhält Ollama bis zu sechs frühere, gekürzte Beiträge desselben Gesprächs als Kontext; nur die letzte Bitte kann eine neue Aktion auslösen. Es ist kein automatischer mehrstufiger Mail-/Kalenderablauf; dafür müssen die entsprechenden Module installiert und aktiv sein. Der lokale Modellvorschlag kann eine Absicht falsch verstehen: Argumente und Ziel vor dem Start prüfen. Der reproduzierbare Echtmodelltest `backend\.venv\Scripts\python.exe scripts\smoke_action_proposal.py` prüft synthetische Beispiele und die Schreibfreigabe ohne persönliche Daten.
 
 ### Ältere Chatbeiträge lokal zusammenfassen
 
@@ -331,6 +413,8 @@ Unter „Arbeitsstände“ „Neuen Arbeitsstand anlegen“ wählen. Projektname
 Nach einem Neustart den Arbeitsstand unter „Arbeitsstände“ öffnen. Jede Datei zeigt den beim Sichern erfassten Hash und ihren aktuellen Zustand: unverändert, geändert, fehlend, ausgeschlossen oder nicht mehr verfügbar. Nur eine unveränderte und weiterhin freigegebene Datei lässt sich über „Datei öffnen“ starten; das Werkzeug prüft ihren Hash unmittelbar vor der Öffnung erneut. „Link prüfen“ startet bewusst das bestehende eingeschränkte Browserwerkzeug und meldet Erfolg oder Fehler. Aufgaben zeigen ihren aktuellen Status, auch wenn sie inzwischen erledigt oder gelöscht wurden. Der Arbeitsstand kann mit Versionsprüfung bearbeitet oder in zwei Schritten gelöscht werden; die referenzierten Dateien und Aufgaben bleiben dabei bestehen. Links werden beim Speichern syntaktisch geprüft, ihre Erreichbarkeit erst nach Klick auf „Link prüfen“. Es findet keine automatische Hintergrundaufnahme statt.
 
 Unter „Sitzungsnotizen & Wiedereinstieg“ kannst du innerhalb eines geöffneten Arbeitsstands nach einer Arbeitssitzung **Erreichtes Ergebnis**, offene Fragen und den nächsten Schritt manuell festhalten. Wähle bei Bedarf bereits zugeordnete, unveränderte Dateien sowie Aufgaben und Links als Belege aus und klicke „Sitzungsnotiz sichern“. Die Notiz speichert den damaligen Projektnamen, die Arbeitsstand-Fassung und Quellverweise als Snapshot. Nach einem Neustart zeigt sie die damaligen und aktuellen Aufgabentitel, Aufgabenstatus, Dateiänderungen und entfernte Projektzuordnungen; „Notizen neu prüfen“ aktualisiert diese Anzeige. „Dateibeleg ansehen“ und „Aufgabe ansehen“ springen zu den Details desselben Arbeitsstands. Ein Link öffnet sich nur nach dem Klick auf „Link öffnen“ in einem neuen Tab; seine Erreichbarkeit und sein Inhalt bleiben bis zur eigenen Prüfung ungeprüft. Die Notiz bestätigt keine Ergebnisse automatisch und erledigt keine Aufgaben. „Entfernen…“ löscht eine Notiz erst nach dem zweiten Klick. Der isolierte 390-Pixel-Edge-Test läuft mit `backend\.venv\Scripts\python.exe scripts/smoke_work_sessions_ui.py`.
+
+Unter „Suche“ findet die lokale Stichwortsuche auch Ergebnis, offene Fragen und nächsten Schritt dieser manuell gespeicherten Sitzungsnotizen. Den Quelltyp „Arbeitsstände“ wählen, Suchwort eingeben und „Alle lokalen Quellen durchsuchen“ klicken. Der Treffer nennt die passende Notiz mit Datum; „Passenden Beleg öffnen“ springt direkt dorthin. Die Suche berücksichtigt höchstens 2000 aktuelle Projekt-Notizen als Kandidaten und meldet Begrenzungen. Datei-Snapshot-Pfade und Dateiinhalt werden nicht als Notiz-Suchtext übernommen; die Quelle im Arbeitsstand selbst bleibt für die Prüfung zugänglich. Eine gelöschte Notiz verschwindet bei der nächsten Suche. API: `GET /search/unified?q=...&kind=project`. Der isolierte Edge-Test läuft mit `backend\.venv\Scripts\python.exe scripts/smoke_work_session_search_ui.py`.
 
 Unter „Personen im Projekt“ lässt sich zu diesem Arbeitsstand eine Person mit Beziehung und Herkunftsnotiz ausdrücklich eintragen. Optional eine der bereits ausgewählten, unveränderten Projektdateien als zusätzlichen Beleg wählen; Jarvis speichert ihren Pfad und SHA-256 zu dieser Beziehung. Die Notiz allein ist als **eigene Angabe** gekennzeichnet, nicht als geprüfte Tatsache. „Status neu prüfen“ zeigt geänderte, entzogene oder im Arbeitsstand erneuerte Quelldateien. Eine Beziehung kann mit Versionsschutz korrigiert und nach Bestätigung entfernt werden. Personenangaben bleiben lokal und werden nicht automatisch für Chat, Recherche oder ein dauerhaftes Gedächtnis genutzt. Das Löschen des Arbeitsstands entfernt seine Personenbeziehungen; die zugrunde liegenden Dateien und Aufgaben bleiben bestehen.
 
@@ -436,6 +520,8 @@ Unter „Zeitmodell“ wiederkehrende feste Zeiten mit Wochentagen, IANA-Zeitzon
 
 ## Abendplanung (A22a)
 
+Die Abendplanung erscheint erst nach Installation und Aktivierung des privaten Pakets `evening_plans`. Die genauen Windows-Befehle stehen in der [Modulanleitung](docs/MODULES.md). Wer nur den öffentlichen Kern installiert, sieht diesen Navigationspunkt nicht. Bereits lokal gespeicherte Abendpläne bleiben nach der Umstellung und nach Backup/Restore in der Datenbank; nach Neuinstallation des Pakets lassen sie sich wieder öffnen.
+
 Zuerst unter „Aufgaben“ offene Aufgaben anlegen und unter „Zeitmodell“ feste Termine, Wegezeiten und Puffer eintragen. Dann „Abendplanung“ öffnen, Datum, Abendbeginn, Schlafziel und Pausenrhythmus wählen, Aufgaben ankreuzen und je eine geschätzte Dauer sowie Priorität von 1 bis 5 setzen. „Plan berechnen“ zeigt die zeitlich sortierten Arbeits- und Pausenabschnitte sowie nicht eingeplante Restminuten. Höhere Priorität geht vor; bei gleicher Priorität werden frühere Fälligkeiten zuerst berücksichtigt. Abschnitte liegen nur in freien Zeitfenstern vor dem Schlafziel und nie nach einer Aufgabefrist. Ein Schlafziel vor dem Abendbeginn gilt für den Folgetag.
 
 „Plan speichern“ hält Eingaben und Ergebnis lokal fest. Nach geänderten Aufgaben oder Zeitblöcken einen gespeicherten Plan erneut öffnen; Jarvis kennzeichnet ihn als veraltet. Mit „Plan berechnen“ und „Neu berechnen und speichern“ entsteht die aktualisierte Fassung. „Neuer Plan“ beginnt einen weiteren Plan, „Diesen Plan löschen“ entfernt die aktuell geöffnete Fassung nach Bestätigung. Die Abendplanung benötigt weder Kalenderkonto noch OpenRouter-Key.
@@ -502,7 +588,7 @@ Die verschlüsselten Werte liegen in `%LOCALAPPDATA%\JarvisLocal\vault_credentia
 
 Der öffentliche Quellstand wird bei Push und Pull Request in [Windows CI](.github/workflows/ci.yml) mit gesperrten Abhängigkeiten, Ruff, Backend- und Frontendtests, Produktionsbuild und dem Datei-Scan geprüft. Der Workflow verwendet Standard-Runner ohne OpenRouter-Key, lokale Daten oder Live-Ollama; echte Modell- und Edge-Klickpfade bleiben separate lokale Prüfungen.
 
-Für einen eigenen öffentlichen Git-Push zuerst die Änderungen committen und `./scripts/push_public.ps1` in PowerShell ausführen. Der Helfer scannt den veröffentlichbaren Baum und alle von `HEAD` erreichbaren Commits nach Schlüsselmustern und privaten Dateinamen, prüft Git-Whitespace und pusht nur bei sauberem Arbeitsbaum `HEAD` nach `origin/main`. So fällt auch ein Secret auf, das in einem früheren Commit wieder gelöscht wurde. Mit `-CheckOnly` laufen die Prüfungen ohne Push bereits während der Bearbeitung. `.gitignore` schließt lokale `.env`-Varianten, Tresor-, Datenbank-, Schlüssel-, Log- und Backup-Dateien aus; `.env.example` ist die öffentliche Vorlage. Das Skript ersetzt keine bewusste Sichtung neuer Dateien vor einem Commit.
+Für einen eigenen öffentlichen Git-Push zuerst die Änderungen committen und `./scripts/push_public.ps1` in PowerShell ausführen. Der Helfer scannt den veröffentlichbaren Arbeitsbaum, die bereits gestagten Git-Blobs und alle von `HEAD` erreichbaren Commits nach Schlüsselmustern und privaten Dateinamen, prüft Git-Whitespace und pusht nur bei sauberem Arbeitsbaum `HEAD` nach `origin/main`. So fällt auch ein Secret auf, das in einem früheren Commit wieder gelöscht wurde. Mit `-CheckOnly` laufen die Prüfungen ohne Push bereits während der Bearbeitung; fehlende oder unlesbare noch getrackte Dateien werden als Befund gemeldet. `.gitignore` schließt lokale `.env`-Varianten, Tresor-, Datenbank-, Schlüssel-, Log- und Backup-Dateien aus; `.env.example` ist die öffentliche Vorlage. Das Skript ersetzt keine bewusste Sichtung neuer Dateien vor einem Commit.
 
 ```powershell
 python -m uv run --project backend pytest -q backend/tests
@@ -530,7 +616,7 @@ python -m uv run --project backend python scripts/smoke_hotkey_selection.py
 python -m uv run --project backend python scripts/smoke_hotkey_registration.py
 python -m uv run --project backend python scripts/smoke_quick_capture_ui.py
 python -m uv run --project backend python scripts/smoke_time_model_ui.py
-python -m uv run --project backend python scripts/smoke_evening_plan_ui.py
+python -m uv run --project backend python ..\jarvis-private-modules\tests\smoke_evening_plans_ui.py --core .
 python -m uv run --project backend python scripts/smoke_reminder_followup_ui.py
 python -m uv run --project backend python scripts/smoke_extension_ui.py
 python -m uv run --project backend python scripts/smoke_research_pdf_ui.py

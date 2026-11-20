@@ -640,6 +640,7 @@ def main() -> None:
                         page.get_by_role("button", name="Aufgaben", exact=True).click()
                         page.get_by_label("Aufgabe", exact=True).fill("Vorschauprobe")
                         page.get_by_label("Lokale Fälligkeit").fill("2027-10-31T02:30")
+                        page.get_by_label("IANA-Zeitzone").fill("")
                         page.get_by_label("IANA-Zeitzone").fill("Europe/Paris")
                         try:
                             page.get_by_text("Diese lokale Zeit kommt zweimal vor", exact=False).wait_for()
@@ -875,7 +876,8 @@ def main() -> None:
                         memory_row.wait_for(state="hidden")
                         page.get_by_text("Erinnerung gelöscht.").wait_for()
                         page.set_viewport_size({"width": 390, "height": 844})
-                        for section in ("Übersicht", "Chat", "Chat-Regeln", "Chat-Skills", "Dokumente", "Entwürfe", "Entwurfsregeln", "Recherche", "Aufgaben", "Zeitmodell", "Abendplanung", "Arbeitsstände", "Aktivität", "Planregeln", "Zugänge"):
+                        expect(page.get_by_role("button", name="Abendplanung", exact=True)).to_have_count(0)
+                        for section in ("Übersicht", "Chat", "Chat-Regeln", "Chat-Skills", "Dokumente", "Entwürfe", "Entwurfsregeln", "Recherche", "Aufgaben", "Zeitmodell", "Arbeitsstände", "Aktivität", "Planregeln", "Zugänge"):
                             page.get_by_role("button", name=section, exact=True).click()
                             width = page.evaluate("document.documentElement.scrollWidth")
                             if width > 390:

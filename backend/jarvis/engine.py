@@ -40,6 +40,8 @@ class ToolDefinition:
     effect: Effect
     timeout_s: int = 15
     cancel_aware: bool = False
+    enabled: Callable[[], bool] | None = None
+    description: str = ""
 
 
 class ToolState(TypedDict, total=False):
@@ -94,8 +96,10 @@ class RunEngine:
 
     def capabilities(self) -> list[dict]:
         return [{"name": item.name, "scope": item.scope, "effect": item.effect,
-                 "schema": item.schema.model_json_schema()}
-                for item in self.definitions.values()]
+                 "schema": item.schema.model_json_schema(),
+                 "description": item.description}
+                for item in list(self.definitions.values())
+                if item.enabled is None or item.enabled()]
 
     def start(self, tool_name: str, args: dict[str, Any],
               client_request_id: str | None = None) -> dict:
@@ -114,7 +118,7 @@ class RunEngine:
     def _prepare(self, tool_name: str, args: dict[str, Any],
                  client_request_id: str | None) -> tuple[dict, ToolState]:
         tool = self.definitions.get(tool_name)
-        if tool is None:
+        if tool is None or (tool.enabled is not None and not tool.enabled()):
             raise ValueError("Unbekanntes Werkzeug")
         try:
             parsed = tool.schema.model_validate(args)
@@ -182,6 +186,8 @@ class RunEngine:
 
     def _execute(self, state: ToolState) -> ToolState:
         tool = self.definitions[state["tool_name"]]
+        if tool.enabled is not None and not tool.enabled():
+            return {"status": "failed", "error": "Modulwerkzeug ist deaktiviert"}
         cancel_event = self.cancel_events.setdefault(state["run_id"], threading.Event())
         if cancel_event.is_set() or self.db.get_run(state["run_id"])["status"] == "cancelled":
             return {"status": "cancelled", "error": "Auftrag vor Ausführung gestoppt"}

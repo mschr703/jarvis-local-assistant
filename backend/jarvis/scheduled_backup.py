@@ -259,10 +259,14 @@ class ScheduledBackup:
             old.unlink()
 
     def tick(self, *, now: datetime | None = None, force: bool = False) -> dict:
-        if not self._tick_lock.acquire(blocking=False):
+        if not self._tick_lock.acquire(timeout=30 if force else 0):
+            if force:
+                raise RuntimeError("Geplantes Backup läuft bereits")
             return self.status()
         try:
             if self._closing:
+                if force:
+                    raise RuntimeError("Backup-Dienst wird beendet")
                 return self.status()
             return self._tick(now=now, force=force)
         finally:
