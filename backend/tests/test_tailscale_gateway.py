@@ -1,9 +1,18 @@
 """Tailscale gateway denies every route without the configured Serve identity."""
 
+import importlib.util
+from pathlib import Path
+
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
-from scripts import tailscale_gateway
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location("jarvis_tailscale_gateway",
+                                           ROOT / "scripts/tailscale_gateway.py")
+assert SPEC and SPEC.loader
+tailscale_gateway = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(tailscale_gateway)
 
 
 def test_tailnet_gateway_identity_static_and_session_proxy(tmp_path, monkeypatch):
