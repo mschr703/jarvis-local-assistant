@@ -22,10 +22,15 @@ RESPONSE_HEADERS = {"cache-control", "content-disposition", "content-encoding",
 
 
 def create_app(*, host: str | None = None, login: str | None = None,
-               port: int = 8443, dist: Path | None = None,
+               port: int | None = None, dist: Path | None = None,
                backend: str = "http://127.0.0.1:8765") -> FastAPI:
     host = (host or os.environ.get("JARVIS_TAILSCALE_HOST", "")).strip().rstrip(".").lower()
     login = (login or os.environ.get("JARVIS_TAILSCALE_LOGIN", "")).strip().casefold()
+    if port is None:
+        try:
+            port = int(os.environ.get("JARVIS_TAILSCALE_PORT", "8443"))
+        except ValueError as exc:
+            raise ValueError("Ungültiger Tailscale-Port") from exc
     if not HOST_RE.fullmatch(host) or not login or "@" not in login:
         raise ValueError("Tailscale-Host und erlaubtes Nutzer-Login müssen gesetzt sein")
     if not 1 <= port <= 65535:

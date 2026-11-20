@@ -93,3 +93,19 @@ def test_tailnet_gateway_rejects_unconfigured_host_and_login(tmp_path):
             pass
         else:
             raise AssertionError((host, login))
+
+
+def test_tailnet_gateway_accepts_another_users_tailnet_and_port(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("Private Jarvis", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    monkeypatch.setenv("JARVIS_TAILSCALE_HOST", "another-laptop.other-tail.ts.net")
+    monkeypatch.setenv("JARVIS_TAILSCALE_LOGIN", "someone@github")
+    monkeypatch.setenv("JARVIS_TAILSCALE_PORT", "9443")
+    with TestClient(tailscale_gateway.create_app(dist=tmp_path)) as client:
+        allowed = client.get("/", headers={"host": "another-laptop.other-tail.ts.net:9443",
+                                           "tailscale-user-login": "someone@github"})
+        assert allowed.status_code == 200 and allowed.text == "Private Jarvis"
+        assert client.get("/", headers={"host": "another-laptop.other-tail.ts.net:8443",
+                                        "tailscale-user-login": "someone@github"}).status_code == 403
+        assert client.get("/", headers={"host": "another-laptop.other-tail.ts.net:9443",
+                                        "tailscale-user-login": "owner@example.org"}).status_code == 403

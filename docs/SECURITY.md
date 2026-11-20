@@ -72,7 +72,9 @@ Die Einrichtung und Deaktivierung der Backup-Planung sind lokale POST-Aktionen m
 
 ## Optionaler privater Tailscale-Zugang
 
-`scripts/start_tailscale.ps1` baut die Oberfläche und startet ein separates Gateway
+`scripts/start_tailscale.ps1` liest Hostname und Login des jeweiligen Rechners
+aus `tailscale status --json`; keine persönliche Tailnet-Adresse ist im Code fest
+eingetragen. Das Skript baut die Oberfläche und startet ein separates Gateway
 auf `127.0.0.1:8770`. Tailscale Serve stellt es ausschließlich im privaten Tailnet
 über HTTPS-Port 8443 bereit. Die vorhandene Tailscale-Weiterleitung auf Port 443
 bleibt erhalten. Jeder Gateway-Request braucht den exakten Host und den von
@@ -94,7 +96,9 @@ A80 bleibt für Gerätezulassung, Widerruf und breitere Fernzugriffsabnahme offe
 
 Start: erst `python scripts\dev.py`, danach in einer zweiten PowerShell
 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_tailscale.ps1`.
-Der Befehl gibt die HTTPS-Adresse aus. Stopp nur des Jarvis-Tailscale-Zugangs:
+Der Befehl gibt die HTTPS-Adresse aus. Mit `-HttpsPort 9443` kann ein freier
+anderer HTTPS-Port gewählt werden; der Stop-Befehl liest den tatsächlich verwendeten
+Port aus dem lokalen Laufdatensatz. Stopp nur des Jarvis-Tailscale-Zugangs:
 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop_tailscale.ps1`.
 Der lokale Jarvis-Prozess läuft danach weiter. Änderungen an der Oberfläche
 erfordern einen neuen Build und Gateway-Neustart.

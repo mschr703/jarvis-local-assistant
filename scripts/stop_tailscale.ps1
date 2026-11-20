@@ -11,7 +11,7 @@ $handler = $serve.Web.PSObject.Properties[$endpoint].Value.Handlers.'/'
 if ($handler.Proxy -ne 'http://127.0.0.1:8770') {
     throw 'Tailscale-Port zeigt nicht auf den Jarvis-Gateway; keine Weiterleitung verändert.'
 }
-& tailscale serve --https=8443 off
+& tailscale serve "--https=$($record.port)" off
 if ($LASTEXITCODE -ne 0) { throw 'Tailscale-Weiterleitung konnte nicht entfernt werden.' }
 $gatewayPid = [int]$record.gateway_pid
 $process = Get-CimInstance Win32_Process -Filter "ProcessId=$gatewayPid"

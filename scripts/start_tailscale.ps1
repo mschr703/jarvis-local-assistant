@@ -1,3 +1,4 @@
+param([ValidateRange(1, 65535)][int]$HttpsPort = 8443)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $state = tailscale status --json | ConvertFrom-Json
@@ -15,9 +16,9 @@ if ($tailHost -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$' -or
 }
 $serve = tailscale serve status --json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Tailscale Serve konnte nicht gelesen werden.' }
-$endpoint = "${tailHost}:8443"
+$endpoint = "${tailHost}:$HttpsPort"
 if ($serve.Web -and $serve.Web.PSObject.Properties[$endpoint]) {
-    throw "Port 8443 ist in Tailscale Serve bereits belegt; bestehende Weiterleitung bleibt erhalten."
+    throw "Port $HttpsPort ist in Tailscale Serve bereits belegt; bestehende Weiterleitung bleibt erhalten."
 }
 foreach ($url in @('http://127.0.0.1:5173/', 'http://127.0.0.1:8765/health')) {
     $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10
@@ -33,6 +34,7 @@ try {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     $env:JARVIS_TAILSCALE_HOST = $tailHost
     $env:JARVIS_TAILSCALE_LOGIN = $tailLogin
+    $env:JARVIS_TAILSCALE_PORT = [string]$HttpsPort
     $python = Join-Path $root 'backend\.venv\Scripts\python.exe'
     $gateway = Start-Process -FilePath $python -ArgumentList @(
         '-m', 'uvicorn', 'tailscale_gateway:create_app', '--factory',
@@ -58,14 +60,14 @@ try {
         if (-not $gateway.HasExited) { Stop-Process -Id $gateway.Id -Force }
         throw "Jarvis-Tailscale-Gateway startete nicht. Log: $logDir\tailscale-error.log"
     }
-    & tailscale serve --bg --https=8443 'http://127.0.0.1:8770'
+    & tailscale serve --bg "--https=$HttpsPort" 'http://127.0.0.1:8770'
     if ($LASTEXITCODE -ne 0) {
         Stop-Process -Id $gateway.Id -Force
-        throw 'Tailscale Serve konnte Port 8443 nicht einrichten.'
+        throw "Tailscale Serve konnte Port $HttpsPort nicht einrichten."
     }
-    @{gateway_pid=$gateway.Id; host=$tailHost; port=8443} | ConvertTo-Json |
+    @{gateway_pid=$gateway.Id; host=$tailHost; port=$HttpsPort} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'JarvisLocal\tailscale-gateway.json')
-    Write-Output "Jarvis im privaten Tailnet: https://${tailHost}:8443/"
+    Write-Output "Jarvis im privaten Tailnet: https://${tailHost}:$HttpsPort/"
     Write-Output 'Zugriff nur mit der Tailscale-Nutzeridentität dieses Laptop-Eigentümers.'
     } catch {
         if ($gateway -and -not $gateway.HasExited) { Stop-Process -Id $gateway.Id -Force }
@@ -75,4 +77,5 @@ try {
     Pop-Location
     Remove-Item Env:JARVIS_TAILSCALE_HOST -ErrorAction SilentlyContinue
     Remove-Item Env:JARVIS_TAILSCALE_LOGIN -ErrorAction SilentlyContinue
+    Remove-Item Env:JARVIS_TAILSCALE_PORT -ErrorAction SilentlyContinue
 }

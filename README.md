@@ -71,8 +71,12 @@ in einer zweiten PowerShell im Repository ausführen:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_tailscale.ps1
 ```
 
-Das Skript baut die Oberfläche, prüft den Tailscale-Eigentümer und gibt einen
-privaten HTTPS-Link mit Port 8443 aus. Dieser erste Zugang erlaubt das eigene
+Das Skript liest **deinen eigenen Hostnamen und Login** aus `tailscale status --json`;
+im Repository ist kein bestimmtes Tailnet oder Konto fest eingetragen. Es baut
+die Oberfläche, prüft die Tailscale-Identität und gibt einen privaten HTTPS-Link
+mit Port 8443 aus. Falls dieser Port im eigenen Tailnet bereits belegt ist, kann
+`scripts\start_tailscale.ps1 -HttpsPort 9443` einen freien anderen Port verwenden.
+Dieser erste Zugang erlaubt das eigene
 Tailscale-Nutzerkonto; Gerätefreigaben kommen aus den Tailnet-Regeln. Die
 bereits vorhandene Weiterleitung auf Port 443 bleibt erhalten. Zum Stoppen
 dieses Zugangs `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop_tailscale.ps1`
