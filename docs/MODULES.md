@@ -181,7 +181,9 @@ vorschlagen. Der Kern prüft Namen, aktuelle Aktivierung und Pydantic-Argumente;
 ein Vorschlag führt nichts aus. Der Nutzer prüft die Argumente, startet danach
 bewusst einen Run und gibt Schreibwirkungen in **Aktivität** nochmals für den
 konkreten Argument-Hash frei. Fehlendes Werkzeug oder eine Frage ohne klare
-Aktion lässt die Vorschau leer. Dieser erste Schritt bleibt unter
+Aktion lässt die Vorschau leer. Nach einem erfolgreichen Modullauf führt
+**Modul öffnen** unter **Aktivität → Aufträge** in die aktive Modulansicht.
+Dieser erste Schritt bleibt unter
 [Trello P10](https://trello.com/c/D0v0Cw32) in Arbeit; insbesondere
 mehrstufige Abläufe und gezielte Rückfragen bei unvollständigen Angaben folgen.
 Jarvis prüft alle Werkzeugdefinitionen vor der Registrierung. Scheitert ein Paket
