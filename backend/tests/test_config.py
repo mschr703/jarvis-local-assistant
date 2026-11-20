@@ -10,6 +10,30 @@ from jarvis.config import Settings, default_data_dir
 from jarvis.db import Database
 
 
+def test_new_install_defaults_to_openrouter_without_secret(tmp_path, monkeypatch):
+    monkeypatch.delenv("JARVIS_PROVIDER", raising=False)
+    monkeypatch.delenv("JARVIS_OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("JARVIS_OPENROUTER_API_KEY", raising=False)
+    settings = Settings(_env_file=None, JARVIS_DATA_DIR=tmp_path)
+    assert settings.provider == "openrouter"
+    assert settings.openrouter_model == "openai/gpt-4o-mini"
+    assert settings.openrouter_api_key is None
+    with TestClient(create_app(settings)) as client:
+        health = client.get("/health").json()
+        assert health["provider"] == "openrouter"
+        assert health["model"] == "openai/gpt-4o-mini"
+        assert health["status"] == "setup_required"
+        assert health["configured"] is False
+
+
+def test_existing_ollama_env_keeps_provider_after_default_change(tmp_path, monkeypatch):
+    monkeypatch.delenv("JARVIS_PROVIDER", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("JARVIS_PROVIDER=ollama\n", encoding="utf-8")
+    settings = Settings(_env_file=env_file, JARVIS_DATA_DIR=tmp_path)
+    assert settings.provider == "ollama"
+
+
 def test_empty_data_home_environment_uses_home_fallback(monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", "")
     monkeypatch.setenv("XDG_DATA_HOME", "")

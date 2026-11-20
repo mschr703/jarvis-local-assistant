@@ -1,11 +1,11 @@
 # Jarvis Local
 
-Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Die Abendplanung ist ein optionales [privates Modul](docs/MODULES.md). Ohne OpenRouter-Key verwendet Jarvis das lokale Ollama-Modell `qwen3:4b-instruct`. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Die [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; weitere bislang eingebaute Bereiche werden schrittweise ausgelagert.
+Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Die Abendplanung ist ein optionales [privates Modul](docs/MODULES.md). Neue Installationen wählen OpenRouter mit `openai/gpt-4o-mini` als Standardmodell; ohne eigenen Schlüssel bleibt der Modellaufruf gesperrt. Für rein lokalen Betrieb kann `JARVIS_PROVIDER=ollama` gesetzt werden. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Die [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; weitere bislang eingebaute Bereiche werden schrittweise ausgelagert.
 
 ## Voraussetzungen
 
 - Windows 11, [Git](https://git-scm.com/download/win), Python 3.13, Node.js 24, pnpm 11 und [uv](https://docs.astral.sh/uv/getting-started/installation/).
-- [Ollama für Windows](https://ollama.com/download/windows) und rund 3 GB freier Platz für `qwen3:4b-instruct`.
+- Für den Standardbetrieb einen eigenen [OpenRouter-Schlüssel](https://openrouter.ai/keys); für die lokale Alternative [Ollama für Windows](https://ollama.com/download/windows) und rund 3 GB freier Platz für `qwen3:4b-instruct`.
 - Microsoft Edge für das Playwright-Browserwerkzeug. Jarvis verwendet dafür ein eigenes Profil unter `%LOCALAPPDATA%\JarvisLocal\browser-profile`.
 
 ## Einmalige Einrichtung
@@ -17,20 +17,21 @@ git clone https://github.com/mschr703/jarvis-local-assistant.git
 Set-Location jarvis-local-assistant
 ```
 
-Der Einrichtungshelfer funktioniert mit Windows PowerShell 5.1 und PowerShell 7. Er prüft die benötigten Programme und Versionen, installiert die gesperrten Python-/Frontend-Abhängigkeiten, erstellt bei Bedarf eine lokale `.env` und lädt das Ollama-Modell. Eine bestehende `.env` wird nicht überschrieben:
+Der Einrichtungshelfer funktioniert mit Windows PowerShell 5.1 und PowerShell 7. Er prüft die benötigten Programme und Versionen, installiert die gesperrten Python-/Frontend-Abhängigkeiten und erstellt bei Bedarf eine lokale `.env`. Nur bei gewähltem Ollama lädt er das Chatmodell. Eine bestehende `.env` wird nicht überschrieben:
 
 ```powershell
 .\scripts\setup.ps1
 ```
 
-Für die optionale sinngemäße Suche lädt `.\scripts\setup.ps1 -IncludeSearchModel` zusätzlich `embeddinggemma:300m`. Wenn die Modelle schon vorhanden sind, kann `-SkipModelDownload` verwendet werden; dieser Schalter überspringt beide Downloads. Fehlt ein Programm, nennt der Helfer dessen Installationsseite. Alternativ sind die Einzelschritte:
+Für die optionale lokale sinngemäße Suche lädt `.\scripts\setup.ps1 -IncludeSearchModel` zusätzlich `embeddinggemma:300m`; dafür wird Ollama benötigt, auch wenn der Chat OpenRouter nutzt. Wenn lokale Modelle schon vorhanden sind, kann `-SkipModelDownload` verwendet werden; dieser Schalter überspringt die Downloads. Fehlt ein Programm, nennt der Helfer dessen Installationsseite. Alternativ sind die Einzelschritte:
 
 ```powershell
 Copy-Item .env.example .env
 python -m uv sync --project backend
 pnpm --dir frontend install --frozen-lockfile
-ollama pull qwen3:4b-instruct
 ```
+
+Danach den OpenRouter-Schlüssel wie [unten beschrieben](#openrouter-einrichten) geschützt speichern. Für die rein lokale Alternative in `.env` `JARVIS_PROVIDER=ollama` setzen, Ollama installieren und `ollama pull qwen3:4b-instruct` ausführen.
 
 Für **optionale lokale OCR von Scan-PDFs** braucht Jarvis zusätzlich [Tesseract 5 für Windows](https://github.com/tesseract-ocr/tessdoc/blob/main/Installation.md) mit den Sprachen Deutsch (`deu`) und Englisch (`eng`). PDFium wird bereits durch `setup.ps1` als gesperrte Python-Abhängigkeit installiert. Tesseract kann beispielsweise mit `winget install --id tesseract-ocr.tesseract -e` oder bei vorhandenem Scoop ohne Administratorrechte mit `scoop install tesseract` installiert werden. Danach eine neue PowerShell öffnen und nur die beiden benötigten Sprachdateien aus dem offiziellen `tessdata_fast`-Release mit fest geprüften SHA-256-Werten installieren:
 
@@ -42,11 +43,11 @@ python scripts/doctor.py
 
 `doctor.py` zeigt „Scan-PDF-OCR“ als optionalen Punkt. Wenn Tesseract außerhalb des `PATH` liegt, akzeptiert der Sprachdatenhelfer `-TesseractExe "C:\Program Files\Tesseract-OCR\tesseract.exe"`; Jarvis selbst findet zusätzlich diesen Standardpfad. OCR benötigt keinen OpenRouter-Key und startet Tesseract erst nach einem bewussten Klick.
 
-Nach der Einrichtung prüft `python scripts/doctor.py` lesend die benötigten Programme, lokalen Abhängigkeiten, `.env`, Ollama-Dienst und Modelle. Fehlende Pflichtvoraussetzungen ergeben Exitcode 1 und einen konkreten Hinweis; das optionale Suchmodell wird getrennt markiert. Der Check zeigt keine Schlüssel oder privaten Konfigurationswerte und lädt nichts herunter. Für automatisierte lokale Prüfungen gibt `python scripts/doctor.py --json` dieselben Ergebnisse als JSON aus. Bei bewusst gewähltem OpenRouter prüft der Helfer keine Cloud-Zugangsdaten oder Kosten.
+Nach der Einrichtung prüft `python scripts/doctor.py` lesend die benötigten Programme, lokalen Abhängigkeiten und `.env`. Bei Ollama prüft er zusätzlich Dienst und Chatmodell; das optionale Suchmodell wird getrennt markiert. Fehlende Pflichtvoraussetzungen ergeben Exitcode 1 und einen konkreten Hinweis. Der Check zeigt keine Schlüssel oder privaten Konfigurationswerte und lädt nichts herunter. Für automatisierte lokale Prüfungen gibt `python scripts/doctor.py --json` dieselben Ergebnisse als JSON aus. Bei OpenRouter prüft der Helfer keine Cloud-Zugangsdaten oder Kosten; die Oberfläche zeigt einen fehlenden Schlüssel als Einrichtungsbedarf.
 
 Falls `uv` als eigenständiges Programm statt als Python-Modul installiert wurde, in den Befehlen dieser Anleitung `python -m uv` durch `uv` ersetzen.
 
-Falls `ollama` im aktuellen Terminal noch nicht im `PATH` liegt, ein neues Terminal öffnen oder `& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" pull qwen3:4b-instruct` ausführen. Ollama muss laufen; die Windows-App startet üblicherweise einen lokalen Dienst auf `127.0.0.1:11434`. In `.env` bleibt `JARVIS_PROVIDER=ollama` und es wird kein API-Key benötigt.
+Für die lokale Alternative: Falls `ollama` im aktuellen Terminal noch nicht im `PATH` liegt, ein neues Terminal öffnen oder `& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" pull qwen3:4b-instruct` ausführen. Ollama muss laufen; die Windows-App startet üblicherweise einen lokalen Dienst auf `127.0.0.1:11434`. Mit `JARVIS_PROVIDER=ollama` in `.env` wird kein API-Key benötigt.
 
 ## Start und Stopp
 
@@ -75,7 +76,7 @@ Das Skript liest **deinen eigenen Hostnamen und Login** aus `tailscale status --
 im Repository ist kein bestimmtes Tailnet oder Konto fest eingetragen. Es baut
 die Oberfläche, prüft die Tailscale-Identität und gibt einen privaten HTTPS-Link
 mit Port 8443 aus. Falls dieser Port im eigenen Tailnet bereits belegt ist, kann
-`scripts\start_tailscale.ps1 -HttpsPort 9443` einen freien anderen Port verwenden.
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_tailscale.ps1 -HttpsPort 9443` einen freien anderen Port verwenden.
 Dieser erste Zugang erlaubt das eigene
 Tailscale-Nutzerkonto; Gerätefreigaben kommen aus den Tailnet-Regeln. Die
 bereits vorhandene Weiterleitung auf Port 443 bleibt erhalten. Zum Stoppen
@@ -773,11 +774,13 @@ python -m uv run --project backend python scripts/backup.py restore "C:\Pfad\jar
 
 Danach in `.env` `JARVIS_DATA_DIR=C:/Pfad/JarvisWiederhergestellt` setzen und Jarvis starten. Bereits beim Erstellen prüft Jarvis die SQLite-Momentaufnahmen und gleicht gespeicherte Exporte mit ihren Hashes ab; verschachtelte Links/Junctions in Exporten oder Notizen brechen das Backup mit einer Fehlermeldung ab, und höchstens 2.000 Verzeichnisse werden besucht. Die Wiederherstellung prüft Dateiliste, sichere Archivpfade einschließlich Windows-Namenskollisionen, SHA-256-Prüfsummen, SQLite-Integrität und Schema-Version. Exportpfade in der Datenbank zeigen danach auf den neuen Zielordner. Unterstützte ältere Schemata werden beim ersten Start migriert. Freigegebene Originalordner und Quelldateien liegen außerhalb des Backups und müssen am neuen Ort weiterhin verfügbar sein. Das Browserprofil wird bei Bedarf neu angelegt.
 
-## OpenRouter bewusst einrichten
+## OpenRouter einrichten
 
-Für einen bewussten Cloud-Betrieb in `.env` `JARVIS_PROVIDER=openrouter` und eine gültige `JARVIS_OPENROUTER_MODEL`-ID eintragen. Ein Live-Test verwendete `openai/gpt-4o-mini`; Modellverfügbarkeit und Preise werden vor jeder Anfrage erneut geprüft. Den **Schlüssel nicht in `.env` speichern**. Es gibt zwei lokale Wege:
+Neue Installationen enthalten `JARVIS_PROVIDER=openrouter` und `JARVIS_OPENROUTER_MODEL=openai/gpt-4o-mini` in `.env`. Das Modell ist [bei OpenRouter gelistet](https://openrouter.ai/openai/gpt-4o-mini); Verfügbarkeit und Preise werden vor jeder bezahlten Anfrage erneut geprüft. Den **Schlüssel nicht in `.env` speichern**. Ohne Schlüssel wird keine Modellanfrage gestartet. Es gibt zwei lokale Wege:
 
-1. **Windows-Tresor:** Jarvis mit Ollama starten, unter „Zugänge“ „OpenRouter-Eintrag vorbereiten“ wählen, den Schlüssel im Passwortfeld eingeben und geschützt speichern. Der Eintrag lautet `openrouter` / `default` / `api_key`. Danach unter „Übersicht“ Provider und Modell bewusst umstellen oder die beiden Werte in `.env` setzen und Jarvis neu starten. Der Schlüssel wird bei jedem neuen Modellaufruf aus dem DPAPI-Tresor des aktuellen Windows-Benutzers gelesen; Ersetzen und lokales Entziehen wirken für folgende Aufrufe. Der Tresor wird nicht ins normale Backup aufgenommen und muss nach Geräte- oder Benutzerwechsel neu eingerichtet werden.
+Der Cloud-Chat braucht zusätzlich die Freigabe der konkreten Nachricht und des bisherigen Verlaufs in der Chatansicht. Lokale Chat-Werkzeuge, Aktionsvorschläge und Chatanhänge sind derzeit an Ollama gebunden; einige weitere lokale Assistentenfunktionen sind im OpenRouter-Modus noch nicht verfügbar. Für diese Abläufe `JARVIS_PROVIDER=ollama` wählen. Ein Wechsel in der `.env` überschreibt bereits gespeicherte Profileinstellungen nicht; den aktiven Provider zeigt „Übersicht“.
+
+1. **Windows-Tresor:** Jarvis starten, unter „Zugänge“ „OpenRouter-Eintrag vorbereiten“ wählen, den Schlüssel im Passwortfeld eingeben und geschützt speichern. Der Eintrag lautet `openrouter` / `default` / `api_key`. Jarvis liest den Schlüssel bei jedem neuen Modellaufruf aus dem DPAPI-Tresor des aktuellen Windows-Benutzers; Ersetzen und lokales Entziehen wirken für folgende Aufrufe. Der Tresor wird nicht ins normale Backup aufgenommen und muss nach Geräte- oder Benutzerwechsel neu eingerichtet werden.
 2. **Nur für das Startterminal:** Schlüssel als Prozessvariable setzen und Jarvis starten:
 
 ```powershell
@@ -785,13 +788,13 @@ $env:JARVIS_OPENROUTER_API_KEY = [System.Net.NetworkCredential]::new('', (Read-H
 python scripts/dev.py
 ```
 
-Nach dem Schließen dieses Terminals ist die Prozessvariable weg. Falls sie gesetzt ist, hat sie Vorrang vor dem Tresoreintrag. Das Startskript reicht sie nur an das Backend weiter, nicht an Vite. Von Jarvis gestartete Desktopprogramme, der Dateizuordnungs-Hilfsprozess und Edge erhalten eine Umgebung ohne den Schlüssel. Den Key weder in Chat noch im Repository ablegen. Jarvis prüft das Modell und dessen aktuelle Preise vor einer bezahlten Anfrage und reserviert konservativ Budget. Der Adapter setzt 180 Sekunden SDK-Anfrage-Timeout und deaktiviert automatische Wiederholungen. Die Variante `:online` ist wegen zusätzlicher, hier nicht budgetierter Websuchkosten gesperrt. Der isolierte [R02-Live-Test](scripts/smoke_openrouter_live.py) bestand mit gestreamtem Chat, Provider-Kostenbeleg, Reload, Cloud-Einwilligung und Sperre einer `local_only`-Fundstelle. Der [Edge-Cloud-Klicktest](scripts/smoke_openrouter_ui.py) prüfte den Freigabeschalter, Antwort, Kostenbeleg und Reload; mit `--vault` prüft er den verschlüsselten Schlüsselpfad ohne Prozessvariable und das Entziehen. Zum bewussten Wiederholen `python -m uv run --project backend python scripts/smoke_openrouter_live.py` oder `python -m uv run --project backend python scripts/smoke_openrouter_ui.py --vault` ausführen und den Schlüssel am verdeckten Prompt eingeben; jeder Test verursacht eine kleine Modellgebühr und löscht sein temporäres Profil danach. Die normale lokale `.env` bleibt bei Ollama.
+Nach dem Schließen dieses Terminals ist die Prozessvariable weg. Falls sie gesetzt ist, hat sie Vorrang vor dem Tresoreintrag. Das Startskript reicht sie nur an das Backend weiter, nicht an Vite. Von Jarvis gestartete Desktopprogramme, der Dateizuordnungs-Hilfsprozess und Edge erhalten eine Umgebung ohne den Schlüssel. Den Key weder in Chat noch im Repository ablegen. Jarvis prüft das Modell und dessen aktuelle Preise vor einer bezahlten Anfrage und reserviert konservativ Budget. Der Adapter setzt 180 Sekunden SDK-Anfrage-Timeout und deaktiviert automatische Wiederholungen. Die Variante `:online` ist wegen zusätzlicher, hier nicht budgetierter Websuchkosten gesperrt. Der isolierte [R02-Live-Test](scripts/smoke_openrouter_live.py) bestand mit gestreamtem Chat, Provider-Kostenbeleg, Reload, Cloud-Einwilligung und Sperre einer `local_only`-Fundstelle. Der [Edge-Cloud-Klicktest](scripts/smoke_openrouter_ui.py) prüfte den Freigabeschalter, Antwort, Kostenbeleg und Reload; mit `--vault` prüft er den verschlüsselten Schlüsselpfad ohne Prozessvariable und das Entziehen. Zum bewussten Wiederholen `python -m uv run --project backend python scripts/smoke_openrouter_live.py` oder `python -m uv run --project backend python scripts/smoke_openrouter_ui.py --vault` ausführen und den Schlüssel am verdeckten Prompt eingeben; jeder Test verursacht eine kleine Modellgebühr und löscht sein temporäres Profil danach. Das bestehende Laptop-Profil bleibt für die Tests derzeit auf Ollama.
 
 ## Modell je Aufgabe wählen
 
 Unter „Übersicht → Modell je Aufgabe“ kann für Chat, Entwurf/Text, Plan und Recherche je eine Modell-ID für den aktuell gewählten Provider eingetragen werden. Ein leeres Feld verwendet dessen Standardmodell. Ollama- und OpenRouter-Regeln werden getrennt gespeichert; der Wechsel eines Modells ändert den Provider nicht. Die jeweilige Ansicht zeigt vor dem Aufruf die gespeicherte wirksame Modellwahl und ob sie aus einer Aufgabenregel oder dem Standard stammt. Unter „Letzte Modellläufe“ steht das tatsächlich verwendete Modell im Kostenbeleg.
 
-Für Ollama muss das gewählte Modell lokal installiert und erreichbar sein (`ollama list`); ein fehlendes Modell ergibt einen sichtbaren Fehler. OpenRouter-Modell-IDs werden nicht fest im Code vorgegeben: Verfügbarkeit und aktuelle Preise werden vor jedem bezahlten Aufruf über OpenRouter geprüft. Ein Preisfehler, ein fehlendes Modell oder ein erschöpftes Tagesbudget stoppt den Aufruf. Es gibt keinen stillen Wechsel zu einem anderen Modell oder von Ollama in die Cloud. Die bestehenden Cloudfreigaben für Inhalte und Anfragen gelten unverändert. Interne lokale Aufgaben wie Chat-Zusammenfassungen und Erinnerungsvorschläge behalten das Standardmodell; `research_queries` verwendet die Recherche-Regel.
+Für Ollama muss das gewählte Modell lokal installiert und erreichbar sein (`ollama list`); ein fehlendes Modell ergibt einen sichtbaren Fehler. Die OpenRouter-Modell-ID kann geändert werden; Verfügbarkeit und aktuelle Preise werden vor jedem bezahlten Aufruf über OpenRouter geprüft. Ein Preisfehler, ein fehlendes Modell oder ein erschöpftes Tagesbudget stoppt den Aufruf. Es gibt keinen stillen Wechsel zu einem anderen Modell oder von Ollama in die Cloud. Die bestehenden Cloudfreigaben für Inhalte und Anfragen gelten unverändert. Interne lokale Aufgaben wie Chat-Zusammenfassungen und Erinnerungsvorschläge behalten das Standardmodell; `research_queries` verwendet die Recherche-Regel.
 
 Der isolierte Edge/Ollama-Test `python -m uv run --project backend python scripts/smoke_model_routes_ui.py` setzt für einen temporären Datensatz eine Chat-Regel auf ein zweites lokal installiertes Modell und prüft die Anzeige vor dem Aufruf, den gespeicherten Nutzungsbeleg, Reload und die mobile Breite. Dafür müssen `qwen3:4b-instruct` und `qwen3:4b` installiert sein; es wird kein OpenRouter-Key verwendet.
 
@@ -831,7 +834,7 @@ Nach der Erzeugung bietet ein Entwurf mit persönlichem Profil eine Stilüberarb
 
 „Schreibmuster prüfen“ untersucht den gerade sichtbaren Entwurf einschließlich ungespeicherter Änderungen **lokal und ohne Modellaufruf**. Jarvis zeigt konkrete deutsche Einleitungs-, Kontext-, Hinweis- und Schlussfloskeln mit Textausschnitt und Änderungsidee. Wörtliche Zitate werden ausgelassen. Nach einer Textänderung verschwinden die alten Treffer bis zur nächsten Prüfung. Das sind redaktionelle Hinweise, keine KI-Erkennung, keine Bewertung der Autorschaft und keine Garantie für eine bestimmte Detektorentscheidung. Die Regelidee wurde eigenständig auf Deutsch umgesetzt und ist von [blader/humanizer](https://github.com/blader/humanizer) (MIT-Lizenz) inspiriert. Dessen README erklärt selbst, dass Detektoren die meisten Ausgaben weiterhin markieren. Es wird kein fremder Quelltext eingebunden und kein Text an dieses Projekt gesendet.
 
-Für diesen Ablauf ist **kein OpenRouter-Key** nötig: `.env` mit `JARVIS_PROVIDER=ollama` belassen, `ollama pull qwen3:4b-instruct` ausführen, Ollama starten und im Repository `python scripts/dev.py` aufrufen. Danach [http://127.0.0.1:5173](http://127.0.0.1:5173) öffnen. Die unabhängige lokale Stilfunktion verwendet keinen Code oder Dienst von Turnitout. Sie verbessert die Anpassung an eigene Beispiele; sie kann weder perfekte Stiltreue noch eine bestimmte Bewertung durch KI-Detektoren zusichern. Fakten, Zahlen, Zitate und Quellen vor Verwendung selbst prüfen.
+Für diesen Ablauf ist **kein OpenRouter-Key** nötig: `.env` mit `JARVIS_PROVIDER=ollama` setzen, `ollama pull qwen3:4b-instruct` ausführen, Ollama starten und im Repository `python scripts/dev.py` aufrufen. Danach [http://127.0.0.1:5173](http://127.0.0.1:5173) öffnen. Die unabhängige lokale Stilfunktion verwendet keinen Code oder Dienst von Turnitout. Sie verbessert die Anpassung an eigene Beispiele; sie kann weder perfekte Stiltreue noch eine bestimmte Bewertung durch KI-Detektoren zusichern. Fakten, Zahlen, Zitate und Quellen vor Verwendung selbst prüfen.
 
 ## Grenzen und Status
 

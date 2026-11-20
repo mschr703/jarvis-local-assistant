@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default_factory=default_data_dir, alias="JARVIS_DATA_DIR")
     timezone: str = Field(default="Europe/Berlin", min_length=1, max_length=100,
                           alias="JARVIS_TIMEZONE")
-    provider: Literal["ollama", "openrouter"] = Field(default="ollama", alias="JARVIS_PROVIDER")
+    provider: Literal["ollama", "openrouter"] = Field(default="openrouter", alias="JARVIS_PROVIDER")
     ollama_url: str = Field(default="http://127.0.0.1:11434", alias="JARVIS_OLLAMA_URL")
     ollama_model: str = Field(default="qwen3:4b-instruct", alias="JARVIS_OLLAMA_MODEL")
     ollama_planner_model: str | None = Field(default=None, min_length=1, max_length=120,
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
                                    alias="JARVIS_VOICESTUDIO_VOICE")
     openrouter_api_key: str | None = Field(default=None, repr=False,
                                            alias="JARVIS_OPENROUTER_API_KEY")
-    openrouter_model: str | None = Field(default=None, alias="JARVIS_OPENROUTER_MODEL")
+    openrouter_model: str | None = Field(default="openai/gpt-4o-mini", alias="JARVIS_OPENROUTER_MODEL")
     model_routes: dict[str, dict[str, str]] = Field(default_factory=dict,
                                                    alias="JARVIS_MODEL_ROUTES")
     daily_budget_usd: float = Field(default=1.0, ge=0, allow_inf_nan=False,

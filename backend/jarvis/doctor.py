@@ -35,7 +35,7 @@ def local_ollama_url(value: str) -> bool:
 
 def settings_from_env(root: Path) -> dict[str, str]:
     """Read only known, non-secret settings; never echo raw lines or other keys."""
-    settings = {"JARVIS_PROVIDER": "ollama", "JARVIS_OLLAMA_URL": "http://127.0.0.1:11434",
+    settings = {"JARVIS_PROVIDER": "openrouter", "JARVIS_OLLAMA_URL": "http://127.0.0.1:11434",
                 "JARVIS_OLLAMA_MODEL": CHAT_MODEL}
     path = root / ".env"
     if not path.is_file():
@@ -140,7 +140,7 @@ def build_report(root: Path = ROOT) -> dict:
     except ValueError:
         add(".env lesbar", False, True,
             "Lokale .env ist nicht lesbar oder keine UTF-8-Datei.")
-        settings = {"JARVIS_PROVIDER": "ollama",
+        settings = {"JARVIS_PROVIDER": "openrouter",
                     "JARVIS_OLLAMA_URL": "http://127.0.0.1:11434",
                     "JARVIS_OLLAMA_MODEL": CHAT_MODEL}
     if settings["JARVIS_PROVIDER"] == "ollama":

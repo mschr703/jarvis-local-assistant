@@ -36,7 +36,6 @@ if ($env:OS -ne 'Windows_NT') {
 Require-Command 'python' 'https://www.python.org/downloads/windows/'
 Require-Command 'node' 'https://nodejs.org/en/download'
 Require-Command 'pnpm' 'https://pnpm.io/installation'
-Require-Command 'ollama' 'https://ollama.com/download/windows'
 $pythonVersionOutput = (& python --version).Trim()
 if ($LASTEXITCODE -ne 0 -or $pythonVersionOutput -notmatch '^Python\s+(\d+\.\d+(?:\.\d+)?)') {
     throw "Python-Version konnte nicht gelesen werden: $pythonVersionOutput"
@@ -62,6 +61,26 @@ try {
         Write-Host 'Vorhandene lokale .env bleibt erhalten.'
     }
 
+    $provider = 'openrouter'
+    foreach ($line in (Get-Content -LiteralPath '.env' -Encoding UTF8)) {
+        if ($line -match '^\s*JARVIS_PROVIDER\s*=') {
+            if ($line -match '^\s*JARVIS_PROVIDER\s*=\s*["'']?(ollama|openrouter)["'']?\s*$') {
+                $provider = $Matches[1].ToLowerInvariant()
+            } else {
+                throw 'JARVIS_PROVIDER in .env muss ollama oder openrouter sein.'
+            }
+        }
+    }
+    if ($env:JARVIS_PROVIDER) {
+        $provider = $env:JARVIS_PROVIDER.ToLowerInvariant()
+        if ($provider -notin @('ollama', 'openrouter')) {
+            throw 'JARVIS_PROVIDER im Prozess muss ollama oder openrouter sein.'
+        }
+    }
+    if ($provider -eq 'ollama' -or ($IncludeSearchModel -and -not $SkipModelDownload)) {
+        Require-Command 'ollama' 'https://ollama.com/download/windows'
+    }
+
     if ($uvCommand) {
         Run-Checked 'Backend-Abhängigkeiten installieren' { & uv sync --project backend --frozen }
     } else {
@@ -69,11 +88,11 @@ try {
     }
     Run-Checked 'Frontend-Abhängigkeiten installieren' { & pnpm --dir frontend install --frozen-lockfile }
 
-    if (-not $SkipModelDownload) {
+    if (-not $SkipModelDownload -and $provider -eq 'ollama') {
         Run-Checked 'Lokales Modell laden' { & ollama pull qwen3:4b-instruct }
-        if ($IncludeSearchModel) {
-            Run-Checked 'Lokales Suchmodell laden' { & ollama pull embeddinggemma:300m }
-        }
+    }
+    if (-not $SkipModelDownload -and $IncludeSearchModel) {
+        Run-Checked 'Lokales Suchmodell laden' { & ollama pull embeddinggemma:300m }
     }
 
     Write-Host "`nEinrichtung abgeschlossen. Start: python scripts/dev.py"

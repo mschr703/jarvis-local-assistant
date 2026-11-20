@@ -4,7 +4,7 @@ Stand: 19.11.2026. Jarvis ist für einen Benutzer auf einem Windows-Laptop gebau
 
 ## Öffentliche Veröffentlichung
 
-Das öffentliche Repository enthält Quellcode und synthetische Tests. `.gitignore` schließt lokale Umgebungsdateien, Datenbanken, Tresorwerte, Browserprofile, Schlüsseldateien, Logs und Archive für gewöhnliches `git add` aus. `scripts/audit_public.py` prüft auch absichtlich in Git aufgenommene Dateien und die von `HEAD` erreichbare Commit-Historie anhand von Dateiname und typischen Tokenmustern. Der Maintainer-Befehl `scripts/push_public.ps1` führt diesen Scan und `git diff --check` vor dem Push aus; Windows-CI holt die vollständige Historie und wiederholt den Scan. Für eine neue lokale Modell- oder Cloud-Konfiguration gehört der Schlüssel in die ignorierte `.env` oder den DPAPI-Tresor, nie in eine Beispieldatei oder einen Commit.
+Das öffentliche Repository enthält Quellcode und synthetische Tests. `.gitignore` schließt lokale Umgebungsdateien, Datenbanken, Tresorwerte, Browserprofile, Schlüsseldateien, Logs und Archive für gewöhnliches `git add` aus. `scripts/audit_public.py` prüft auch absichtlich in Git aufgenommene Dateien und die von `HEAD` erreichbare Commit-Historie anhand von Dateiname und typischen Tokenmustern. Der Maintainer-Befehl `scripts/push_public.ps1` führt diesen Scan und `git diff --check` vor dem Push aus; Windows-CI holt die vollständige Historie und wiederholt den Scan. Für eine neue lokale Modell- oder Cloud-Konfiguration gehört der Schlüssel in den DPAPI-Tresor oder nur als Prozessvariable ins Startterminal, nie in eine Beispieldatei oder einen Commit.
 
 ## Vertrauensgrenzen
 

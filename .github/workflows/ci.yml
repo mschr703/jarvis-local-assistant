@@ -31,6 +31,8 @@ jobs:
       - name: Lint Python
         run: uv run --project backend ruff check backend scripts
       - name: Test backend
+        env:
+          JARVIS_PROVIDER: ollama
         run: uv run --project backend pytest backend/tests -q
 
   frontend:
