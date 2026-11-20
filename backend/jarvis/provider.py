@@ -99,6 +99,7 @@ class OllamaAdapter(ProviderAdapter):
         self.max_output_tokens = max_output_tokens
         self.context_tokens = context_tokens
         self.response_format: dict | str | None = None
+        self.temperature: float | None = None
 
     async def available(self) -> bool:
         try:
@@ -126,7 +127,9 @@ class OllamaAdapter(ProviderAdapter):
                     **({"format": self.response_format} if self.response_format else {}),
                     "options": {"num_predict": self.max_output_tokens,
                                 "num_ctx": self.context_tokens,
-                                **({"temperature": 0} if self.response_format else {})},
+                                **({"temperature": 0} if self.response_format else
+                                   {"temperature": self.temperature}
+                                   if self.temperature is not None else {})},
                 }) as response,
             ):
                     if response.status_code != 200:

@@ -98,6 +98,23 @@ async def test_ollama_stream_usage_and_malformed_response(monkeypatch):
     assert chunks[1].cost_kind == "local_no_api_charge"
 
 
+@pytest.mark.asyncio
+async def test_ollama_grounded_chat_can_use_zero_temperature(monkeypatch):
+    def handler(request):
+        payload = json.loads(request.content)
+        assert payload["options"]["temperature"] == 0
+        assert "format" not in payload
+        return httpx.Response(200, text=json.dumps({
+            "message": {"content": "Projektstand"}, "done": True}) + "\n")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+    provider = OllamaAdapter("http://127.0.0.1:11434", "fixture")
+    provider.temperature = 0
+    chunks = [item.text async for item in provider.stream([])]
+    assert chunks[0] == "Projektstand"
+
+
 @pytest.mark.parametrize("response_format", ["json", {"type": "object", "properties": {
     "tools": {"type": "array"}}}])
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
 from jarvis.modules import package_digest
-from jarvis.provider import Chunk, Completion, ProviderAdapter
+from jarvis.provider import Chunk, Completion, OllamaAdapter, ProviderError
 
 SAMPLE_MODULE = '''
 from fastapi import FastAPI
@@ -223,16 +223,29 @@ def test_chat_reads_active_module_and_persists_tool_receipt(tmp_path, monkeypatc
     data_dir = tmp_path / "data"
     install_fixture(data_dir)
     seen_messages = []
+    temperatures = []
 
-    class AnswerProvider(ProviderAdapter):
+    class AnswerProvider(OllamaAdapter):
+        def __init__(self):
+            super().__init__("http://127.0.0.1:11434", "fixture")
+
+        async def available(self):
+            return True
+
         async def stream(self, messages):
             seen_messages.append(messages)
+            temperatures.append(self.temperature)
             yield Chunk("text", text="Die Notiz heißt Garten.")
             yield Chunk("usage", input_tokens=10, output_tokens=7,
                         cost_usd=0.0, cost_kind="local_no_api_charge")
 
-    async def choose(_db, _settings, _purpose, _messages, *, ollama_format):
+    async def choose(_db, _settings, _purpose, messages, *, ollama_format):
         assert ollama_format == "json"
+        question = json.loads(messages[1]["content"])["question"]
+        if "Begriff" in question:
+            raise ProviderError("ollama_http", "Planer nicht erreichbar")
+        if "Hypothese" in question:
+            return Completion('{"tools":[]}', 8, 8, 0.0, "local_no_api_charge")
         return Completion('{"tools":[{"tool":"sample_notes__list_entries","args":{}}]}',
                           8, 8, 0.0, "local_no_api_charge")
 
@@ -250,17 +263,33 @@ def test_chat_reads_active_module_and_persists_tool_receipt(tmp_path, monkeypatc
         assert response.status_code == 200 and "event: tools" in response.text
         assert "event: done" in response.text
         assert "Garten" in seen_messages[-1][-1]["content"]
+        assert temperatures[-1] == 0
         assistant = client.get(f"/chats/{chat_id}").json()["messages"][-1]
         assert assistant["tool_uses"][0]["name"] == "sample_notes__list_entries"
         assert assistant["tool_uses"][0]["status"] == "succeeded"
         run_id = assistant["tool_uses"][0]["run_id"]
         assert client.get(f"/runs/{run_id}").json()["status"] == "succeeded"
+        general = client.post(f"/chats/{chat_id}/stream", headers=headers,
+                              json={"content": "Was bedeutet Hypothese?",
+                                    "use_local_tools": True})
+        assert general.status_code == 200 and "event: tools" not in general.text
+        assert "[LOKALE WERKZEUGDATEN]" not in seen_messages[-1][-1]["content"]
+        assert "allgemeine Wissensfragen normal" in seen_messages[-1][0]["content"]
+        assert temperatures[-1] is None
+        failed_general = client.post(f"/chats/{chat_id}/stream", headers=headers,
+                                     json={"content": "Erkläre den Begriff Hypothese.",
+                                           "use_local_tools": True})
+        assert failed_general.status_code == 200
+        assert "Allgemeine Wissensfragen beantworte auch dann normal" in seen_messages[-1][0]["content"]
+        assert "Allgemeine Fragen normal beantworten" in seen_messages[-1][-1]["content"]
+        assert temperatures[-1] is None
         assert client.post("/modules/sample_notes/disable", headers=headers).status_code == 200
         second = client.post(f"/chats/{chat_id}/stream", headers=headers,
                              json={"content": "Sind die Notizen noch aktuell?",
                                    "use_local_tools": True})
         assert second.status_code == 200 and "event: tools" not in second.text
-        assert "Keine aktiven lokalen Lese-Werkzeuge" in seen_messages[-1][-1]["content"]
+        assert any("Keine aktiven lokalen Lese-Werkzeuge" in item["content"]
+                   for item in seen_messages[-1])
         assert client.get(f"/chats/{chat_id}").json()["messages"][-1]["tool_uses"] == []
     archive = tmp_path / "conversation-backup.zip"
     create_backup(data_dir, archive)

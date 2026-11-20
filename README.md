@@ -205,8 +205,16 @@ benennen; Modellantworten bitte bei wichtigen Fragen anhand der Belege prüfen.
 
 Dieser erste Gesprächsschritt nutzt höchstens zwei **lesende** Modulwerkzeuge pro
 Frage und läuft nur mit Ollama. Eine lokale JSON-Wahl nutzt Werkzeugbeschreibungen
-und den Gesprächskontext; die Antwort soll belegte Zeit von freien Fenstern
-unterscheiden. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
+und zwei kurze frühere Gesprächsrunden. Bei ausdrücklichen Rückfragen wie „Was muss
+ich dafür tun?“ wird die zuletzt erfolgreich genutzte lokale Quelle erneut gelesen,
+damit Jarvis beim Thema bleibt. Allgemeine Wissens- und Denkfragen brauchen keine
+persönlichen Werkzeugdaten; auch ein fehlgeschlagener Werkzeugplaner sollte sie nicht
+blockieren. Ausdrücklich hypothetische, selbstständige Beispiele ohne Bezug auf
+aktuelle persönliche Daten gehen direkt zur Antwort. Wenn dabei „heute“, Kalender,
+gespeicherte Aufgaben oder ein Rückbezug genannt werden, bleibt der Datenabruf möglich.
+Die Antwort soll konkrete Projektangaben nicht durch eine leere allgemeine
+Liste ersetzen und belegte Zeit von freien Fenstern unterscheiden. Die Belege der
+tatsächlich verwendeten Werkzeuge stehen im Gespräch. Schreibwerkzeuge, Browser- und Desktop-Werkzeuge
 werden nicht automatisch aus dem Chat gestartet. Bei einer Nachricht mit
 Dateianhang entfällt die Modulwerkzeugwahl vorerst; das normale Datei-Chatverfahren
 bleibt erhalten. Für OpenRouter sind lokale Chat-Werkzeuge gesperrt. Konten für
@@ -215,9 +223,12 @@ nur mit einem tatsächlich installierten passenden Modul beantwortbar. Der echte
 Ollama-/Edge-Test mit Tagesnotizen liegt im privaten Modul-Repository unter
 `tests/smoke_conversation_ui.py` und wurde bei 390 Pixel geprüft.
 Der zusätzliche echte Projekt-Folgechat liegt unter
-`tests/smoke_context_lookup_chat.py`. Auf dem getesteten CPU-Laptop brauchte die
-lokale Werkzeugwahl mit `qwen3:4b-instruct` etwa 52 Sekunden für die erste und
-95 Sekunden für die zweite Frage; die Antwortgenerierung kommt hinzu.
+`tests/smoke_context_lookup_chat.py`; der Mehrturn-Qualitätstest liegt unter
+`tests/smoke_multi_turn_chat.py`. Auf dem getesteten CPU-Laptop kann schon die
+Werkzeugwahl mit `qwen3:4b-instruct` etwa 50–150 Sekunden beanspruchen;
+die Antwortgenerierung kommt hinzu. Das Modell kann trotz dieser Leitplanken
+Fehler machen. Für wichtige Termine, Aufgaben und Entscheidungen die angezeigten
+lokalen Belege prüfen.
 
 ### Eigene Dateien an eine Chatnachricht anhängen
 

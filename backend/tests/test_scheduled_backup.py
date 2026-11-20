@@ -28,6 +28,32 @@ def local(year, month, day, hour, minute, fold=0):
                     fold=fold).astimezone(UTC)
 
 
+def test_manual_tick_waits_for_an_in_progress_tick(tmp_path, monkeypatch):
+    schedule = ScheduledBackup(tmp_path)
+    monkeypatch.setattr(schedule, "_tick", lambda **_kwargs: {"last_status": "succeeded"})
+    started, completed = threading.Event(), threading.Event()
+    result = {}
+
+    def invoke():
+        started.set()
+        try:
+            result["value"] = schedule.tick(force=True)
+        except Exception as exc:  # noqa: BLE001 - capture worker failure for the assertion
+            result["error"] = exc
+        completed.set()
+
+    schedule._tick_lock.acquire()
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    try:
+        assert started.wait(2)
+        assert not completed.wait(0.05)
+    finally:
+        schedule._tick_lock.release()
+    worker.join(timeout=2)
+    assert completed.is_set() and result == {"value": {"last_status": "succeeded"}}
+
+
 @pytest.fixture
 def profile(tmp_path):
     data = tmp_path / "data"
