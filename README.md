@@ -13,7 +13,7 @@ Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, En
 PowerShell öffnen und den Quellcode laden:
 
 ```powershell
-git clone https://github.com/mschr703CODEX/jarvis-local-assistant.git
+git clone https://github.com/mschr703/jarvis-local-assistant.git
 Set-Location jarvis-local-assistant
 ```
 

@@ -1,6 +1,6 @@
 # Jarvis-Module · Umsetzungsplan
 
-Stand: 19.11.2026. Die Trello-Karten bleiben die fachliche Quelle. Der Nutzer hat `mschr703CODEX` als neues Konto gewählt: [öffentliche Basis](https://github.com/mschr703CODEX/jarvis-local-assistant), [private Module](https://github.com/mschr703CODEX/jarvis-private-modules). Das bisherige Repository bleibt Archiv. **Alle optionalen Module bleiben vorerst privat.** Über eine spätere Veröffentlichung einzelner Module wird erst nach deren Prüfung entschieden.
+Stand: 20.11.2026. Die Trello-Karten bleiben die fachliche Quelle. Die [öffentliche Basis](https://github.com/mschr703/jarvis-local-assistant) liegt wieder im ursprünglichen Repository; neue Kern-Commits stammen vom Konto `mschr703CODEX`. [Private Module](https://github.com/mschr703CODEX/jarvis-private-modules) bleiben getrennt. **Alle optionalen Module bleiben vorerst privat.** Über eine spätere Veröffentlichung einzelner Module wird erst nach deren Prüfung entschieden.
 
 ## Technischer Schnitt
 
