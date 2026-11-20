@@ -2,6 +2,8 @@
 
 Lies vor jeder Änderung [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md), die konkrete Aufgabenkarte und [docs/STATUS.md](docs/STATUS.md). Der Brief beschreibt das Ziel; README und Status beschreiben den tatsächlich vorhandenen Stand. Behaupte keine Funktion allein wegen einer Idee oder einer Trello-Karte.
 
+Importierte Karten können alte Entscheidungen oder bereits erledigte Arbeit enthalten. Bei einem Widerspruch gelten die aktuellen Entscheidungen des Nutzers und der nachweislich aktuelle Repo- und Statusstand. Prüfe den alten Kartenauftrag, bevor du eine schon vorhandene Funktion erneut baust oder eine frühere Veröffentlichungsgrenze übernimmst.
+
 - Bearbeite die konkrete Karte. Prüfe zuerst, ob die Funktion schon existiert, welche Module betroffen sind und welcher überprüfbare Nutzerablauf am Ende funktionieren soll.
 - Baue Gesprächsverständnis und Werkzeugnutzung so, dass sie auch für neue Formulierungen und Kombinationen von Fragen funktionieren. Benutze echte aktuelle Quellen und Werkzeugergebnisse. Erfinde keine Termine, Nachrichten, Kontakte oder Geräteaktionen.
 - Halte allgemeine Schnittstellen und wiederverwendbare Funktionen im öffentlichen Kern. Persönliche Integrationen und noch nicht zur Veröffentlichung bestimmte Module bleiben in getrennten privaten Paketen. Ein öffentlicher Commit enthält nur allgemein nutzbaren Code, synthetische Testdaten und öffentliche Dokumentation.

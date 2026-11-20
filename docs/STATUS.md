@@ -4,6 +4,12 @@ Stand: 20.11.2026. Die [öffentliche Basis](https://github.com/mschr703/jarvis-l
 
 ## Aktueller Prüfstand
 
+- Gemeinsamer Projektauftrag (20.11.): `AGENTS.md` und `docs/PROJECT_BRIEF.md` halten die gültige Vision für alle Codex- und Antigravity-Karten fest: freies Gespräch, belegter aktueller Kontext, modulare Werkzeuge und überprüfbare Freigaben. Alte importierte Trello-Entscheidungen werden gegen Nutzerentscheidungen und den heutigen Code-/Statusstand geprüft. Die lokale Kangentic-Konfiguration verweist in den zehn aktiven Spalten ausdrücklich auf diese Dateien; ihre Board-, Token- und Importdateien bleiben außerhalb des öffentlichen Git-Verlaufs.
+
+- Öffentlicher Push-Schutz (20.11.): Der versionierte Git-Pre-Push-Hook prüft direkte Pushes zum öffentlichen Jarvis-Repository auch aus verbundenen Kangentic-Worktrees. Er erkennt erzwungen aufgenommene lokale Kangentic-Dateien und typische Schlüssel in erreichbaren, auch später gelöschten Binärblobs. Der Installer setzt `core.hooksPath` für den jeweiligen Clone; `scripts/push_public.ps1 -CheckOnly` und die gezielten Hook-/Audit-Tests sind grün. Lokale Hooks lassen sich bewusst umgehen; GitHub-CI wiederholt den Audit.
+
+- Modul-Syntaxprüfung unter Windows-CI (20.11.): Ein Backendlauf mit 854 bestandenen Tests traf einmal auf einen 8-Sekunden-Timeout beim Start von `node --check`. Die Prüfung wiederholt ausschließlich diesen Timeout mit einem 20-Sekunden-Limit; fehlendes Node und echte Syntaxfehler bleiben direkte Fehler. Die gezielten Modultests und Ruff sind grün. Der nächste vollständige CI-Lauf prüft die Änderung auf dem Runner.
+
 - OpenRouter-Einrichtung in der Oberfläche (20.11.): Wenn der gewählte Cloud-Provider noch keinen lesbaren Schlüssel hat, führt die Übersicht direkt zum geschützten Bereich „Zugänge“. Der Link wird nur beim unkonfigurierten OpenRouter-Status angezeigt. 40 Frontendtests und der Produktionsbuild bestanden; der bestehende Ollama-Betrieb bleibt unverändert.
 
 - A80 · Start-Rollback (20.11.): Falls Tailscale Serve eingerichtet wird, der lokale Laufbeleg danach aber nicht geschrieben werden kann, nimmt der Starter genau die neu angelegte Jarvis-Route zurück. Vor dem Entfernen prüft er nochmals das exakte Gateway-Ziel; eine andere Serve-Route bleibt erhalten. Ein isolierter PowerShell-Test simulierte den Fehler, den erfolgreichen Start und einen fremden Zielwechsel; zusammen mit den Gatewaytests 4 bestanden, Ruff, PowerShell-Syntax und Public-Audit grün. Die echte laufende Tailnet-Route wurde für diesen Fehlertest nicht verändert.
