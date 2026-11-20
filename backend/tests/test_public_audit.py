@@ -43,7 +43,9 @@ def test_sensitive_filenames_and_public_example():
                  "vault_credentials.json", "backup.zip", "private.key",
                  "certificate.p12", "jarvis.db", "jarvis.db-journal", "app.log",
                  "browser-profile/Default/Cookies",
-                 "chat-attachments/123.txt", "nested/chat-attachments/123.txt"):
+                 "chat-attachments/123.txt", "nested/chat-attachments/123.txt",
+                 "kangentic.json", "kangentic.local.json", ".kangentic/board.json",
+                 "nested/.kangentic/state.json", ".claude/settings.local.json"):
         assert sensitive_path(Path(name)), name
     assert sensitive_path(Path(".env.example")) is None
     assert sensitive_path(Path("README.md")) is None
@@ -51,7 +53,9 @@ def test_sensitive_filenames_and_public_example():
 
 def test_git_ignores_local_secrets_but_not_example():
     for name in (".env.local", "prod.env.production", "backup.zip",
-                 "private.key", "vault_credentials.json", "app.log", "jarvis.db-journal"):
+                 "private.key", "vault_credentials.json", "app.log", "jarvis.db-journal",
+                 "kangentic.json", "kangentic.local.json", ".kangentic/state.json",
+                 ".claude/settings.local.json"):
         result = subprocess.run(["git", "check-ignore", "--no-index", "-q", name],
                                 cwd=ROOT, check=False)
         assert result.returncode == 0, name

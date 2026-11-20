@@ -23,6 +23,10 @@ def sensitive_path(relative: Path) -> str | None:
     """Catch forced additions that bypass .gitignore, including binary files."""
     name = relative.name.lower()
     parts = [part.lower() for part in relative.parts]
+    if name in {"kangentic.json", "kangentic.local.json"} or ".kangentic" in parts:
+        return "local Kangentic board or project data"
+    if name == "settings.local.json" and ".claude" in parts:
+        return "local agent settings"
     if name == ".env" or name.endswith(".env") or ".env." in name:
         if name == ".env.example":
             return None
@@ -71,10 +75,11 @@ def staged_file_contents(root: Path) -> list[tuple[Path, bytes]]:
     return staged
 
 
-def history_findings(root: Path, secret: bytes = b"") -> list[tuple[str, str]]:
-    """Scan commits reachable from HEAD, including files removed before a push."""
+def history_findings(root: Path, secret: bytes = b"", ref: str = "HEAD") -> list[tuple[str, str]]:
+    """Scan commits reachable from ref, including files removed before a push."""
+    history_label = "HEAD" if ref == "HEAD" else "pushed ref"
     names = subprocess.run(
-        ["git", "log", "--format=", "--name-only", "-z", "HEAD"],
+        ["git", "log", "--format=", "--name-only", "-z", ref],
         cwd=root, check=True, capture_output=True,
     ).stdout
     findings = []
@@ -85,17 +90,17 @@ def history_findings(root: Path, secret: bytes = b"") -> list[tuple[str, str]]:
         relative = Path(token.decode("utf-8", errors="surrogateescape"))
         label = sensitive_path(relative)
         if label and (str(relative), label) not in seen_paths:
-            findings.append((f"HEAD history: {relative}", label))
+            findings.append((f"{history_label} history: {relative}", label))
             seen_paths.add((str(relative), label))
     patch = subprocess.run(
-        ["git", "log", "--format=", "--patch", "HEAD"],
+        ["git", "log", "--format=", "--patch", ref],
         cwd=root, check=True, capture_output=True,
     ).stdout
     for label, pattern in PATTERNS.items():
         if pattern.search(patch):
-            findings.append(("HEAD history patch", label))
+            findings.append((f"{history_label} history patch", label))
     if secret and secret in patch:
-        findings.append(("HEAD history patch", "provided secret"))
+        findings.append((f"{history_label} history patch", "provided secret"))
     return findings
 
 

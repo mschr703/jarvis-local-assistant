@@ -1,0 +1,5 @@
+#!/bin/sh
+# Install with scripts/install_public_push_guard.ps1. This hook is shared by
+# Kangentic-created worktrees through the repository's absolute hooksPath.
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+exec python "$hook_dir/../scripts/check_public_push.py" "$1" "$2"
