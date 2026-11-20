@@ -2,6 +2,8 @@
 
 Deutschsprachiger Assistent für einen Windows-Laptop. Chat, Dokumentensuche, Entwürfe, Aufgaben, Erinnerungen, Zeitmodell, manuelle Arbeitsstände, Kontakte und begrenzte PC-/Browseraktionen laufen über eine lokale Oberfläche. Die Abendplanung ist ein optionales [privates Modul](docs/MODULES.md). Neue Installationen wählen OpenRouter mit `openai/gpt-4o-mini` als Standardmodell; ohne eigenen Schlüssel bleibt der Modellaufruf gesperrt. Für rein lokalen Betrieb kann `JARVIS_PROVIDER=ollama` gesetzt werden. Daten liegen standardmäßig in `%LOCALAPPDATA%\JarvisLocal`, außerhalb des Repositories. Ein eigener `JARVIS_DATA_DIR` muss ein absoluter Pfad sein. Die [Modulschnittstelle](docs/MODULES.md) ermöglicht private optionale Pakete mit eigener API, Ansicht und Werkzeugen; weitere bislang eingebaute Bereiche werden schrittweise ausgelagert.
 
+Der [Projektauftrag](docs/PROJECT_BRIEF.md) beschreibt die angestrebten Gesprächs- und Werkzeugabläufe und trennt Ziele vom bereits geprüften Funktionsstand.
+
 ## Voraussetzungen
 
 - Windows 11, [Git](https://git-scm.com/download/win), Python 3.13, Node.js 24, pnpm 11 und [uv](https://docs.astral.sh/uv/getting-started/installation/).
