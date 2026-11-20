@@ -3,13 +3,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from jarvis.app import create_app
 from jarvis.backup import create_backup, restore_backup
 from jarvis.config import Settings
 from jarvis.db import Database
-from jarvis.modules import package_digest
+from jarvis.modules import check_package_syntax, package_digest
 from jarvis.provider import Chunk, Completion, OllamaAdapter, ProviderError
 
 SAMPLE_MODULE = '''
@@ -73,6 +74,32 @@ def client_for(data_dir):
 
 def csrf(client):
     return {"x-jarvis-csrf": client.get("/session").json()["csrf"]}
+
+
+def test_module_syntax_check_survives_one_slow_node_start(tmp_path, monkeypatch):
+    install_fixture(tmp_path)
+    source = tmp_path / "modules" / "sample_notes"
+    calls = []
+
+    def slow_once(command, **kwargs):
+        calls.append(kwargs["timeout"])
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("jarvis.modules.subprocess.run", slow_once)
+    check_package_syntax(source)
+    assert calls == [8, 20]
+
+    def always_slow(command, **kwargs):
+        calls.append(kwargs["timeout"])
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    calls.clear()
+    monkeypatch.setattr("jarvis.modules.subprocess.run", always_slow)
+    with pytest.raises(ValueError, match="Zeitlimit überschritten"):
+        check_package_syntax(source)
+    assert calls == [8, 20]
 
 
 def test_module_lifecycle_and_backup(tmp_path):

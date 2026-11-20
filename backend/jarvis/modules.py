@@ -116,16 +116,23 @@ def check_package_syntax(source: Path) -> None:
     try:
         ui = (source / "ui.js").read_bytes()
         ui.decode("utf-8")
-        check = subprocess.run(["node", "--input-type=module", "--check"], input=ui,
-                               capture_output=True, check=False, timeout=8)
     except UnicodeError as exc:
         raise ValueError("Moduloberfläche muss UTF-8 sein") from exc
-    except FileNotFoundError as exc:
-        raise ValueError("Node.js fehlt für die Modul-Syntaxprüfung") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError("JavaScript-Syntaxprüfung hat das Zeitlimit überschritten") from exc
-    if check.returncode != 0:
-        raise ValueError("Ungültige JavaScript-Syntax im Modul")
+    # Node startup can exceed a short deadline on a busy Windows runner. Retry
+    # only a timeout: syntax errors and a missing Node installation are final.
+    for attempt, timeout in enumerate((8, 20), start=1):
+        try:
+            check = subprocess.run(["node", "--input-type=module", "--check"], input=ui,
+                                   capture_output=True, check=False, timeout=timeout)
+        except FileNotFoundError as exc:
+            raise ValueError("Node.js fehlt für die Modul-Syntaxprüfung") from exc
+        except subprocess.TimeoutExpired as exc:
+            if attempt == 1:
+                continue
+            raise ValueError("JavaScript-Syntaxprüfung hat das Zeitlimit überschritten") from exc
+        if check.returncode != 0:
+            raise ValueError("Ungültige JavaScript-Syntax im Modul")
+        return
 
 
 def package_digest(source: Path) -> str:
